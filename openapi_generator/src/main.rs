@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate serde_derive;
 
+use colored::Colorize;
 use std::borrow::Cow;
 use std::env;
 use std::ffi::OsStr;
@@ -11,7 +12,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process;
 
-use colored::Colorize;
+mod constructor;
+use constructor::*;
 
 #[derive(Debug, Serialize)]
 struct OpenApiDocument {
@@ -38,7 +40,7 @@ struct OpenApiSchema {
     properties: HashMap<String, OpenApiProperties>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 struct OpenApiProperties {
     format: Option<String>,
     #[serde(rename = "type")]
@@ -53,7 +55,6 @@ enum Error {
         filepath: PathBuf,
         source_code: String,
     },
-    NoStruct,
 }
 
 impl Display for Error {
@@ -63,7 +64,6 @@ impl Display for Error {
         match self {
             IncorrectUsage => write!(f, "Usage: dump-syntax path/to/filename.rs"),
             ReadFile(error) => write!(f, "Unable to read file: {}", error),
-            NoStruct => write!(f, "The file has no struct"),
             ParseFile {
                 error,
                 filepath,
@@ -97,115 +97,12 @@ fn try_main() -> Result<(), Error> {
             source_code: code,
         }
     })?;
-    let first_struct = syntax.items.into_iter().map(|i| {
-        if let syn::Item::Struct(s) = i {
-            Some(s)
-        } else {
-            None
-        }
-    })
-        .filter(|v| v.is_some())
-        .map(|v| v.unwrap())
-        .next()
-        .ok_or(Error::NoStruct)?;
+    let mut constructor = Constructor::new();
+    syn::visit::visit_file(&mut constructor, &syntax);
 
-    let struct_name = first_struct.ident.to_string();
-    let mut required = Vec::new();
-    let mut properties = HashMap::new();
-
-    for f in first_struct.fields.iter().filter(|f| f.ident.is_some()) {
-        let ident = f.ident.clone().unwrap().to_string();
-        match &f.ty {
-            syn::Type::Path(p) => {
-                let f_segment = &p.path.segments[0];
-                match f_segment.ident.to_string().as_str() {
-                    "usize" => {
-                        properties.insert(ident.clone(), OpenApiProperties {
-                            o_type: "integer".to_owned(),
-                            format: Some("int32".to_owned()),
-                        });
-                        required.push(ident.clone());
-                    }
-                    "String" => {
-                        properties.insert(ident.clone(), OpenApiProperties {
-                            o_type: "string".to_owned(),
-                            format: None,
-                        });
-                        required.push(ident.clone());
-                    }
-                    "Option" => {
-                        match &f_segment.arguments {
-                            syn::PathArguments::AngleBracketed(args) => {
-                                match &args.args[0] {
-                                    syn::GenericArgument::Type(t) => {
-                                        if let syn::Type::Path(t) = t {
-                                            let s = &t.path.segments[0].ident;
-                                            match s.to_string().as_str() {
-                                                "u64" => {
-                                                    properties.insert(ident.clone(), OpenApiProperties {
-                                                        o_type: "integer".to_owned(),
-                                                        format: Some("int64".to_owned()),
-                                                    });
-                                                }
-                                                _ => {}
-                                            }
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    "Vec" => {
-                        match &f_segment.arguments {
-                            syn::PathArguments::AngleBracketed(args) => {
-                                match &args.args[0] {
-                                    syn::GenericArgument::Type(t) => {
-                                        if let syn::Type::Path(t) = t {
-                                            let s = &t.path.segments[0].ident;
-                                            match s.to_string().as_str() {
-                                                "char" => {
-                                                    properties.insert(ident.clone(), OpenApiProperties {
-                                                        o_type: "array".to_owned(),
-                                                        format: None,
-                                                    });
-                                                }
-                                                _ => {}
-                                            }
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            _ => {}
-        }
+    for document in constructor.open_api_documents().unwrap() {
+        println!("{}", serde_yaml::to_string(&document).unwrap());
     }
-
-    let mut schemas = HashMap::new();
-    schemas.insert(struct_name, OpenApiSchema {
-        required,
-        properties,
-    });
-
-    let document = OpenApiDocument {
-        swagger: "3.0".to_owned(),
-        info: OpenApiInfo {
-            title: "Autogenerated OpenAPI model".to_owned(),
-            version: "1.0".to_owned(),
-        },
-        paths: Vec::new(),
-        components: vec![OpenApiComponents {
-            schemas,
-        }],
-    };
-    println!("{}", serde_yaml::to_string(&document).unwrap());
     Ok(())
 }
 
