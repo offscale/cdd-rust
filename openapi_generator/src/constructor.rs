@@ -23,83 +23,89 @@ impl<'ast> Visit<'ast> for StructProperties {
         let mut next_required = false;
         match f_segment.ident.to_string().as_str() {
             "bool" => {
-                self.properties.insert(self.ident.clone().unwrap(), OpenApiProperties {
-                    o_type: "boolean".to_owned(),
-                    format: None,
-                });
+                self.properties.insert(
+                    self.ident.clone().unwrap(),
+                    OpenApiProperties::new("boolean".to_owned())
+                );
+                next_required = true;
             }
             "usize" => {
-                self.properties.insert(self.ident.clone().unwrap(), OpenApiProperties {
-                    o_type: "integer".to_owned(),
-                    format: Some("int32".to_owned()),
-                });
+                self.properties.insert(
+                    self.ident.clone().unwrap(),
+                    OpenApiProperties::new("integer".to_owned())
+                        .with_format("int32".to_owned())
+                        .with_minimum(0),
+                );
                 next_required = true;
             }
             "u32" => {
-                self.properties.insert(self.ident.clone().unwrap(), OpenApiProperties {
-                    o_type: "integer".to_owned(),
-                    format: Some("int32".to_owned()),
-                });
+                self.properties.insert(
+                    self.ident.clone().unwrap(),
+                    OpenApiProperties::new("integer".to_owned())
+                        .with_format("int32".to_owned())
+                        .with_minimum(0),
+                );
                 next_required = true;
             }
             "u64" => {
-                self.properties.insert(self.ident.clone().unwrap(), OpenApiProperties {
-                    o_type: "integer".to_owned(),
-                    format: Some("int64".to_owned()),
-                });
+                self.properties.insert(
+                    self.ident.clone().unwrap(),
+                    OpenApiProperties::new("integer".to_owned())
+                        .with_format("int64".to_owned())
+                        .with_minimum(0),
+                );
                 next_required = true;
             }
-            // TODO: In integer types, set the minimum to zero in the resulting OpenAPI
             "isize" => {
-                self.properties.insert(self.ident.clone().unwrap(), OpenApiProperties {
-                    o_type: "integer".to_owned(),
-                    format: Some("int32".to_owned()),
-                });
+                self.properties.insert(
+                    self.ident.clone().unwrap(),
+                    OpenApiProperties::new("integer".to_owned()).with_format("int32".to_owned()),
+                );
                 next_required = true;
             }
             "i32" => {
-                self.properties.insert(self.ident.clone().unwrap(), OpenApiProperties {
-                    o_type: "integer".to_owned(),
-                    format: Some("int32".to_owned()),
-                });
+                self.properties.insert(
+                    self.ident.clone().unwrap(),
+                    OpenApiProperties::new("integer".to_owned()).with_format("int32".to_owned()),
+                );
                 next_required = true;
             }
             "i64" => {
-                self.properties.insert(self.ident.clone().unwrap(), OpenApiProperties {
-                    o_type: "integer".to_owned(),
-                    format: Some("int64".to_owned()),
-                });
+                self.properties.insert(
+                    self.ident.clone().unwrap(),
+                    OpenApiProperties::new("integer".to_owned()).with_format("int64".to_owned()),
+                );
                 next_required = true;
             }
             "f32" => {
-                self.properties.insert(self.ident.clone().unwrap(), OpenApiProperties {
-                    o_type: "number".to_owned(),
-                    format: Some("float".to_owned()),
-                });
+                self.properties.insert(
+                    self.ident.clone().unwrap(),
+                    OpenApiProperties::new("number".to_owned()).with_format("float".to_owned()),
+                );
                 next_required = true;
             }
             "f64" => {
-                self.properties.insert(self.ident.clone().unwrap(), OpenApiProperties {
-                    o_type: "number".to_owned(),
-                    format: Some("double".to_owned()),
-                });
+                self.properties.insert(
+                    self.ident.clone().unwrap(),
+                    OpenApiProperties::new("number".to_owned()).with_format("double".to_owned()),
+                );
                 next_required = true;
             }
             "String" => {
-                self.properties.insert(self.ident.clone().unwrap(), OpenApiProperties {
-                    o_type: "string".to_owned(),
-                    format: None,
-                });
+                self.properties.insert(
+                    self.ident.clone().unwrap(),
+                    OpenApiProperties::new("string".to_owned()),
+                );
                 next_required = true;
             }
             "char" => {
-                self.properties.insert(self.ident.clone().unwrap(), OpenApiProperties {
-                    o_type: "array".to_owned(),
-                    format: None,
-                });
+                self.properties.insert(
+                    self.ident.clone().unwrap(),
+                    OpenApiProperties::new("array".to_owned()),
+                );
                 next_required = true;
             }
-            "Option" =>
+            "Option" => {
                 visit_path_arguments(self, &f_segment.arguments);
                 self.required.remove(&self.ident.clone().unwrap());
             }

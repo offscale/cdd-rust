@@ -42,9 +42,32 @@ struct OpenApiSchema {
 
 #[derive(Clone, Debug, Serialize)]
 struct OpenApiProperties {
+    #[serde(skip_serializing_if = "Option::is_none")]
     format: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    minimum: Option<i64>,
     #[serde(rename = "type")]
     o_type: String,
+}
+
+impl OpenApiProperties {
+    fn new(o_type: String) -> OpenApiProperties {
+        OpenApiProperties {
+            o_type,
+            minimum: None,
+            format: None,
+        }
+    }
+    fn with_minimum(&self, minimum: i64) -> Self {
+        let mut new = self.clone();
+        new.minimum = Some(minimum);
+        new
+    }
+    fn with_format(&self, format: String) -> Self {
+        let mut new = self.clone();
+        new.format = Some(format);
+        new
+    }
 }
 
 enum Error {
