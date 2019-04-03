@@ -9,6 +9,7 @@ use std::fmt::{self, Display};
 use std::fs;
 use std::io::{self, Write};
 use std::collections::HashMap;
+use std::ops::Not;
 use std::path::{Path, PathBuf};
 use std::process;
 
@@ -45,17 +46,39 @@ struct OpenApiProperties {
     #[serde(skip_serializing_if = "Option::is_none")]
     format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    items: Option<Box<OpenApiProperties>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     minimum: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "type")]
-    o_type: String,
+    o_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "$ref")]
+    dollar_ref: Option<String>,
+    #[serde(skip_serializing_if = "Not::not")]
+    #[serde(rename = "uniqueItems")]
+    unique_items: bool,
 }
 
 impl OpenApiProperties {
     fn new(o_type: String) -> OpenApiProperties {
         OpenApiProperties {
-            o_type,
-            minimum: None,
+            dollar_ref: None,
             format: None,
+            items: None,
+            minimum: None,
+            o_type: Some(o_type),
+            unique_items: false,
+        }
+    }
+    fn new_ref(dollar_ref: String) -> OpenApiProperties {
+        OpenApiProperties {
+            dollar_ref: Some(dollar_ref),
+            format: None,
+            items: None,
+            minimum: None,
+            o_type: None,
+            unique_items: false,
         }
     }
     fn with_minimum(&self, minimum: i64) -> Self {
@@ -66,6 +89,16 @@ impl OpenApiProperties {
     fn with_format(&self, format: String) -> Self {
         let mut new = self.clone();
         new.format = Some(format);
+        new
+    }
+    fn with_items(&self, items: OpenApiProperties) -> Self {
+        let mut new = self.clone();
+        new.items = Some(Box::new(items));
+        new
+    }
+    fn with_unique_items(&self) -> Self {
+        let mut new = self.clone();
+        new.unique_items = true;
         new
     }
 }

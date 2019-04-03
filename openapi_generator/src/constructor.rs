@@ -101,7 +101,7 @@ impl<'ast> Visit<'ast> for StructProperties {
             "char" => {
                 self.properties.insert(
                     self.ident.clone().unwrap(),
-                    OpenApiProperties::new("array".to_owned()),
+                    OpenApiProperties::new("char".to_owned()),
                 );
                 next_required = true;
             }
@@ -111,8 +111,26 @@ impl<'ast> Visit<'ast> for StructProperties {
             }
             "Vec" => {
                 visit_path_arguments(self, &f_segment.arguments);
+                let ident = self.ident.clone().unwrap();
+                let new_props = OpenApiProperties::new("array".to_owned())
+                    .with_items(self.properties[&ident].clone());
+                self.properties.insert(ident, new_props);
             }
-            t => panic!("Type {} can't be translated to openAPI models.", t),
+            "HashSet" | "BTreeSet" => {
+                visit_path_arguments(self, &f_segment.arguments);
+                let ident = self.ident.clone().unwrap();
+                let new_props = OpenApiProperties::new("array".to_owned())
+                    .with_unique_items()
+                    .with_items(self.properties[&ident].clone());
+                self.properties.insert(ident, new_props);
+            }
+            dollar_ref => {
+                self.properties.insert(
+                    self.ident.clone().unwrap(),
+                    OpenApiProperties::new_ref(format!("#/components/schemas/{}", dollar_ref)),
+                );
+                next_required = true;
+            }
         }
         if next_required {
             self.required.insert(self.ident.clone().unwrap());
