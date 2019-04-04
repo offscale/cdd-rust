@@ -10,4 +10,4 @@ proc-macro2 = { version = "0.4.27", features = ["span-locations"] }
 serde = "1.0"
 serde_derive = "1.0"
 serde_yaml = "0.8"
-syn = { version = "0.15.29", features = ["parsing", "full", "extra-traits"] }
+syn = { version = "0.15.29", features = ["parsing", "full", "extra-traits", "visit"] }
