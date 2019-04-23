@@ -3,12 +3,12 @@ extern crate serde_derive;
 
 use colored::Colorize;
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::env;
 use std::ffi::OsStr;
 use std::fmt::{self, Display};
 use std::fs;
 use std::io::{self, Write};
-use std::collections::HashMap;
 use std::ops::Not;
 use std::path::{Path, PathBuf};
 use std::process;

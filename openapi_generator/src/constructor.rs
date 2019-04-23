@@ -1,7 +1,10 @@
 use crate::*;
-use std::collections::{HashSet, HashMap};
-use syn::{Field, Fields, ItemStruct, TypePath, AngleBracketedGenericArguments};
-use syn::visit::{visit_fields_named, visit_generic_argument, visit_path_arguments, visit_type, Visit};
+use proc_macro2::{Delimiter, TokenTree};
+use std::collections::{HashMap, HashSet};
+use syn::visit::{
+    visit_fields_named, visit_generic_argument, visit_path_arguments, visit_type, Visit,
+};
+use syn::{AngleBracketedGenericArguments, Field, Fields, ItemMacro, ItemStruct, Macro, TypePath};
 
 struct StructProperties {
     required: HashSet<String>,
@@ -25,7 +28,7 @@ impl<'ast> Visit<'ast> for StructProperties {
             "bool" => {
                 self.properties.insert(
                     self.ident.clone().unwrap(),
-                    OpenApiProperties::new("boolean".to_owned())
+                    OpenApiProperties::new("boolean".to_owned()),
                 );
                 next_required = true;
             }
@@ -140,10 +143,17 @@ impl<'ast> Visit<'ast> for StructProperties {
 
 #[derive(Debug)]
 pub(crate) enum GenerationError {
+    ExpectingArrow,
+    ExpectingComma,
+    ExpectingSqlType,
+    InvalidSqlType,
     NoNamedFields,
+    NoFields,
 }
 
-fn struct_to_open_api_document(rust_struct: &ItemStruct) -> Result<OpenApiDocument, GenerationError> {
+fn struct_to_open_api_document(
+    rust_struct: &ItemStruct,
+) -> Result<OpenApiDocument, GenerationError> {
     let struct_name = rust_struct.ident.to_string();
     if let Fields::Named(fields_named) = &rust_struct.fields {
         let mut struct_properties = StructProperties {
@@ -153,10 +163,13 @@ fn struct_to_open_api_document(rust_struct: &ItemStruct) -> Result<OpenApiDocume
         };
         visit_fields_named(&mut struct_properties, fields_named);
         let mut schemas = HashMap::new();
-        schemas.insert(struct_name, OpenApiSchema {
-            properties: struct_properties.properties.clone(),
-            required: struct_properties.required.into_iter().collect(),
-        });
+        schemas.insert(
+            struct_name,
+            OpenApiSchema {
+                properties: struct_properties.properties.clone(),
+                required: struct_properties.required.into_iter().collect(),
+            },
+        );
 
         Ok(OpenApiDocument {
             swagger: "3.0".to_owned(),
@@ -165,32 +178,172 @@ fn struct_to_open_api_document(rust_struct: &ItemStruct) -> Result<OpenApiDocume
                 version: "1.0".to_owned(),
             },
             paths: Vec::new(),
-            components: vec![OpenApiComponents {
-                schemas,
-            }],
+            components: vec![OpenApiComponents { schemas }],
         })
     } else {
         Err(GenerationError::NoNamedFields)
     }
 }
 
+fn parse_arrow<I: Iterator<Item = TokenTree>>(s: &mut I) -> Result<(), GenerationError> {
+    if let Some(TokenTree::Punct(p)) = s.next() {
+        if p.as_char() == '-' {
+            if let Some(TokenTree::Punct(p)) = s.next() {
+                if p.as_char() == '>' {
+                    Ok(())
+                } else {
+                    Err(GenerationError::ExpectingArrow)
+                }
+            } else {
+                Err(GenerationError::ExpectingArrow)
+            }
+        } else {
+            Err(GenerationError::ExpectingArrow)
+        }
+    } else {
+        Err(GenerationError::ExpectingArrow)
+    }
+}
+
+fn parse_comma<I: Iterator<Item = TokenTree>>(s: &mut I) -> Result<(), GenerationError> {
+    if let Some(TokenTree::Punct(p)) = s.next() {
+        if p.as_char() == ',' {
+            Ok(())
+        } else {
+            Err(GenerationError::ExpectingComma)
+        }
+    } else {
+        Err(GenerationError::ExpectingComma)
+    }
+}
+
+fn macro_to_open_api_document(diesel_macro: &Macro) -> Result<OpenApiDocument, GenerationError> {
+    let mut tts = diesel_macro.tts.clone().into_iter();
+    let mut schemas = HashMap::new();
+    let struct_name = match tts.next() {
+        Some(TokenTree::Ident(i)) => Ok(i.to_string()),
+        _ => Err(GenerationError::NoNamedFields),
+    }?;
+    if let Some(TokenTree::Group(g)) = tts.next() {
+        let mut required = Vec::new();
+        let actual_group = if g.delimiter() == Delimiter::Brace {
+            g
+        } else {
+            for t in g.stream() {
+                if let TokenTree::Ident(r) = t {
+                    required.push(r.to_string());
+                }
+            }
+            match &tts.next() {
+                Some(TokenTree::Group(ng)) if ng.delimiter() == Delimiter::Brace => Ok(ng.clone()),
+                _ => Err(GenerationError::NoFields),
+            }?
+        };
+        let mut item_pairs: Vec<(String, String)> = Vec::new();
+        let mut items_stream = actual_group.stream().clone().into_iter();
+        while let Some(TokenTree::Ident(id)) = items_stream.next() {
+            parse_arrow(&mut items_stream)?;
+            let item_type = if let Some(TokenTree::Ident(it)) = items_stream.next() {
+                Ok(it.to_string())
+            } else {
+                Err(GenerationError::ExpectingSqlType)
+            }?;
+            item_pairs.push((id.to_string(), item_type));
+            parse_comma(&mut items_stream)?;
+        }
+        let mut properties = HashMap::new();
+        for (name, field_type) in item_pairs.into_iter() {
+            let field_properties =
+                match field_type.as_str() {
+                    "BigInt" => Ok(OpenApiProperties::new("integer".to_owned())
+                        .with_format("int64".to_owned())),
+                    "Binary" => Ok(OpenApiProperties::new("array".to_owned()).with_items(
+                        OpenApiProperties::new("integer".to_owned())
+                            .with_format("int32".to_owned()),
+                    )),
+                    "Bool" => Ok(OpenApiProperties::new("boolean".to_owned())),
+                    "Double" => Ok(OpenApiProperties::new("number".to_owned())
+                        .with_format("double".to_owned())),
+                    "Float" => {
+                        Ok(OpenApiProperties::new("number".to_owned())
+                            .with_format("float".to_owned()))
+                    }
+                    "Integer" => Ok(OpenApiProperties::new("integer".to_owned())
+                        .with_format("int64".to_owned())),
+                    "Numeric" => Ok(OpenApiProperties::new("number".to_owned())
+                        .with_format("double".to_owned())),
+                    "SmallInt" => Ok(OpenApiProperties::new("integer".to_owned())
+                        .with_format("int32".to_owned())),
+                    "Text" => Ok(OpenApiProperties::new("string".to_owned())),
+                    "TinyInt" => Ok(OpenApiProperties::new("integer".to_owned())
+                        .with_format("int32".to_owned())),
+                    _ => Err(GenerationError::InvalidSqlType),
+                }?;
+            properties.insert(name, field_properties);
+        }
+        schemas.insert(
+            struct_name,
+            OpenApiSchema {
+                properties,
+                required,
+            },
+        );
+    } else {
+        schemas.insert(
+            struct_name,
+            OpenApiSchema {
+                properties: HashMap::new(),
+                required: Vec::new(),
+            },
+        );
+    };
+    let document = OpenApiDocument {
+        swagger: "3.0".to_owned(),
+        info: OpenApiInfo {
+            title: "Autogenerated OpenAPI model".to_owned(),
+            version: "1.0".to_owned(),
+        },
+        paths: Vec::new(),
+        components: vec![OpenApiComponents { schemas }],
+    };
+    Ok(document)
+}
+
 pub(crate) struct Constructor {
     structs: Vec<ItemStruct>,
+    diesel_macros: Vec<ItemMacro>,
 }
 
 impl Constructor {
     pub(crate) fn new() -> Constructor {
         Constructor {
+            diesel_macros: Vec::new(),
             structs: Vec::new(),
         }
     }
 
     pub(crate) fn open_api_documents(&self) -> Result<Vec<OpenApiDocument>, GenerationError> {
-        self.structs.iter().map(|s| struct_to_open_api_document(s)).collect()
+        let mut diesel_macros: Vec<OpenApiDocument> = self
+            .diesel_macros
+            .iter()
+            .map(|m| macro_to_open_api_document(&m.mac))
+            .collect::<Result<Vec<OpenApiDocument>, GenerationError>>()?;
+        let native_structs = self
+            .structs
+            .iter()
+            .map(|s| struct_to_open_api_document(s))
+            .collect::<Result<Vec<OpenApiDocument>, GenerationError>>()?;
+        diesel_macros.extend(native_structs);
+        Ok(diesel_macros)
     }
 }
 
 impl<'ast> Visit<'ast> for Constructor {
+    fn visit_item_macro(&mut self, i: &'ast ItemMacro) {
+        if i.mac.path.segments[0].ident.to_string().as_str() == "table" {
+            self.diesel_macros.push(i.clone());
+        }
+    }
     fn visit_item_struct(&mut self, i: &'ast ItemStruct) {
         self.structs.push(i.clone());
     }
