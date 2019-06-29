@@ -1,24 +1,6 @@
-use colored::Colorize;
 use std::{
-    borrow::Cow,
     collections::HashMap,
-    env,
-    ffi::OsStr,
-    fmt::{
-        self,
-        Display,
-    },
-    fs,
-    io::{
-        self,
-        Write,
-    },
     ops::Not,
-    path::{
-        Path,
-        PathBuf,
-    },
-    process,
 };
 #[derive(Debug, Serialize)]
 pub struct OpenApiDocument {

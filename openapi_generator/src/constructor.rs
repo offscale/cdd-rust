@@ -1,9 +1,9 @@
 use crate::openapi::{
+    OpenApiComponents,
     OpenApiDocument,
+    OpenApiInfo,
     OpenApiProperties,
     OpenApiSchema,
-    OpenApiInfo,
-    OpenApiComponents,
 };
 use proc_macro2::{
     Delimiter,
