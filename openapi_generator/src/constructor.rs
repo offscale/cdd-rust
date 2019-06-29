@@ -1,10 +1,34 @@
-use crate::*;
-use proc_macro2::{Delimiter, TokenTree};
-use std::collections::{HashMap, HashSet};
-use syn::visit::{
-    visit_fields_named, visit_generic_argument, visit_path_arguments, visit_type, Visit,
+use crate::openapi::{
+    OpenApiDocument,
+    OpenApiProperties,
+    OpenApiSchema,
+    OpenApiInfo,
+    OpenApiComponents,
 };
-use syn::{AngleBracketedGenericArguments, Field, Fields, ItemMacro, ItemStruct, Macro, TypePath};
+use proc_macro2::{
+    Delimiter,
+    TokenTree,
+};
+use std::collections::{
+    HashMap,
+    HashSet,
+};
+use syn::{
+    visit::{
+        visit_fields_named,
+        visit_generic_argument,
+        visit_path_arguments,
+        visit_type,
+        Visit,
+    },
+    AngleBracketedGenericArguments,
+    Field,
+    Fields,
+    ItemMacro,
+    ItemStruct,
+    Macro,
+    TypePath,
+};
 
 struct StructProperties {
     required: HashSet<String>,
@@ -12,15 +36,22 @@ struct StructProperties {
     ident: Option<String>,
 }
 
+impl StructProperties {}
+
 impl<'ast> Visit<'ast> for StructProperties {
-    fn visit_angle_bracketed_generic_arguments(&mut self, i: &'ast AngleBracketedGenericArguments) {
+    fn visit_angle_bracketed_generic_arguments(
+        &mut self,
+        i: &'ast AngleBracketedGenericArguments,
+    ) {
         visit_generic_argument(self, &i.args[0]);
     }
+
     fn visit_field(&mut self, f: &'ast Field) {
         let ident = f.ident.clone().unwrap().to_string();
         self.ident = Some(ident);
         visit_type(self, &f.ty);
     }
+
     fn visit_type_path(&mut self, p: &'ast TypePath) {
         let f_segment = &p.path.segments[0];
         let mut next_required = false;
@@ -62,35 +93,40 @@ impl<'ast> Visit<'ast> for StructProperties {
             "isize" => {
                 self.properties.insert(
                     self.ident.clone().unwrap(),
-                    OpenApiProperties::new("integer".to_owned()).with_format("int32".to_owned()),
+                    OpenApiProperties::new("integer".to_owned())
+                        .with_format("int32".to_owned()),
                 );
                 next_required = true;
             }
             "i32" => {
                 self.properties.insert(
                     self.ident.clone().unwrap(),
-                    OpenApiProperties::new("integer".to_owned()).with_format("int32".to_owned()),
+                    OpenApiProperties::new("integer".to_owned())
+                        .with_format("int32".to_owned()),
                 );
                 next_required = true;
             }
             "i64" => {
                 self.properties.insert(
                     self.ident.clone().unwrap(),
-                    OpenApiProperties::new("integer".to_owned()).with_format("int64".to_owned()),
+                    OpenApiProperties::new("integer".to_owned())
+                        .with_format("int64".to_owned()),
                 );
                 next_required = true;
             }
             "f32" => {
                 self.properties.insert(
                     self.ident.clone().unwrap(),
-                    OpenApiProperties::new("number".to_owned()).with_format("float".to_owned()),
+                    OpenApiProperties::new("number".to_owned())
+                        .with_format("float".to_owned()),
                 );
                 next_required = true;
             }
             "f64" => {
                 self.properties.insert(
                     self.ident.clone().unwrap(),
-                    OpenApiProperties::new("number".to_owned()).with_format("double".to_owned()),
+                    OpenApiProperties::new("number".to_owned())
+                        .with_format("double".to_owned()),
                 );
                 next_required = true;
             }
@@ -130,7 +166,10 @@ impl<'ast> Visit<'ast> for StructProperties {
             dollar_ref => {
                 self.properties.insert(
                     self.ident.clone().unwrap(),
-                    OpenApiProperties::new_ref(format!("#/components/schemas/{}", dollar_ref)),
+                    OpenApiProperties::new_ref(format!(
+                        "#/components/schemas/{}",
+                        dollar_ref
+                    )),
                 );
                 next_required = true;
             }
@@ -185,7 +224,9 @@ fn struct_to_open_api_document(
     }
 }
 
-fn parse_arrow<I: Iterator<Item = TokenTree>>(s: &mut I) -> Result<(), GenerationError> {
+fn parse_arrow<I: Iterator<Item = TokenTree>>(
+    s: &mut I,
+) -> Result<(), GenerationError> {
     if let Some(TokenTree::Punct(p)) = s.next() {
         if p.as_char() == '-' {
             if let Some(TokenTree::Punct(p)) = s.next() {
@@ -205,7 +246,9 @@ fn parse_arrow<I: Iterator<Item = TokenTree>>(s: &mut I) -> Result<(), Generatio
     }
 }
 
-fn parse_comma<I: Iterator<Item = TokenTree>>(s: &mut I) -> Result<(), GenerationError> {
+fn parse_comma<I: Iterator<Item = TokenTree>>(
+    s: &mut I,
+) -> Result<(), GenerationError> {
     if let Some(TokenTree::Punct(p)) = s.next() {
         if p.as_char() == ',' {
             Ok(())
@@ -217,7 +260,9 @@ fn parse_comma<I: Iterator<Item = TokenTree>>(s: &mut I) -> Result<(), Generatio
     }
 }
 
-fn macro_to_open_api_document(diesel_macro: &Macro) -> Result<OpenApiDocument, GenerationError> {
+fn macro_to_open_api_document(
+    diesel_macro: &Macro,
+) -> Result<OpenApiDocument, GenerationError> {
     let mut tts = diesel_macro.tts.clone().into_iter();
     let mut schemas = HashMap::new();
     let struct_name = match tts.next() {
@@ -235,7 +280,11 @@ fn macro_to_open_api_document(diesel_macro: &Macro) -> Result<OpenApiDocument, G
                 }
             }
             match &tts.next() {
-                Some(TokenTree::Group(ng)) if ng.delimiter() == Delimiter::Brace => Ok(ng.clone()),
+                Some(TokenTree::Group(ng))
+                    if ng.delimiter() == Delimiter::Brace =>
+                {
+                    Ok(ng.clone())
+                }
                 _ => Err(GenerationError::NoFields),
             }?
         };
@@ -243,42 +292,56 @@ fn macro_to_open_api_document(diesel_macro: &Macro) -> Result<OpenApiDocument, G
         let mut items_stream = actual_group.stream().clone().into_iter();
         while let Some(TokenTree::Ident(id)) = items_stream.next() {
             parse_arrow(&mut items_stream)?;
-            let item_type = if let Some(TokenTree::Ident(it)) = items_stream.next() {
-                Ok(it.to_string())
-            } else {
-                Err(GenerationError::ExpectingSqlType)
-            }?;
+            let item_type =
+                if let Some(TokenTree::Ident(it)) = items_stream.next() {
+                    Ok(it.to_string())
+                } else {
+                    Err(GenerationError::ExpectingSqlType)
+                }?;
             item_pairs.push((id.to_string(), item_type));
             parse_comma(&mut items_stream)?;
         }
         let mut properties = HashMap::new();
         for (name, field_type) in item_pairs.into_iter() {
-            let field_properties =
-                match field_type.as_str() {
-                    "BigInt" => Ok(OpenApiProperties::new("integer".to_owned())
-                        .with_format("int64".to_owned())),
-                    "Binary" => Ok(OpenApiProperties::new("array".to_owned()).with_items(
+            let field_properties = match field_type.as_str() {
+                "BigInt" => {
+                    Ok(OpenApiProperties::new("integer".to_owned())
+                        .with_format("int64".to_owned()))
+                }
+                "Binary" => {
+                    Ok(OpenApiProperties::new("array".to_owned()).with_items(
                         OpenApiProperties::new("integer".to_owned())
                             .with_format("int32".to_owned()),
-                    )),
-                    "Bool" => Ok(OpenApiProperties::new("boolean".to_owned())),
-                    "Double" => Ok(OpenApiProperties::new("number".to_owned())
-                        .with_format("double".to_owned())),
-                    "Float" => {
-                        Ok(OpenApiProperties::new("number".to_owned())
-                            .with_format("float".to_owned()))
-                    }
-                    "Integer" => Ok(OpenApiProperties::new("integer".to_owned())
-                        .with_format("int64".to_owned())),
-                    "Numeric" => Ok(OpenApiProperties::new("number".to_owned())
-                        .with_format("double".to_owned())),
-                    "SmallInt" => Ok(OpenApiProperties::new("integer".to_owned())
-                        .with_format("int32".to_owned())),
-                    "Text" => Ok(OpenApiProperties::new("string".to_owned())),
-                    "TinyInt" => Ok(OpenApiProperties::new("integer".to_owned())
-                        .with_format("int32".to_owned())),
-                    _ => Err(GenerationError::InvalidSqlType),
-                }?;
+                    ))
+                }
+                "Bool" => Ok(OpenApiProperties::new("boolean".to_owned())),
+                "Double" => {
+                    Ok(OpenApiProperties::new("number".to_owned())
+                        .with_format("double".to_owned()))
+                }
+                "Float" => {
+                    Ok(OpenApiProperties::new("number".to_owned())
+                        .with_format("float".to_owned()))
+                }
+                "Integer" => {
+                    Ok(OpenApiProperties::new("integer".to_owned())
+                        .with_format("int64".to_owned()))
+                }
+                "Numeric" => {
+                    Ok(OpenApiProperties::new("number".to_owned())
+                        .with_format("double".to_owned()))
+                }
+                "SmallInt" => {
+                    Ok(OpenApiProperties::new("integer".to_owned())
+                        .with_format("int32".to_owned()))
+                }
+                "Text" => Ok(OpenApiProperties::new("string".to_owned())),
+                "TinyInt" => {
+                    Ok(OpenApiProperties::new("integer".to_owned())
+                        .with_format("int32".to_owned()))
+                }
+                _ => Err(GenerationError::InvalidSqlType),
+            }?;
             properties.insert(name, field_properties);
         }
         schemas.insert(
@@ -322,7 +385,9 @@ impl Constructor {
         }
     }
 
-    pub(crate) fn open_api_documents(&self) -> Result<Vec<OpenApiDocument>, GenerationError> {
+    pub(crate) fn open_api_documents(
+        &self,
+    ) -> Result<Vec<OpenApiDocument>, GenerationError> {
         let mut diesel_macros: Vec<OpenApiDocument> = self
             .diesel_macros
             .iter()
@@ -344,6 +409,7 @@ impl<'ast> Visit<'ast> for Constructor {
             self.diesel_macros.push(i.clone());
         }
     }
+
     fn visit_item_struct(&mut self, i: &'ast ItemStruct) {
         self.structs.push(i.clone());
     }
