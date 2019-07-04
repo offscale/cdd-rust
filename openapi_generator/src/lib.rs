@@ -1,4 +1,4 @@
-#![deny(warnings)]
+//#![deny(warnings)]
 #[macro_use]
 extern crate serde_derive;
 
@@ -12,6 +12,7 @@ use std::{
 mod constructor;
 mod error;
 mod openapi;
+mod parser;
 
 fn generate(file: &str) -> Result<(), Error> {
     let filepath = PathBuf::from(file);
