@@ -10,7 +10,7 @@ use std::{
 };
 
 fn main() {
-    let file = "code_data/diesel.rs";
+    let file = "template/diesel.rs";
     if let Err(error) = cdd_rust::do_generate(file) {
         let _ = writeln!(io::stderr(), "{}", error);
         process::exit(1);
