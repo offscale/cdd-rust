@@ -13,6 +13,7 @@ mod constructor;
 mod error;
 mod openapi;
 mod parser;
+mod project;
 
 fn generate(file: &str) -> Result<(), Error> {
     let filepath = PathBuf::from(file);

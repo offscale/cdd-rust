@@ -8,6 +8,7 @@ edition = "2018"
 colored = "1.7"
 diesel = { version = "1.0.0", features = ["postgres"] }
 dotenv = "0.9.0"
+openapiv3 = "0.3"
 proc-macro2 = { version = "0.4.27", features = ["span-locations"] }
 serde = "1.0"
 serde_derive = "1.0"
