@@ -1,5 +1,5 @@
 #![deny(warnings)]
-extern crate openapi_generator;
+extern crate cdd_rust;
 
 use std::{
     io::{
@@ -10,8 +10,8 @@ use std::{
 };
 
 fn main() {
-    let file = "examples/diesel.rs";
-    if let Err(error) = openapi_generator::do_generate(file) {
+    let file = "code_data/diesel.rs";
+    if let Err(error) = cdd_rust::do_generate(file) {
         let _ = writeln!(io::stderr(), "{}", error);
         process::exit(1);
     }
