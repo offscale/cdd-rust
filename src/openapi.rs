@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap,
-    ops::Not,
-};
+use std::{collections::HashMap, ops::Not};
 #[derive(Debug, Serialize)]
 pub struct OpenApiDocument {
     pub swagger: String,

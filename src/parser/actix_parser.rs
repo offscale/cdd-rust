@@ -1,4 +1,3 @@
-
 use std::borrow::Cow;
 use std::env;
 use std::ffi::OsStr;
@@ -8,9 +7,8 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process;
 
-use colored::Colorize;
 use crate::parser::actix::Actix;
-
+use colored::Colorize;
 
 enum Error {
     IncorrectUsage,
@@ -27,7 +25,9 @@ impl Display for Error {
         use self::Error::*;
 
         match self {
-            IncorrectUsage => write!(f, "Usage: dump-syntax path/to/filename.rs"),
+            IncorrectUsage => {
+                write!(f, "Usage: dump-syntax path/to/filename.rs")
+            }
             ReadFile(error) => write!(f, "Unable to read file: {}", error),
             ParseFile {
                 error,
@@ -37,7 +37,6 @@ impl Display for Error {
         }
     }
 }
-
 
 /// extract the paths, params and the struct return types
 /// parse the api url of actix_web
@@ -57,7 +56,8 @@ impl Display for Error {
 ///
 fn parse_actix(file: &str) -> Result<(), Error> {
     let filepath = PathBuf::from(file);
-    let code: String = fs::read_to_string(&filepath).map_err(Error::ReadFile)?;
+    let code: String =
+        fs::read_to_string(&filepath).map_err(Error::ReadFile)?;
     let syntax = syn::parse_file(&code).map_err({
         |error| Error::ParseFile {
             error,
@@ -137,16 +137,19 @@ fn render_location(
     )
 }
 
-fn render_fallback(formatter: &mut fmt::Formatter, err: &syn::Error) -> fmt::Result {
+fn render_fallback(
+    formatter: &mut fmt::Formatter,
+    err: &syn::Error,
+) -> fmt::Result {
     write!(formatter, "Unable to parse file: {}", err)
 }
 
 #[cfg(test)]
-mod tests{
-use super::*;
+mod tests {
+    use super::*;
 
     #[test]
-    fn try_generate(){
+    fn try_generate() {
         parse_actix("code_data/actix_code.rs");
         panic!()
     }

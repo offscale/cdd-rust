@@ -2,10 +2,7 @@
 extern crate cdd_rust;
 
 use std::{
-    io::{
-        self,
-        Write,
-    },
+    io::{self, Write},
     process,
 };
 

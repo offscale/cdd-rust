@@ -4,10 +4,7 @@ extern crate serde_derive;
 
 use constructor::Constructor;
 use error::Error;
-use std::{
-    fs,
-    path::PathBuf,
-};
+use std::{fs, path::PathBuf};
 
 mod constructor;
 mod error;
@@ -20,12 +17,10 @@ fn generate(file: &str) -> Result<(), Error> {
 
     let code = fs::read_to_string(&filepath).map_err(Error::ReadFile)?;
     let syntax = syn::parse_file(&code).map_err({
-        |error| {
-            Error::ParseFile {
-                error,
-                filepath,
-                source_code: code,
-            }
+        |error| Error::ParseFile {
+            error,
+            filepath,
+            source_code: code,
         }
     })?;
     let mut constructor = Constructor::new();
