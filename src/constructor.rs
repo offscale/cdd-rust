@@ -164,7 +164,7 @@ impl<'ast> Visit<'ast> for StructProperties {
 }
 
 #[derive(Debug)]
-pub(crate) enum GenerationError {
+pub enum GenerationError {
     ExpectingArrow,
     ExpectingComma,
     ExpectingSqlType,

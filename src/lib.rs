@@ -12,6 +12,8 @@ mod openapi;
 mod parser;
 mod project;
 
+pub use project::Project;
+
 fn generate(file: &str) -> Result<(), Error> {
     let filepath = PathBuf::from(file);
 

@@ -1,11 +1,11 @@
-extern crate cdd_rust;
-
-use openapiv3::OpenAPI;
-use serde_yaml;
+use cdd_rust::*;
+use std::path::PathBuf;
 
 fn main() {
-    let data = include_str!("openapi.yml");
-    let openapi: OpenAPI =
-        serde_yaml::from_str(data).expect("Could not deserialize input");
-    println!("{:?}", openapi);
+    let path = PathBuf::from("examples");
+    if let Ok(project) = Project::read(path) {
+        println!("{:?}", project.specfile);
+    } else {
+        println!("error");
+    }
 }

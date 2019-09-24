@@ -9,7 +9,7 @@ use std::{
 };
 
 #[allow(unused)]
-pub(crate) enum Error {
+pub enum Error {
     IncorrectUsage,
     ReadFile(io::Error),
     ParseFile {

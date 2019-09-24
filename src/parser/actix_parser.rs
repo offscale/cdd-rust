@@ -1,11 +1,9 @@
 use std::borrow::Cow;
-use std::env;
 use std::ffi::OsStr;
 use std::fmt::{self, Display};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process;
 
 use crate::parser::actix::Actix;
 use colored::Colorize;
