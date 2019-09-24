@@ -2,6 +2,7 @@
 name = "cdd_rust"
 version = "0.1.0"
 authors = ["Agustin Chiappe Berrini <agustin@auvik.com>"]
+license = "Apache-2.0 OR MIT"
 edition = "2018"
 
 [dependencies]
