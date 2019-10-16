@@ -30,7 +30,7 @@ paths:
               schema:
                 type: string
           content:
-            application/json:    
+            application/json:
               schema:
                 $ref: "#/components/schemas/Pets"
         default:
@@ -81,18 +81,41 @@ paths:
                 $ref: "#/components/schemas/Error"
 components:
   schemas:
-    Pet:
-      required:
-        - id
-        - name
+    NewPet:
       properties:
-        id:
-          type: integer
-          format: int64
-        name:
-          type: integer
-        tag2:
+        tag:
           type: string
+        name:
+          type: string
+      required:
+        - name
+    Pet:
+        properties:
+          arr:
+            items:
+              type: string
+            type: array
+          name:
+            type: string
+          id:
+            type: integer
+          tag:
+            type: string
+          arrC:
+            items:
+              $ref: '#/components/schemas/NewPet'
+            type: array
+          boole:
+            type: boolean
+          copmpl:
+            $ref: '#/components/schemas/NewPet'
+        required:
+          - id
+          - name
+          - arr
+          - arrC
+          - copmpl
+          - boole
     Pets:
       type: array
       items:

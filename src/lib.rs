@@ -10,14 +10,16 @@ mod constructor;
 mod error;
 mod openapi;
 mod parser;
+mod project_reader;
 mod project;
 
-pub use project::Project;
+pub use project_reader::ProjectReader;
 
 fn generate(file: &str) -> Result<(), Error> {
     let filepath = PathBuf::from(file);
-
+    // let path: String = filepath.into_os_string().into_string().unwrap();
     let code = fs::read_to_string(&filepath).map_err(Error::ReadFile)?;
+    let reader = ProjectReader::read(filepath.clone());
     let syntax = syn::parse_file(&code).map_err({
         |error| Error::ParseFile {
             error,
@@ -27,7 +29,6 @@ fn generate(file: &str) -> Result<(), Error> {
     })?;
     let mut constructor = Constructor::new();
     syn::visit::visit_file(&mut constructor, &syntax);
-
     for document in constructor.open_api_documents()? {
         println!(
             "{}",
@@ -35,6 +36,7 @@ fn generate(file: &str) -> Result<(), Error> {
                 .expect("error serializaing to serder")
         );
     }
+
     Ok(())
 }
 
