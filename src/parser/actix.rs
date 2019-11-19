@@ -1,8 +1,10 @@
 use std::collections::HashMap;
-use syn::visit::Visit;
-use syn::Expr;
-use syn::Field;
-use syn::TypePath;
+use syn::{
+    visit::Visit,
+    Expr,
+    Field,
+    TypePath,
+};
 
 /// try to parse the actix server resource path ant the function
 /// pattern to watch out for: use actix_web::server

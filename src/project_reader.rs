@@ -1,12 +1,17 @@
 use crate::error;
 use openapiv3::OpenAPI;
-use std::fs;
-use std::path::PathBuf;
+use std::{
+    fs,
+    path::PathBuf,
+};
 
 use crate::project::*;
 
 use std::{
-    io::{self, Write},
+    io::{
+        self,
+        Write,
+    },
     process,
 };
 
@@ -23,7 +28,7 @@ impl ProjectReader {
             serde_yaml::from_str(&spec).expect("Could not deserialize input");
 
         let spec_project = Project::parse_yml(openapi.clone());
-        println!("{}",spec_project.info.endpoint);
+        println!("{}", spec_project.info.endpoint);
         Ok(ProjectReader { specfile: openapi })
     }
 }

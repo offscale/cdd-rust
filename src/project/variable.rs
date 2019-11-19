@@ -1,4 +1,3 @@
-
 #[derive(Debug)]
 pub struct Variable {
     pub name: String,
@@ -13,7 +12,6 @@ pub enum VariableType {
     IntType,
     BoolType,
     FloatType,
-    ArrayType (Box<VariableType>),
-    ComplexType (String),
+    ArrayType(Box<VariableType>),
+    ComplexType(String),
 }
-

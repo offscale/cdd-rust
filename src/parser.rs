@@ -1,2 +1,2 @@
-pub mod actix_parser;
 pub mod actix;
+pub mod actix_parser;

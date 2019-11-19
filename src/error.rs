@@ -3,9 +3,15 @@ use colored::Colorize;
 use std::{
     borrow::Cow,
     ffi::OsStr,
-    fmt::{self, Display},
+    fmt::{
+        self,
+        Display,
+    },
     io,
-    path::{Path, PathBuf},
+    path::{
+        Path,
+        PathBuf,
+    },
 };
 
 #[allow(unused)]

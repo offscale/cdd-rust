@@ -1,0 +1,69 @@
+dist: bionic
+language: minimal
+sudo: false
+# Default `language: rust` has problems on nightly with rustfmt support
+
+# only cache cargo subcommand binaries and .so libs
+# the build artifacts take a lot of space and are slower to
+# cache than to actually rebuild anyway...
+# We need to cache the whole .cargo directory to keep the
+# .crates.toml file.
+cache:
+  directories:
+    - /home/travis/install
+    - /home/travis/.cargo
+
+# But don't cache the cargo registry
+before_cache:
+  - rm -rf "$HOME"/.cargo/registry
+before_script:
+  - |
+    export PATH="$HOME/.cargo/bin:$PATH"
+    TRAVIS_RUST_VERSION="${TRAVIS_RUST_VERSION:-nightly}"
+    if [ "$TRAVIS_RUST_VERSION" = 'nightly' ]; then
+       printf -v RUSTFMT_VERSION '%s%s' '-' "$(curl -s https://rust-lang.github.io/rustup-components-history/x86_64-unknown-linux-gnu/rustfmt)"
+       printf -v CLIPPY_VERSION '%s%s' '-' "$(curl -s https://rust-lang.github.io/rustup-components-history/x86_64-unknown-linux-gnu/clippy)"
+       SMALLEST_COMPAT_RUST="$([[ "$RUSTFMT_VERSION" < "$CLIPPY_VERSION" ]] && echo "$RUSTFMT_VERSION" || echo "$CLIPPY_VERSION")"
+
+       if command -v rustup 2>/dev/null; then
+           rustup default "${TRAVIS_RUST_VERSION}${SMALLEST_COMPAT_RUST}"
+       else
+           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain "${TRAVIS_RUST_VERSION}${SMALLEST_COMPAT_RUST}"
+       fi
+    fi
+    if command -v cargo >/dev/null; then
+      export PATH="$HOME/.cargo/bin:$PATH"
+      export XDG_RUNTIME_DIR="$PWD"'/socket'
+      mkdir "$XDG_RUNTIME_DIR"
+      cargo fetch
+      rustup component add rustfmt
+    fi
+    if [ -n "$CLIPPY" ]; then
+      rustup component add clippy --toolchain "${TRAVIS_RUST_VERSION}${SMALLEST_COMPAT_RUST}"
+    elif [ -n "$BUILD_FMT" ]; then
+      rustup component add rustfmt --toolchain "${TRAVIS_RUST_VERSION}${SMALLEST_COMPAT_RUST}"
+    fi
+script:
+  - |
+    if [ -n "$BUILD_FMT" ]; then
+      cargo fmt --all -- --check
+      # rustfmt --check # With: `src/*.rs` xor `"$(find -name '*.rs' -not -path './target/*')"`
+    elif [ -n "$CLIPPY" ]; then
+      cargo clippy --all -- -D warnings
+    elif [ -n "$CARGO_TEST" ]; then
+      if grep -qF '[workspace]' Cargo.toml || [ ! -z "$FEATURES" ]; then
+          features='--all-features'
+      else
+          printf -v features '--features %s' "$FEATURES"
+      fi
+      cargo test --all "$features"
+    fi
+
+matrix:
+  include:
+    - rust: nightly
+      env: BUILD_FMT=1
+    - rust: nightly
+      env: CLIPPY=1
+    - rust: nightly
+      env: CARGO_TEST=1

@@ -1,9 +1,20 @@
-use std::borrow::Cow;
-use std::ffi::OsStr;
-use std::fmt::{self, Display};
-use std::fs;
-use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::{
+    borrow::Cow,
+    ffi::OsStr,
+    fmt::{
+        self,
+        Display,
+    },
+    fs,
+    io::{
+        self,
+        Write,
+    },
+    path::{
+        Path,
+        PathBuf,
+    },
+};
 
 use crate::parser::actix::Actix;
 use colored::Colorize;
@@ -57,10 +68,12 @@ fn parse_actix(file: &str) -> Result<(), Error> {
     let code: String =
         fs::read_to_string(&filepath).map_err(Error::ReadFile)?;
     let syntax = syn::parse_file(&code).map_err({
-        |error| Error::ParseFile {
-            error,
-            filepath,
-            source_code: code,
+        |error| {
+            Error::ParseFile {
+                error,
+                filepath,
+                source_code: code,
+            }
         }
     })?;
     parse_syntax(&syntax);

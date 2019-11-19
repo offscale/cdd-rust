@@ -1,16 +1,33 @@
 use crate::openapi::{
-    OpenApiComponents, OpenApiDocument, OpenApiInfo, OpenApiProperties,
+    OpenApiComponents,
+    OpenApiDocument,
+    OpenApiInfo,
+    OpenApiProperties,
     OpenApiSchema,
 };
-use proc_macro2::{Delimiter, TokenTree};
-use std::collections::{HashMap, HashSet};
+use proc_macro2::{
+    Delimiter,
+    TokenTree,
+};
+use std::collections::{
+    HashMap,
+    HashSet,
+};
 use syn::{
     visit::{
-        visit_fields_named, visit_generic_argument, visit_path_arguments,
-        visit_type, Visit,
+        visit_fields_named,
+        visit_generic_argument,
+        visit_path_arguments,
+        visit_type,
+        Visit,
     },
-    AngleBracketedGenericArguments, Field, Fields, ItemMacro, ItemStruct,
-    Macro, TypePath,
+    AngleBracketedGenericArguments,
+    Field,
+    Fields,
+    ItemMacro,
+    ItemStruct,
+    Macro,
+    TypePath,
 };
 
 struct StructProperties {
@@ -287,27 +304,42 @@ fn macro_to_open_api_document(
         let mut properties = HashMap::new();
         for (name, field_type) in item_pairs.into_iter() {
             let field_properties = match field_type.as_str() {
-                "BigInt" => Ok(OpenApiProperties::new("integer".to_owned())
-                    .with_format("int64".to_owned())),
-                "Binary" => Ok(OpenApiProperties::new("array".to_owned())
-                    .with_items(
+                "BigInt" => {
+                    Ok(OpenApiProperties::new("integer".to_owned())
+                        .with_format("int64".to_owned()))
+                }
+                "Binary" => {
+                    Ok(OpenApiProperties::new("array".to_owned()).with_items(
                         OpenApiProperties::new("integer".to_owned())
                             .with_format("int32".to_owned()),
-                    )),
+                    ))
+                }
                 "Bool" => Ok(OpenApiProperties::new("boolean".to_owned())),
-                "Double" => Ok(OpenApiProperties::new("number".to_owned())
-                    .with_format("double".to_owned())),
-                "Float" => Ok(OpenApiProperties::new("number".to_owned())
-                    .with_format("float".to_owned())),
-                "Integer" => Ok(OpenApiProperties::new("integer".to_owned())
-                    .with_format("int64".to_owned())),
-                "Numeric" => Ok(OpenApiProperties::new("number".to_owned())
-                    .with_format("double".to_owned())),
-                "SmallInt" => Ok(OpenApiProperties::new("integer".to_owned())
-                    .with_format("int32".to_owned())),
+                "Double" => {
+                    Ok(OpenApiProperties::new("number".to_owned())
+                        .with_format("double".to_owned()))
+                }
+                "Float" => {
+                    Ok(OpenApiProperties::new("number".to_owned())
+                        .with_format("float".to_owned()))
+                }
+                "Integer" => {
+                    Ok(OpenApiProperties::new("integer".to_owned())
+                        .with_format("int64".to_owned()))
+                }
+                "Numeric" => {
+                    Ok(OpenApiProperties::new("number".to_owned())
+                        .with_format("double".to_owned()))
+                }
+                "SmallInt" => {
+                    Ok(OpenApiProperties::new("integer".to_owned())
+                        .with_format("int32".to_owned()))
+                }
                 "Text" => Ok(OpenApiProperties::new("string".to_owned())),
-                "TinyInt" => Ok(OpenApiProperties::new("integer".to_owned())
-                    .with_format("int32".to_owned())),
+                "TinyInt" => {
+                    Ok(OpenApiProperties::new("integer".to_owned())
+                        .with_format("int32".to_owned()))
+                }
                 _ => Err(GenerationError::InvalidSqlType),
             }?;
             properties.insert(name, field_properties);
