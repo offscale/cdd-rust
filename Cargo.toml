@@ -1,0 +1,26 @@
+[package]
+name = "cdd-rust"
+version = "0.1.0"
+edition = "2021"
+authors = ["Samuel Marks"]
+description = "OpenAPI ↔ Rust"
+readme = true
+license = "Apache-2.0 OR MIT"
+keywords = ["openapi", "actix", "actix-web", "diesel", "rest", "orm"]
+categories = [
+    "development-tools",
+    "development-tools::testing",
+    "parser-implementations",
+    "template-engine",
+    "web-programming::http-server"
+]
+
+[toolchain]
+channel = "nightly" # Needed by diesel
+
+[dependencies]
+rowan = { git = "https://github.com/rust-analyzer/rowan", branch = "master" }
+
+[dev-dependencies]
+actix_web_mocks = { path = "src/actix_web_mocks" }
+diesel_mocks = { path = "src/diesel_mocks" }
