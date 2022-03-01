@@ -2,7 +2,7 @@ cdd-rust
 --------
 [![Rust: nightly](https://img.shields.io/badge/Rust-nightly-blue.svg)](https://www.rust-lang.org)
 [![License: (Apache-2.0 OR MIT)](https://img.shields.io/badge/LICENSE-Apache--2.0%20OR%20MIT-orange)](LICENSE-APACHE)
-[![CI](https://github.com/offscale/cdd-python/workflows/CI/badge.svg)](https://github.com/offscale/cdd-rust/actions)
+[![CI](https://github.com/offscale/cdd-rust/actions/workflows/ci-cargo.yml/badge.svg)](https://github.com/offscale/cdd-rust/actions/workflows/ci-cargo.yml)
 
 OpenAPI ↔ Rust. Compiler Driven Development (CDD) is a new development methodology, with implementations in many languages.
 
