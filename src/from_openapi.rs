@@ -45,12 +45,7 @@ pub fn generate<P: AsRef<Path>>(
                 let mut fields = Vec::new();
                 for (name, schema) in properties {
                     let field_name = syn::Ident::new(name, proc_macro2::Span::call_site());
-                    let schema = schema.as_item().unwrap();
-                    let field_type = match schema.schema_kind.clone() {
-                        SchemaKind::Type(Type::String(_)) => quote! { String },
-                        SchemaKind::Type(Type::Integer(_)) => quote! { i64 },
-                        _ => todo!(),
-                    };
+                    let field_type = get_type_from_schema(schema);
                     fields.push(quote! { pub #field_name: #field_type });
                 }
 
@@ -76,11 +71,7 @@ pub fn generate<P: AsRef<Path>>(
                 for (name, schema) in properties {
                     let field_name = syn::Ident::new(name, proc_macro2::Span::call_site());
                     let schema = schema.as_item().unwrap();
-                    let field_type = match schema.schema_kind.clone() {
-                        SchemaKind::Type(Type::String(_)) => quote! { Text },
-                        SchemaKind::Type(Type::Integer(_)) => quote! { BigInt },
-                        _ => todo!(),
-                    };
+                    let field_type = get_diesel_type_from_schema(schema);
                     schema_fields.push(quote! { #field_name -> #field_type, });
                 }
 
@@ -97,6 +88,51 @@ pub fn generate<P: AsRef<Path>>(
     }
 
     Ok(())
+}
+
+fn get_type_from_schema(schema: &openapiv3::ReferenceOr<openapiv3::Schema>) -> proc_macro2::TokenStream {
+    match schema {
+        openapiv3::ReferenceOr::Reference { reference } => {
+            let ref_name = reference.split('/').last().unwrap();
+            let ident = syn::Ident::new(ref_name, proc_macro2::Span::call_site());
+            quote! { #ident }
+        }
+        openapiv3::ReferenceOr::Item(item) => match &item.schema_kind {
+            SchemaKind::Type(Type::String(_)) => quote! { String },
+            SchemaKind::Type(Type::Integer(_)) => quote! { i64 },
+            SchemaKind::Type(Type::Boolean(_)) => quote! { bool },
+            SchemaKind::Type(Type::Number(_)) => quote! { f64 },
+            SchemaKind::Type(Type::Array(array)) => {
+                let items = array.items.as_ref().unwrap();
+                let item_type = get_type_from_schema(items);
+                quote! { Vec<#item_type> }
+            }
+            _ => quote! { serde_json::Value },
+        },
+    }
+}
+
+fn get_diesel_type_from_schema(
+    schema: &openapiv3::ReferenceOr<openapiv3::Schema>,
+) -> proc_macro2::TokenStream {
+    match schema {
+        openapiv3::ReferenceOr::Reference { reference } => {
+            let ref_name = reference.split('/').last().unwrap();
+            let ident = syn::Ident::new(
+                &format!("{}Id", ref_name),
+                proc_macro2::Span::call_site(),
+            );
+            quote! { #ident }
+        }
+        openapiv3::ReferenceOr::Item(item) => match &item.schema_kind {
+            SchemaKind::Type(Type::String(_)) => quote! { Text },
+            SchemaKind::Type(Type::Integer(_)) => quote! { BigInt },
+            SchemaKind::Type(Type::Boolean(_)) => quote! { Bool },
+            SchemaKind::Type(Type::Number(_)) => quote! { Double },
+            SchemaKind::Type(Type::Array(_)) => quote! { Array<Text> },
+            _ => quote! { Jsonb },
+        },
+    }
 }
 
 pub fn generate_tests<P: AsRef<Path>>(

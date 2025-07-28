@@ -39,6 +39,7 @@ struct ToOpenapi {
 use cdd_rust::{from_openapi, to_openapi};
 
 fn main() {
+    println!("Starting application...");
     let cli = Cli::parse();
 
     match cli {
