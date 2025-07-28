@@ -119,3 +119,44 @@ pub fn generate<P: AsRef<Path>>(input: P, output: P) -> Result<(), ToOpenApiErro
 
     Ok(())
 }
+
+pub fn generate_from_models<P: AsRef<Path>>(
+    input: P,
+    output: P,
+) -> Result<(), ToOpenApiError> {
+    let mut openapi = OpenAPI {
+        openapi: "3.0.0".to_string(),
+        info: Info {
+            title: "Test API".to_string(),
+            version: "1.0.0".to_string(),
+            ..Default::default()
+        },
+        paths: Paths::default(),
+        components: Some(Components::default()),
+        ..Default::default()
+    };
+
+    for entry in fs::read_dir(input)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() {
+            let rust_code = fs::read_to_string(path)?;
+            let ast = syn::parse_file(&rust_code)?;
+            let mut visitor = Visitor {
+                schemas: IndexMap::new(),
+            };
+            visitor.visit_file(&ast);
+            openapi
+                .components
+                .as_mut()
+                .unwrap()
+                .schemas
+                .extend(visitor.schemas);
+        }
+    }
+
+    let spec = serde_yaml::to_string(&openapi)?;
+    fs::write(output, spec)?;
+
+    Ok(())
+}

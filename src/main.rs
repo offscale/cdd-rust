@@ -16,9 +16,13 @@ struct FromOpenapi {
     #[arg(short, long)]
     input: std::path::PathBuf,
 
-    /// The path to the output directory.
+    /// The path to the output directory for the models.
     #[arg(short, long)]
     output: std::path::PathBuf,
+
+    /// The path to the output directory for the schema.
+    #[arg(short, long)]
+    schema_output: std::path::PathBuf,
 }
 
 #[derive(Parser, Debug)]
@@ -39,7 +43,7 @@ fn main() {
 
     match cli {
         Cli::FromOpenapi(args) => {
-            if let Err(e) = from_openapi::generate(args.input, args.output) {
+            if let Err(e) = from_openapi::generate(args.input, args.output, args.schema_output) {
                 eprintln!("Error generating Rust code from OpenAPI: {}", e);
                 std::process::exit(1);
             }
