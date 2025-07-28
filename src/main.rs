@@ -32,15 +32,23 @@ struct ToOpenapi {
     output: std::path::PathBuf,
 }
 
+use cdd_rust::{from_openapi, to_openapi};
+
 fn main() {
     let cli = Cli::parse();
 
     match cli {
         Cli::FromOpenapi(args) => {
-            println!("Generating Rust code from {:?}", args.input);
+            if let Err(e) = from_openapi::generate(args.input, args.output) {
+                eprintln!("Error generating Rust code from OpenAPI: {}", e);
+                std::process::exit(1);
+            }
         }
         Cli::ToOpenapi(args) => {
-            println!("Generating OpenAPI spec from {:?}", args.input);
+            if let Err(e) = to_openapi::generate(args.input, args.output) {
+                eprintln!("Error generating OpenAPI spec from Rust: {}", e);
+                std::process::exit(1);
+            }
         }
     }
 }

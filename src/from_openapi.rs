@@ -6,7 +6,18 @@ use heck::ToPascalCase;
 use quote::quote;
 use std::io::Write;
 
-pub fn generate<P: AsRef<Path>>(input: P, output: P) -> Result<(), Box<dyn std::error::Error>> {
+use derive_more::{Display, From};
+
+#[derive(Debug, Display, From)]
+pub enum FromOpenApiError {
+    Io(std::io::Error),
+    Yaml(serde_yaml::Error),
+    Syn(syn::Error),
+}
+
+impl std::error::Error for FromOpenApiError {}
+
+pub fn generate<P: AsRef<Path>>(input: P, output: P) -> Result<(), FromOpenApiError> {
     let spec_path = input.as_ref();
     let output_path = output.as_ref();
     let spec = load_spec(spec_path)?;
@@ -39,7 +50,7 @@ pub fn generate<P: AsRef<Path>>(input: P, output: P) -> Result<(), Box<dyn std::
                         #(#fields),*
                     }
                 };
-                let formatted = prettyplease::unparse(&syn::parse2(gen).unwrap());
+                let formatted = prettyplease::unparse(&syn::parse2(gen)?);
                 write!(models_file, "{}", formatted)?;
             }
         }
@@ -48,7 +59,7 @@ pub fn generate<P: AsRef<Path>>(input: P, output: P) -> Result<(), Box<dyn std::
     Ok(())
 }
 
-fn load_spec<P: AsRef<Path>>(path: P) -> Result<OpenAPI, Box<dyn std::error::Error>> {
+fn load_spec<P: AsRef<Path>>(path: P) -> Result<OpenAPI, FromOpenApiError> {
     let s = fs::read_to_string(path)?;
     let spec: OpenAPI = serde_yaml::from_str(&s)?;
     Ok(spec)

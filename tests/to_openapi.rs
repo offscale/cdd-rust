@@ -6,9 +6,17 @@ use std::fs;
 fn test_generate_to_openapi() {
     let rust_code = r#"
 #[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct NestedSchema {
+    pub id: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct TestSchema {
     pub id: i64,
     pub name: String,
+    pub value: f64,
+    pub is_valid: bool,
+    pub nested: NestedSchema,
 }
     "#;
 
@@ -20,14 +28,26 @@ info:
 paths: {}
 components:
   schemas:
+    NestedSchema:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
     TestSchema:
       type: object
       properties:
         id:
           type: integer
           format: int64
+        is_valid:
+          type: boolean
         name:
           type: string
+        nested:
+          $ref: '#/components/schemas/NestedSchema'
+        value:
+          type: number
     "#;
 
     let input_dir = tempfile::tempdir().unwrap();
@@ -41,5 +61,5 @@ components:
 
     let generated_openapi_spec = fs::read_to_string(spec_path).unwrap();
 
-    assert_eq!(generated_openapi_spec, expected_openapi_spec);
+    assert_eq!(generated_openapi_spec.trim(), expected_openapi_spec.trim());
 }

@@ -1,0 +1,15 @@
+openapi: 3.0.0
+info:
+  title: Dummy API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    DummySchema:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
