@@ -1,8 +1,11 @@
 cdd-rust
 --------
+[![No Maintenance Intended](http://unmaintained.tech/badge.svg)](http://unmaintained.tech)
 [![Rust: nightly](https://img.shields.io/badge/Rust-nightly-blue.svg)](https://www.rust-lang.org)
 [![License: (Apache-2.0 OR MIT)](https://img.shields.io/badge/LICENSE-Apache--2.0%20OR%20MIT-orange)](LICENSE-APACHE)
 [![CI](https://github.com/offscale/cdd-rust/actions/workflows/ci-cargo.yml/badge.svg)](https://github.com/offscale/cdd-rust/actions/workflows/ci-cargo.yml)
+
+Update: future of this repo remains unclear. One direction different to the Python and C cdd implementations is to go from SQL to diesel to diesel functions (https://github.com/SamuelMarks/dsync). Then use https://github.com/rust-lang/rust-analyzer to go from those Diesel models to/fro actix to/fro tests & mocks to/fro OpenAPI (utoipa).
 
 OpenAPI ↔ Rust. Compiler Driven Development (CDD) is a new development methodology, with implementations in many languages.
 
