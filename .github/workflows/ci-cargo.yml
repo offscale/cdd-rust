@@ -23,6 +23,7 @@ jobs:
         run: |
           rustup override set nightly
           rustup component add rustfmt
+          rustup component add clippy
 
       - name: Check Formatting
         run: cargo fmt -- --check
