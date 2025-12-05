@@ -1,0 +1,23 @@
+[package]
+name = "cdd-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Error handling
+derive_more = { version = "^2.1", features = ["from", "display"] }
+
+# AST Parsing
+ra_ap_syntax = "0.0.308"
+ra_ap_edition = "0.0.308"
+
+# Regex for attributes
+regex = "^1.12"
+
+# JSON/YAML Output & Parsing
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "^1.0"
+serde_yaml = "^0.9"
+
+# OpenAPI definition types
+utoipa = { version = "^5.4", features = ["preserve_order", "indexmap", "uuid"] }
