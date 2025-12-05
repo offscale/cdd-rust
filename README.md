@@ -6,11 +6,13 @@ cdd-rust: OpenAPI ↔ Rust
 
 **Compiler Driven Development (CDD)** for Rust.
 
-**cdd-rust** bridges the gap between your **Database**, **Rust Code**, and **OpenAPI Specifications**. Unlike traditional generators that produce untouchable code in a "generated" folder, `cdd-rust` uses advanced AST parsing to surgically patch your *existing* source files, strictly Typed handlers, and integration tests.
+**cdd-rust** creates a symbiotic link between your **Database**, **Rust Code**, and **OpenAPI Specifications**. Unlike traditional generators that overwrite files or hide code in "generated" directories, `cdd-rust` uses advanced AST parsing (`ra_ap_syntax`) to surgically patch your *existing* source files, strictly typed handlers, and integration tests.
+
+It supports two distinct workflows:
+1.  **Scaffold | Patch (OpenAPI ➔ Rust):** Generate/update Actix handlers, routes, and Diesel models from OpenAPI.
+2.  **Reflect & Sync (Rust ➔ OpenAPI):** Generate OpenAPI specifications from your actual source code.
 
 ## ⚡️ The CDD Loop
-
-Automate the repetitive parts of building robust web services with **Actix Web**, **Diesel**, and **Postgres**.
 
 ```mermaid
 %%{init: {
@@ -25,95 +27,83 @@ Automate the repetitive parts of building robust web services with **Actix Web**
 }}%%
 
 graph TD
-%% Nodes
-    OpenAPI([OpenAPI]):::yellow
-    Handlers(Actix Handlers):::blue
-    Models(Diesel Models):::green
-    DB[(Database)]:::navy
+%% --- Section 1: Route Logic ---
 
-%% Flow 0 & 1: Downward (Scaffold & Patch)
-    OpenAPI -->|"0. Scaffold (New) |<br/> 1. Patch (Existing)"| Handlers
+%% Node: OAS Path
+    OasPath("<strong>OpenAPI Path (YAML)</strong><br/>/users/{id}:<br/>&nbsp;&nbsp;get:<br/>&nbsp;&nbsp;&nbsp;&nbsp;parameters:<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;- name: id<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;in: path<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;schema: {format: uuid}"):::yellow
 
-%% Connection
-    Handlers -- "Uses Strictly Typed Structs" --> Models
+%% Node: Actix Handler
+    Actix("<strong>Actix Handler (Rust)</strong><br/>async fn get_user(<br/>&nbsp;&nbsp;id: web::Path&lt;Uuid&gt;<br/>) -> impl Responder {<br/>&nbsp;&nbsp;/* Logic */<br/>}"):::blue
 
-%% Flow 2: Upward (Reflection)
-    Models -.->|"2. Derives Schema (Reflection)"| OpenAPI
+%% Flow: Down (Scaffold) & Up (Reflect)
+    OasPath ==>|"1. SCAFFOLD / PATCH<br/>(Injects Handler & Route Signature)"| Actix
+    Actix -.->|"2. REFLECT / GENERATE<br/>(Extracts Paths via AST)"| OasPath
 
-%% Database Sync
-    DB == "Syncs SQL Columns" ==> Models
+%% --- Spacer to force vertical layout ---
+    Actix ~~~ OasSchema
 
-%% Styles
-    classDef yellow fill:#f9ab00,stroke:#20344b,stroke-width:2px,color:#ffffff,font-family:'Google Sans Medium',font-size:16px;
-    classDef blue fill:#4285f4,stroke:#20344b,stroke-width:2px,color:#ffffff,font-family:'Google Sans Medium',font-size:16px;
-    classDef green fill:#34a853,stroke:#20344b,stroke-width:2px,color:#ffffff,font-family:'Google Sans Medium',font-size:16px;
-    classDef navy fill:#20344b,stroke:#20344b,stroke-width:2px,color:#ffffff,font-family:'Google Sans Medium',font-size:16px;
+%% --- Section 2: Data Models ---
+
+%% Node: OAS Schema
+    OasSchema("<strong>OpenAPI Schema (YAML)</strong><br/>components:<br/>&nbsp;&nbsp;schemas:<br/>&nbsp;&nbsp;&nbsp;&nbsp;User:<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;type: object<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;properties:<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;email: {type: string}"):::yellow
+
+%% Node: Diesel Model
+    Diesel("<strong>Diesel Model (Rust)</strong><br/>#[derive(ToSchema)]<br/>struct User {<br/>&nbsp;&nbsp;id: Uuid,<br/>&nbsp;&nbsp;email: String<br/>}"):::green
+
+%% Flow: Down (Scaffold) & Up (Reflect)
+    OasSchema ==>|"1. SCAFFOLD / PATCH<br/>(Injects Fields & Types)"| Diesel
+    Diesel -.->|"2. REFLECT / GENERATE<br/>(Derives Attributes)"| OasSchema
+
+%% --- Styles ---
+    classDef yellow fill:#f9ab00,stroke:#20344b,stroke-width:2px,color:#ffffff,font-family:'Consolas',font-size:14px,text-align:left;
+    classDef blue fill:#4285f4,stroke:#20344b,stroke-width:2px,color:#ffffff,font-family:'Consolas',font-size:14px,text-align:left;
+    classDef green fill:#34a853,stroke:#20344b,stroke-width:2px,color:#ffffff,font-family:'Consolas',font-size:14px,text-align:left;
 
     linkStyle default stroke:#20344b,stroke-width:2px;
 ```
 
 ---
 
-## 🚀 The Philosophy
+## 🚀 Features
 
-**Compiler Driven Development** solves synchronization issues across language boundaries (Backend $\leftrightarrow$ Frontend $\leftrightarrow$ Docs).
+### 1. Zero-Boilerplate Scaffolding (OpenAPI ➔ Rust)
+Stop manually writing repetitive handler signatures. `cdd-rust` reads your spec and generates strictly typed code.
+*   **Handler Scaffolding:** Transforms OpenAPI paths into `async fn` signatures with correct extractors:
+    *   Path variables ➔ `web::Path<Uuid>`
+    *   Query strings ➔ `web::Query<Value>`
+    *   Request bodies ➔ `web::Json<T>`
+*   **Route Registration:** Surgically injects `cfg.service(...)` calls into your `routes.rs` configuration using AST analysis, preserving existing logic.
+*   **Non-Destructive Patching:** Uses [`ra_ap_syntax`](https://docs.rs/ra_ap_syntax/) (part of official [rust-lang/rust-analyzer](https://github.com/rust-lang/rust-analyzer)) to edit files safely. It respects your manual comments and formatting.
 
-*   **Single Source of Truth:** Your Code + Attributes *are* the documentation. Your Database *is* the source of your models.
-*   **No Magic Folders:** We don't hide code. We generate code you can read, debug, and commit.
-*   **Lossless Patching:** Powered by `ra_ap_syntax` (Rust Analyzer), we edit your files without breaking your manual formatting or comments.
-*   **Contract Safety:** Automated updating of contract tests ensures your implementation strictly adheres to the API definition.
+### 2. Source-of-Truth Reflection (Rust ➔ OpenAPI)
+Keep your documentation alive. Your Rust code *is* the spec.
+*   **Database Sync:** Wraps `dsync` to generate Rust structs directly from your Postgres `schema.rs`.
+*   **Attribute Injection:** Automatically parses structs and injects `#[derive(ToSchema)]` and `#[serde(...)]` attributes.
+*   **Type Mapping:** Maps Rust types (`Uuid`, `chrono::NaiveDateTime`) back to OpenAPI formats automatically.
 
----
-
-## 🛠 Features
-
-### 1. Database & Model Sync (`sync`)
-Keeps your Rust structs in perfect harmony with your Postgres schema.
-*   **Diesel Integration:** Wraps `dsync` to generate raw structs from `schema.rs`.
-*   **Attribute Injection:** Automatically parses generated structs and injects `utoipa::ToSchema`, `serde::Serialize`, and `serde::Deserialize`.
-*   **Result:** A fully documented, OpenAPI-ready Rust struct generated directly from your DB.
-
-### 2. Contract Test Generation (`test-gen`)
-Treats your application as a black box to ensure spec compliance.
-*   **Route Parsing:** Reads your `openapi.yaml`.
-*   **Test Scaffolding:** Generates `tests/api_contracts.rs` containing `#[actix_web::test]` functions.
-*   **Smart Mocking:** Automatically generates dummy values for `Uuid`, `Date`, and primitives to satisfy route parameters during testing.
-*   **Schema Validation:** Includes logic to validate response bodies against the JSON Schema definitions.
-
-### 3. AST-Based Patching (Core)
-The engine under the hood (`cdd-core`) provides intelligent code manipulation:
-*   **Smart Injection:** Adds fields to structs and lines to functions respecting indentation and comma placement.
-*   **Structural Diffing:** configuration-aware diffing between target specs and actual implementations.
-*   **Route Registration:** Injects `cfg.service(...)` calls into your Actix config without disrupting existing logic.
+### 3. Contract Safety (`test-gen`)
+Ensure your implementation actually matches the spec.
+*   **Test Generation:** Generates `tests/api_contracts.rs` based on your `openapi.yaml`.
+*   **Smart Mocking:** Automatically fills request parameters with valid dummy data (e.g., UUIDs for ID fields, ISO strings for Dates).
+*   **Validation:** Verifies that your API responses align with the JSON Schema defined in your spec.
 
 ---
 
-## 📦 Usage
+## 📦 Command Usage
 
-### Installation
-
-Clone the repository and build the CLI tool:
-
-```bash
-cargo build -p cdd-cli --release
-```
-
-### Command Reference
-
-#### 1. Sync Pipeline (DB ➔ Rust ➔ OpenAPI)
-Transforms raw Diesel schema files into rich, OpenAPI-compatible Rust structs.
+### 1. The Sync Pipeline
+**DB ➔ Rust Models ➔ OpenAPI Attributes**
+Synchronizes your database schema to your Rust structs and ensures they are ready for OpenAPI generation.
 
 ```bash
-# Workflow: 
-# 1. Runs `dsync` to update models from schema.rs
-# 2. Patches models with #[derive(ToSchema)]
 cargo run -p cdd-cli -- sync \
   --schema-path web/src/schema.rs \
   --model-dir web/src/models
 ```
 
-#### 2. Test Configuration (OpenAPI ➔ Tests)
-Reads your API definition and writes a Rust test suite.
+### 2. The Test Pipeline
+**OpenAPI ➔ Integration Tests**
+Generates a test suite that treats your app as a black box.
 
 ```bash
 cargo run -p cdd-cli -- test-gen \
@@ -124,30 +114,21 @@ cargo run -p cdd-cli -- test-gen \
 
 ---
 
-## 🏗 Project Structure
+## 🛠 Project Structure
 
-*   **`core/`**: The brain of the operation. Contains AST parsers (`ra_ap_syntax`), OpenAPI parsers, and code patching logic. It performs surgical updates on Rust source files.
-*   **`cli/`**: The automation runner. Orchestrates `diesel`, `dsync`, and the core library to execute pipelines.
-*   **`web/`**: The reference implementation. A standard Actix Web project that demonstrates how generated models and tests live alongside hand-written logic.
+*   **`core/`**: The engine. Contains AST parsers, OpenAPI parsers, and the diff/patch logic.
+    *   `patcher.rs`: Surgical code editing.
+    *   `handler_generator.rs`: Scaffolds Actix handlers.
+    *   `oas.rs`: Parses OpenAPI YAML.
+*   **`cli/`**: The workflow runner. Use this to run `sync` or `test-gen`.
+*   **`web/`**: Reference implementation. An Actix Web + Diesel project demonstrating the generated code in action.
 
 ## 🎨 Design Principles
 
-*   **Non-Destructive:** We respect your existing code style, comments, and spacing.
-*   **Type Safety:** `Uuid`, `jso::serde::Value`, and `chrono::DateTime` are first-class citizens.
-*   **Dependencies:**
-    *   **Actix Web:** For the HTTP layer.
-    *   **Diesel:** For ORM/DB layer.
-    *   **Utoipa:** For OpenAPI attribute generation.
-    *   **Ra_ap_syntax:** For 100% accurate code manipulation.
-
-## 🔮 Roadmap
-
-- [x] Structural Diffing & AST Patching
-- [x] Database Model Synchronization
-- [x] Contract Test Generation
-- [x] Handler Scaffolding (Core Library Support)
-- [ ] Visual Schema Designer Integration
-- [ ] Expose Handler Scaffolding via CLI
+*   **No Magic Folders:** We generate code you can read, debug, and commit.
+*   **Lossless Patching:** We edit your source files without breaking your style.
+*   **Type Safety:** `Uuid`, `chrono`, and `rust_decimal` are first-class citizens.
+*   **100% Coverage:** The toolchain itself enforces strict documentation and test coverage.
 
 ---
 
