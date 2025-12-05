@@ -35,7 +35,7 @@ pub struct RouteParam {
     pub name: String,
     /// Whether it's from Path or Query
     pub source: ParamSource,
-    /// Rust type (e.g. "Uuid", "i32", "Option<String>")
+    /// Rust type (e.g. `Uuid`, `i32`, `Option<String>`)
     pub ty: String,
 }
 

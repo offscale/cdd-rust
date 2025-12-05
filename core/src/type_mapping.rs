@@ -55,7 +55,7 @@ pub struct JsonSchema {
 
 /// Trait for converting Rust type strings to JSON Schemas.
 pub trait TypeMapper {
-    /// Maps a Rust type string (e.g., "Option<i32>") to a JSON Schema.
+    /// Maps a Rust type string (e.g., `Option<i32>`) to a JSON Schema.
     fn map(&self, rust_type: &str) -> AppResult<JsonSchema>;
 }
 
@@ -142,7 +142,7 @@ fn map_ast_type(ty: &ast::Type) -> AppResult<JsonSchema> {
     }
 }
 
-/// Helper to handle types like Option<T> or Vec<T>.
+/// Helper to handle types like `Option<T>` or `Vec<T>`.
 fn handle_generic_wrapper<F>(
     segment: ast::PathSegment,
     make_nullable: bool,
