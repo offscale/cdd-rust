@@ -7,10 +7,12 @@
 //! configuration function, wiring up generated handlers to specific API paths.
 //!
 //! It supports adding new routes to an existing configuration file ("Append" mode)
-//! by parsing the AST and injecting strictly typed service registration statements.
+//! by parsing the AST and injecting strictly typed service registration statements
+//! via the provided `BackendStrategy`.
 
 use crate::error::AppResult;
 use crate::oas::ParsedRoute;
+use crate::strategies::BackendStrategy;
 use ra_ap_edition::Edition;
 use ra_ap_syntax::ast::{self, HasName};
 use ra_ap_syntax::{AstNode, SourceFile, SyntaxKind};
@@ -20,14 +22,15 @@ use ra_ap_syntax::{AstNode, SourceFile, SyntaxKind};
 /// Designed to target a file like `src/http/routes.rs` containing a function signature:
 /// `pub fn config(cfg: &mut web::ServiceConfig) { ... }`
 ///
-/// This function uses a statement-based injection approach (`cfg.service(...);`)
-/// which is robust against existing code structure (chains vs standalone statements).
+/// This function uses a statement-based injection approach which is robust against
+/// existing code structure (chains vs standalone statements).
 ///
 /// # Arguments
 ///
 /// * `source` - Existing source code of the routes file.
 /// * `module_name` - The name of the module where handlers are located (e.g., "users" implies `crate::http::handlers::users`).
 /// * `routes` - List of routes to register.
+/// * `strategy` - The backend strategy to use for registration syntax.
 ///
 /// # Returns
 ///
@@ -36,11 +39,15 @@ pub fn register_routes(
     source: &str,
     module_name: &str,
     routes: &[ParsedRoute],
+    strategy: &impl BackendStrategy,
 ) -> AppResult<String> {
     let mut new_source = source.to_string();
     let is_new_file = source.trim().is_empty();
 
     // 1. Scaffold if empty
+    // Note: The scaffolding logic here currently defaults to Actix imports/signature.
+    // Ideally this should also be moved to the strategy trait, but for this refactor step
+    // we focus on decoupling the route registration logic.
     if is_new_file {
         new_source.push_str("use actix_web::web;\n");
         // We assume a standard project structure, but user can adjust imports if needed.
@@ -83,21 +90,8 @@ pub fn register_routes(
 
             // Check existence (simple string match avoids duplication)
             if !existing_code.contains(&full_handler_path) {
-                let method = route.method.to_lowercase(); // get, post...
-
-                // Construct the service call statement.
-                // We use explicit statement style `cfg.service(...);` to allow appending
-                // regardless of whether the previous line was a semicolon or a brace.
-                //
-                // Format:
-                // cfg.service(
-                //     web::resource("/path").route(web::get().to(handlers::mod::fn))
-                // );
-                let registration = format!(
-                    "\n    cfg.service(web::resource(\"{}\").route(web::{}().to({})));",
-                    route.path, method, full_handler_path
-                );
-
+                // Use strategy to generate the statement
+                let registration = strategy.route_registration_statement(route, &full_handler_path);
                 injection.push_str(&registration);
             }
         }
@@ -118,11 +112,13 @@ pub fn register_routes(
 mod tests {
     use super::*;
     use crate::oas::ParsedRoute;
+    use crate::strategies::ActixStrategy;
 
     #[test]
     fn test_scaffold_new_file() {
         let routes = vec![];
-        let code = register_routes("", "users", &routes).unwrap();
+        let strategy = ActixStrategy;
+        let code = register_routes("", "users", &routes, &strategy).unwrap();
         assert!(code.contains("pub fn config(cfg: &mut web::ServiceConfig)"));
         assert!(code.contains("use crate::http::handlers;"));
         // Should have empty body
@@ -147,7 +143,8 @@ use crate::http::handlers;
 pub fn config(cfg: &mut web::ServiceConfig) {
 }
 "#;
-        let code = register_routes(source, "users", &[parser_route]).unwrap();
+        let strategy = ActixStrategy;
+        let code = register_routes(source, "users", &[parser_route], &strategy).unwrap();
 
         // Expect: cfg.service(web::resource("/users").route(web::get().to(handlers::users::get_users)));
         assert!(code.contains("cfg.service(web::resource(\"/users\")"));
@@ -170,7 +167,8 @@ pub fn config(cfg: &mut web::ServiceConfig) {
     cfg.service(web::resource("/old").route(web::get().to(handlers::users::old_fn)));
 }
 "#;
-        let code = register_routes(source, "users", &[parser_route]).unwrap();
+        let strategy = ActixStrategy;
+        let code = register_routes(source, "users", &[parser_route], &strategy).unwrap();
 
         // Check that old code persists
         assert!(code.contains("handlers::users::old_fn"));
@@ -196,7 +194,8 @@ pub fn config(cfg: &mut web::ServiceConfig) {
     cfg.service(web::resource("/users").route(web::post().to(handlers::users::create_user)));
 }
 "#;
-        let code = register_routes(source, "users", &[parser_route]).unwrap();
+        let strategy = ActixStrategy;
+        let code = register_routes(source, "users", &[parser_route], &strategy).unwrap();
         // Should remain identical
         assert_eq!(code, source);
     }
@@ -219,7 +218,8 @@ pub fn config(cfg: &mut web::ServiceConfig) {
         };
 
         let source = "pub fn config(cfg: &mut web::ServiceConfig) { }";
-        let code = register_routes(source, "mod", &[r1, r2]).unwrap();
+        let strategy = ActixStrategy;
+        let code = register_routes(source, "mod", &[r1, r2], &strategy).unwrap();
 
         assert!(code.contains("handlers::mod::a"));
         assert!(code.contains("handlers::mod::b"));
@@ -229,7 +229,8 @@ pub fn config(cfg: &mut web::ServiceConfig) {
 
     #[test]
     fn test_missing_config_fn() {
-        let res = register_routes("fn other() {}", "mod", &[]);
+        let strategy = ActixStrategy;
+        let res = register_routes("fn other() {}", "mod", &[], &strategy);
         assert!(res.is_err());
         let err = res.unwrap_err();
         assert!(format!("{}", err).contains("Could not find 'config' function"));

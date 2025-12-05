@@ -4,13 +4,13 @@
 //!
 //! Implements the pipeline: DB -> Diesel -> Model -> Schema -> OpenAPI.
 //!
-//! 1. **DB -> Diesel -> Model**: Uses `dsync` to generate Rust structs from `schema.rs`.
+//! 1. **DB -> Diesel -> Model**: Uses `dsync` via the provided `ModelMapper`.
 //! 2. **Model -> Schema**: Processing generated models to inject `#[derive(ToSchema)]` and other attributes.
 //! 3. **Schema -> OpenAPI**: The resulting code is valid for `utoipa` OpenAPI generation at build/runtime.
 
+use crate::generator::ModelMapper;
 use cdd_core::patcher::add_derive;
 use cdd_core::{AppError, AppResult};
-use dsync::{GenerationConfig, GenerationConfigOpts, TableOptions};
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -32,12 +32,24 @@ pub struct SyncArgs {
 }
 
 /// Executes the sync pipeline.
-pub fn execute(args: &SyncArgs) -> AppResult<()> {
+///
+/// # Arguments
+///
+/// * `args` - Command arguments.
+/// * `mapper` - The strategy/mapper used to generate models (e.g. Diesel/dsync).
+pub fn execute(args: &SyncArgs, mapper: &impl ModelMapper) -> AppResult<()> {
     println!("Starting Sync Pipeline...");
 
-    // 1. DB -> Models (using dsync)
+    // 1. DB -> Models (using decoupled Mapper)
     if !args.no_gen {
-        generate_models(&args.schema_path, &args.model_dir)?;
+        println!(
+            "Generating models from {:?} into {:?}...",
+            args.schema_path, args.model_dir
+        );
+
+        mapper
+            .generate(&args.schema_path, &args.model_dir)
+            .map_err(|e| AppError::General(e.to_string()))?;
     } else {
         println!("Skipping model generation (--no-gen).");
     }
@@ -46,40 +58,6 @@ pub fn execute(args: &SyncArgs) -> AppResult<()> {
     process_models_for_openapi(&args.model_dir)?;
 
     println!("Sync Pipeline Completed successfully.");
-    Ok(())
-}
-
-/// Generates Rust structs from the Diesel schema using `dsync`.
-///
-/// Ref replicates the configuration from Item 1.3:
-/// - Disables CRUD function generation (data structs only).
-/// - Adds `diesel::prelude::*`.
-fn generate_models(schema_path: &Path, output_dir: &Path) -> AppResult<()> {
-    if !schema_path.exists() {
-        return Err(AppError::General(format!(
-            "Schema file not found at: {:?}",
-            schema_path
-        )));
-    }
-
-    println!(
-        "Generating models from {:?} into {:?}...",
-        schema_path, output_dir
-    );
-
-    // GenerationConfig does not implement Default, so we must construct it fully.
-    // connection_type is required, defaulting to PgConnection for typical use cases.
-    let config = GenerationConfig {
-        connection_type: String::from("diesel::pg::PgConnection"),
-        options: GenerationConfigOpts {
-            default_table_options: TableOptions::default().disable_fns(),
-            ..Default::default()
-        },
-    };
-
-    dsync::generate_files(schema_path, output_dir, config)
-        .map_err(|e| AppError::General(format!("dsync generation failed: {}", e)))?;
-
     Ok(())
 }
 
@@ -171,6 +149,8 @@ fn process_file(path: &Path) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Import DieselMapper for testing (or we could use a Mock)
+    use crate::generator::DieselMapper;
     use std::fs::File;
     use std::io::Write;
     use tempfile::tempdir;
@@ -222,7 +202,8 @@ pub struct User {
             no_gen: true,
         };
         // Expect error because model dir doesn't exist for processing
-        let res = execute(&args);
+        let mapper = DieselMapper;
+        let res = execute(&args, &mapper);
         assert!(res.is_err());
     }
 }
