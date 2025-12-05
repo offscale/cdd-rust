@@ -248,7 +248,7 @@ fn map_schema_to_rust_type(schema: &RefOr<Schema>, is_required: bool) -> AppResu
     let type_str = match schema {
         RefOr::Ref(r) => {
             let path = &r.ref_location;
-            path.split('/').last().unwrap_or("Unknown").to_string()
+            path.split('/').next_back().unwrap_or("Unknown").to_string()
         }
         RefOr::T(s) => match s {
             Schema::Object(obj) => match obj.schema_type {
@@ -310,7 +310,7 @@ fn to_snake_case(s: &str) -> String {
 
 fn derive_handler_name(method: &str, path: &str) -> String {
     // GET /users/{id} -> get_users_id
-    let clean_path = path.replace('{', "").replace('}', "").replace('/', "_");
+    let clean_path = path.replace(['{', '}'], "").replace('/', "_");
     format!(
         "{}_{}",
         method.to_lowercase(),

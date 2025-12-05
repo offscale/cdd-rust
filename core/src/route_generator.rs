@@ -56,7 +56,7 @@ pub fn register_routes(
         .syntax()
         .descendants()
         .find_map(ast::Fn::cast)
-        .filter(|f| f.name().map_or(false, |n| n.text() == "config"));
+        .filter(|f| f.name().is_some_and(|n| n.text() == "config"));
 
     if let Some(func) = config_fn {
         let body = func

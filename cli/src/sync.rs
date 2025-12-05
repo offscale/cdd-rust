@@ -108,8 +108,7 @@ fn process_models_for_openapi(model_dir: &Path) -> AppResult<()> {
 
         // Only process Rust files, skip mod.rs if we want (orphans usually valid, but typically we target struct files)
         // dsync generates mod.rs and table files.
-        if path.extension().map_or(false, |ext| ext == "rs")
-            && path.file_name().unwrap() != "mod.rs"
+        if path.extension().is_some_and(|ext| ext == "rs") && path.file_name().unwrap() != "mod.rs"
         {
             process_file(path)?;
         }
