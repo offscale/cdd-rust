@@ -32,7 +32,7 @@ graph TD
     DB[(Database)]:::navy
 
 %% Flow 0 & 1: Downward (Scaffold & Patch)
-    OpenAPI -->|"0. Scaffold (New) | 1. Patch (Existing)"| Handlers
+    OpenAPI -->|"0. Scaffold (New) |<br/> 1. Patch (Existing)"| Handlers
 
 %% Connection
     Handlers -- "Uses Strictly Typed Structs" --> Models
