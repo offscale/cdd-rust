@@ -24,7 +24,7 @@ use std::collections::BTreeSet;
 /// # Arguments
 ///
 /// * `name` - The name of the field (e.g., "email").
-/// * `ty` - The Rust type string (e.g., "String", "Option<i32>").
+/// * `ty` - The Rust type string (e.g., `String`, `Option<i32>`).
 /// * `pub_vis` - Whether the field should be public.
 /// * `indent_size` - Indentation level (spaces) for formatting context.
 ///
