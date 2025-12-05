@@ -97,7 +97,7 @@ pub fn generate_dtos(dtos: &[ParsedStruct]) -> String {
     imports.insert("use utoipa::ToSchema;".to_string());
 
     for dto in dtos {
-        collect_imports(&dto, &mut imports);
+        collect_imports(dto, &mut imports);
     }
 
     // 2. Write Imports
@@ -122,7 +122,7 @@ pub fn generate_dtos(dtos: &[ParsedStruct]) -> String {
 ///
 /// Useful for generating individual snippets or single-struct files.
 pub fn generate_dto(dto: &ParsedStruct) -> String {
-    generate_dtos(&[dto.clone()])
+    generate_dtos(std::slice::from_ref(dto))
 }
 
 /// Helper to generate the body of a single struct (without file-level imports).

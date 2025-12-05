@@ -101,7 +101,7 @@ pub fn extract_struct(code: &str, struct_name: &str) -> AppResult<ParsedStruct> 
         .syntax()
         .descendants()
         .find_map(|node| {
-            ast::Struct::cast(node).filter(|s| s.name().map_or(false, |n| n.text() == struct_name))
+            ast::Struct::cast(node).filter(|s| s.name().is_some_and(|n| n.text() == struct_name))
         })
         .ok_or_else(|| AppError::General(format!("Struct '{}' not found", struct_name)))?;
 
@@ -161,14 +161,12 @@ fn extract_doc_comment(node: &SyntaxNode) -> Option<String> {
     for child in node.children_with_tokens() {
         if child.kind() == SyntaxKind::COMMENT {
             let text = child.to_string();
-            if text.starts_with("///") {
-                let content = &text[3..];
-                let content = if content.starts_with(' ') {
-                    &content[1..]
+            if let Some(content) = text.strip_prefix("///") {
+                lines.push(if let Some(stripped) = text.strip_prefix(' ') {
+                    stripped.to_owned()
                 } else {
-                    content
-                };
-                lines.push(content.to_string());
+                    content.to_owned()
+                });
             }
         }
     }

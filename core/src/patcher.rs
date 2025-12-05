@@ -58,11 +58,9 @@ pub fn add_struct_field(
                 insert_pos = prev.text_range().start().into();
             }
         }
-    } else {
-        if let Some(prev) = r_curly.prev_token() {
-            if prev.kind() == SyntaxKind::WHITESPACE && prev.text().ends_with('\n') {
-                prefix_newline = false;
-            }
+    } else if let Some(prev) = r_curly.prev_token() {
+        if prev.kind() == SyntaxKind::WHITESPACE && prev.text().ends_with('\n') {
+            prefix_newline = false;
         }
     }
 
@@ -111,7 +109,7 @@ pub fn modify_struct_field_type(
 
     let field = field_list
         .fields()
-        .find(|f| f.name().map_or(false, |n| n.text() == field_name))
+        .find(|f| f.name().is_some_and(|n| n.text() == field_name))
         .ok_or_else(|| {
             AppError::General(format!(
                 "Field '{}' not found in struct '{}'",
@@ -169,7 +167,7 @@ pub fn add_derive(source: &str, struct_name: &str, derive_trait: &str) -> AppRes
         let patch = if needs_comma {
             format!(", {}", derive_trait)
         } else {
-            format!("{}", derive_trait)
+            derive_trait.to_string()
         };
 
         new_source.insert_str(insert_pos, &patch);
@@ -294,7 +292,7 @@ fn find_struct(file: &SourceFile, name: &str) -> AppResult<ast::Struct> {
     file.syntax()
         .descendants()
         .filter_map(ast::Struct::cast)
-        .find(|s| s.name().map_or(false, |n| n.text() == name))
+        .find(|s| s.name().is_some_and(|n| n.text() == name))
         .ok_or_else(|| AppError::General(format!("Struct '{}' not found in source file", name)))
 }
 
