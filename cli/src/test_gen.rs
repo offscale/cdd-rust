@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use cdd_core::contract_test_generator::generate_contract_tests_file;
 use cdd_core::oas::parse_openapi_routes;
+use cdd_core::strategies::BackendStrategy;
 use cdd_core::{AppError, AppResult};
 
 /// Arguments for the test generation command.
@@ -29,7 +30,12 @@ pub struct TestGenArgs {
 }
 
 /// Executes the test generation.
-pub fn execute(args: &TestGenArgs) -> AppResult<()> {
+///
+/// # Arguments
+///
+/// * `args` - Command arguments.
+/// * `strategy` - The backend strategy (e.g. Actix) used to generate code.
+pub fn execute(args: &TestGenArgs, strategy: &impl BackendStrategy) -> AppResult<()> {
     if !args.openapi_path.exists() {
         return Err(AppError::General(format!(
             "OpenAPI file not found: {:?}",
@@ -48,7 +54,7 @@ pub fn execute(args: &TestGenArgs) -> AppResult<()> {
     // Note: The generated test needs the RELATIVE path to openapi.yaml from the project root at runtime,
     // or absolute. We pass the string provided in args, assuming user runs `cargo test` from root.
     let openapi_str = args.openapi_path.to_string_lossy().to_string();
-    let code = generate_contract_tests_file(&routes, &openapi_str, &args.app_factory)?;
+    let code = generate_contract_tests_file(&routes, &openapi_str, &args.app_factory, strategy)?;
 
     // 4. Write File
     if let Some(parent) = args.output_path.parent() {

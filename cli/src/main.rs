@@ -8,9 +8,14 @@
 //! - `sync`: Pipeline DB -> Diesel -> Model -> Schema -> OpenAPI.
 //! - `test-gen`: Generates integration tests from OpenAPI specs.
 
+use cdd_core::strategies::ActixStrategy;
 use cdd_core::AppResult;
 use clap::{Parser, Subcommand};
 
+use crate::generator::DieselMapper;
+
+mod error;
+mod generator;
 mod sync;
 mod test_gen;
 
@@ -34,10 +39,14 @@ fn main() -> AppResult<()> {
 
     match &cli.command {
         Commands::Sync(args) => {
-            sync::execute(args)?;
+            // Injecting Diesel/dsync mapper
+            let mapper = DieselMapper;
+            sync::execute(args, &mapper)?;
         }
         Commands::TestGen(args) => {
-            test_gen::execute(args)?;
+            // Injecting Actix Web strategy
+            let strategy = ActixStrategy;
+            test_gen::execute(args, &strategy)?;
         }
     }
 

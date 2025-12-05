@@ -37,6 +37,9 @@ pub mod route_generator;
 /// Contract Test Generator Logic.
 pub mod contract_test_generator;
 
+/// Strategy Pattern Interfaces.
+pub mod strategies;
+
 pub use codegen::{generate_dto, make_record_field};
 pub use contract_test_generator::generate_contract_tests_file;
 pub use diff::{calculate_diff, Diff};
@@ -48,6 +51,7 @@ pub use parser::{
 };
 pub use patcher::{add_derive, add_struct_attribute, add_struct_field, modify_struct_field_type};
 pub use route_generator::register_routes;
+pub use strategies::{ActixStrategy, BackendStrategy};
 pub use type_mapping::{JsonSchema, JsonType, RustToJsonMapper, TypeMapper};
 
 /// A placeholder function to verify workspace setup.

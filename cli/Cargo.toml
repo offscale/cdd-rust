@@ -8,6 +8,7 @@ cdd-core = { path = "../core" }
 clap = { version = "4.4", features = ["derive"] }
 dsync = "0.1.0"
 walkdir = "2.5.0"
+derive_more = { version = "^2.1", features = ["from", "display"] }
 
 [dev-dependencies]
 tempfile = "3.8"

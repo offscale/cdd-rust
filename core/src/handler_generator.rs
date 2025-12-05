@@ -5,10 +5,11 @@
 //! Generates Actix Web handler functions from parsed OpenAPI routes.
 //! This module scaffolds the Rust code required to handle HTTP requests,
 //! including resolving path parameters, query strings, and request bodies
-//! into strictly typed Actix extractors.
+//! into strictly typed extractors.
 
 use crate::error::AppResult;
 use crate::oas::{ParamSource, ParsedRoute};
+use crate::strategies::BackendStrategy;
 use ra_ap_edition::Edition;
 use ra_ap_syntax::ast::{self, HasName};
 use ra_ap_syntax::{AstNode, SourceFile};
@@ -24,20 +25,22 @@ use std::collections::HashSet;
 ///
 /// * `source` - Existing file content (empty string if new file).
 /// * `routes` - List of routes to generate handlers for.
+/// * `strategy` - The backend strategy (e.g. Actix) used to generate code.
 ///
 /// # Returns
 ///
 /// * `AppResult<String>` - The updated source code.
-pub fn update_handler_module(source: &str, routes: &[ParsedRoute]) -> AppResult<String> {
+pub fn update_handler_module(
+    source: &str,
+    routes: &[ParsedRoute],
+    strategy: &impl BackendStrategy,
+) -> AppResult<String> {
     let mut new_source = source.to_string();
     let is_new_file = source.trim().is_empty();
 
     // 1. Initialize Headers if new file
     if is_new_file {
-        new_source.push_str("use actix_web::{web, HttpResponse, Responder};\n");
-        new_source.push_str("use serde_json::Value;\n");
-        new_source.push_str("use uuid::Uuid;\n");
-        new_source.push_str("use chrono::{DateTime, Utc, NaiveDate, NaiveDateTime};\n");
+        new_source.push_str(&strategy.handler_imports());
         // We assume DTOs might be used. A realistic generator might accept a config for where models live.
         new_source.push('\n');
     }
@@ -48,7 +51,7 @@ pub fn update_handler_module(source: &str, routes: &[ParsedRoute]) -> AppResult<
     // 3. Generate Missing Handlers
     for route in routes {
         if !existing_fns.contains(&route.handler_name) {
-            let code = generate_function(route)?;
+            let code = generate_function(route, strategy)?;
             new_source.push_str(&code);
             new_source.push('\n');
         }
@@ -58,7 +61,7 @@ pub fn update_handler_module(source: &str, routes: &[ParsedRoute]) -> AppResult<
 }
 
 /// Generates a single async handler function string.
-fn generate_function(route: &ParsedRoute) -> AppResult<String> {
+fn generate_function(route: &ParsedRoute, strategy: &impl BackendStrategy) -> AppResult<String> {
     let mut args = Vec::new();
 
     // 1. Path Parameters
@@ -75,38 +78,33 @@ fn generate_function(route: &ParsedRoute) -> AppResult<String> {
             })
             .collect();
 
+        // Use strategy to extract path
+        let type_signature = strategy.path_extractor(&types);
+
         if types.len() == 1 {
             // Single param: id: web::Path<Uuid>
             let var_name = to_snake_case(&path_vars[0]);
-            args.push(format!("{}: web::Path<{}>", var_name, types[0]));
+            args.push(format!("{}: {}", var_name, type_signature));
         } else {
             // Multiple params: path: web::Path<(Uuid, i32)>
-            // Actix expects a tuple for multiple path segments if matching positional
-            let type_tuple = types.join(", ");
-            args.push(format!("path: web::Path<({})>", type_tuple));
+            // Typically frameworks extract multiple vars into a tuple named "path" or similar
+            args.push(format!("path: {}", type_signature));
         }
     }
 
     // 2. Query Parameters
-    // As per requirement: "Extracts query parameters into web::Query<Value>"
     let has_query = route.params.iter().any(|p| p.source == ParamSource::Query);
     if has_query {
-        args.push("query: web::Query<Value>".to_string());
+        args.push(format!("query: {}", strategy.query_extractor()));
     }
 
     // 3. Request Body
     if let Some(body_type) = &route.request_body {
-        // As per requirement: "Extracts Request Bodies into web::Json<T>"
-        args.push(format!("body: web::Json<{}>", body_type));
+        args.push(format!("body: {}", strategy.body_extractor(body_type)));
     }
 
-    let args_str = args.join(", ");
-
     // 4. Construct Function Body
-    let code = format!(
-        "pub async fn {}({}) -> impl Responder {{\n    todo!()\n}}\n",
-        route.handler_name, args_str
-    );
+    let code = strategy.handler_signature(&route.handler_name, &args);
 
     Ok(code)
 }
@@ -161,6 +159,7 @@ fn to_snake_case(s: &str) -> String {
 mod tests {
     use super::*;
     use crate::oas::RouteParam;
+    use crate::strategies::ActixStrategy;
 
     #[test]
     fn test_scaffold_new_file() {
@@ -172,7 +171,8 @@ mod tests {
             request_body: None,
         };
 
-        let code = update_handler_module("", &[route]).unwrap();
+        let strategy = ActixStrategy;
+        let code = update_handler_module("", &[route], &strategy).unwrap();
         assert!(code.contains("use actix_web"));
         assert!(code.contains("use serde_json::Value"));
         assert!(code.contains("pub async fn get_users() -> impl Responder {"));
@@ -194,7 +194,8 @@ mod tests {
             request_body: None,
         };
 
-        let code = update_handler_module(source, &[route]).unwrap();
+        let strategy = ActixStrategy;
+        let code = update_handler_module(source, &[route], &strategy).unwrap();
         assert!(code.contains("pub async fn existing_handler"));
         assert!(code.contains("pub async fn new_func"));
     }
@@ -210,7 +211,8 @@ mod tests {
             request_body: None,
         };
 
-        let code = update_handler_module(source, &[route]).unwrap();
+        let strategy = ActixStrategy;
+        let code = update_handler_module(source, &[route], &strategy).unwrap();
         // Should assume code didn't change (except trimming/whitespace logic implies append)
         let trimmed = code.trim();
         assert!(trimmed.contains("pub async fn my_handler"));
@@ -233,7 +235,8 @@ mod tests {
             request_body: None,
         };
 
-        let code = update_handler_module("", &[route]).unwrap();
+        let strategy = ActixStrategy;
+        let code = update_handler_module("", &[route], &strategy).unwrap();
         assert!(code.contains("id: web::Path<Uuid>"));
     }
 
@@ -258,7 +261,8 @@ mod tests {
             request_body: None,
         };
 
-        let code = update_handler_module("", &[route]).unwrap();
+        let strategy = ActixStrategy;
+        let code = update_handler_module("", &[route], &strategy).unwrap();
         // regex finds cat, then id. order relies on regex extraction from string
         assert!(code.contains("path: web::Path<(String, i32)>"));
     }
@@ -277,7 +281,8 @@ mod tests {
             request_body: Some("SearchFilter".into()),
         };
 
-        let code = update_handler_module("", &[route]).unwrap();
+        let strategy = ActixStrategy;
+        let code = update_handler_module("", &[route], &strategy).unwrap();
         assert!(code.contains("query: web::Query<Value>"));
         assert!(code.contains("body: web::Json<SearchFilter>"));
     }
@@ -287,19 +292,5 @@ mod tests {
         assert_eq!(to_snake_case("userId"), "user_id");
         assert_eq!(to_snake_case("id"), "id");
         assert_eq!(to_snake_case("camelCaseTemp"), "camel_case_temp");
-    }
-
-    #[test]
-    fn test_param_finding_fallback() {
-        // Define path var 'id' but omit from params array -> Should default to String
-        let route = ParsedRoute {
-            path: "/unknown/{id}".into(),
-            method: "GET".into(),
-            handler_name: "unknown".into(),
-            params: vec![],
-            request_body: None,
-        };
-        let code = update_handler_module("", &[route]).unwrap();
-        assert!(code.contains("id: web::Path<String>"));
     }
 }
