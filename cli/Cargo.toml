@@ -1,0 +1,13 @@
+[package]
+name = "cdd-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cdd-core = { path = "../core" }
+clap = { version = "4.4", features = ["derive"] }
+dsync = "0.1.0"
+walkdir = "2.5.0"
+
+[dev-dependencies]
+tempfile = "3.8"

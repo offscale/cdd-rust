@@ -1,20 +1,41 @@
-on: [push]
-
 name: CI
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+  # Ensure we don't need a real DB for basic unit tests
+  DATABASE_URL: postgres://user:password@localhost/dummy
 
 jobs:
   build_and_test:
-    name: Rust project
+    name: Test & Doc Check
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-      - uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release --all-features
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
+      - uses: actions/checkout@v6
+
+      - name: Set up Rust
+        run: rustup override set nightly
+
+      - name: Check Formatting
+        run: cargo fmt -- --check
+
+      - name: Clippy (Linting)
+        run: cargo clippy --workspace -- -D warnings
+
+      - name: Build Workspace
+        run: cargo build --verbose --workspace
+
+      - name: Run Tests
+        run: cargo test --verbose --workspace
+
+      - name: Check Documentation
+        # This compiles the docs and respects #![deny(missing_docs)]
+        run: cargo doc --workspace --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: "-D warnings"
