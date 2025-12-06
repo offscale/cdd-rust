@@ -137,6 +137,7 @@ mod tests {
             security: vec![],
             response_type: None,
             kind: RouteKind::Path,
+            callbacks: vec![],
         };
 
         // Simulating a fresh file scaffolded content
@@ -166,6 +167,7 @@ pub fn config(cfg: &mut web::ServiceConfig) {
             security: vec![],
             response_type: None,
             kind: RouteKind::Path,
+            callbacks: vec![],
         };
 
         // Existing file has one route already with a semicolon
@@ -196,6 +198,7 @@ pub fn config(cfg: &mut web::ServiceConfig) {
             security: vec![],
             response_type: None,
             kind: RouteKind::Path,
+            callbacks: vec![],
         };
 
         // Simulation: Route already exists
@@ -221,6 +224,7 @@ pub fn config(cfg: &mut web::ServiceConfig) {
             security: vec![],
             response_type: None,
             kind: RouteKind::Path,
+            callbacks: vec![],
         };
         let r2 = ParsedRoute {
             path: "/b".into(),
@@ -231,6 +235,7 @@ pub fn config(cfg: &mut web::ServiceConfig) {
             security: vec![],
             response_type: None,
             kind: RouteKind::Path,
+            callbacks: vec![],
         };
 
         let source = "pub fn config(cfg: &mut web::ServiceConfig) { }";

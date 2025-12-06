@@ -1,3 +1,5 @@
+#![deny(missing_docs)]
+
 //! # Extraction Logic
 //!
 //! High-level functions to parse Rust code into IR models.
@@ -130,14 +132,12 @@ fn parse_enum_node(enum_def: ast::Enum, name: &str) -> AppResult<ParsedEnum> {
                 let mut vty = None;
 
                 // Handle single item tuple variants: Variant(Type)
-                if let Some(fl) = variant.field_list() {
-                    if let ast::FieldList::TupleFieldList(tfl) = fl {
-                        // We strictly support polymorphism which wraps the subtype.
-                        // So we look for exactly one field.
-                        if let Some(first) = tfl.fields().next() {
-                            if let Some(ty) = first.ty() {
-                                vty = Some(ty.syntax().text().to_string());
-                            }
+                if let Some(ast::FieldList::TupleFieldList(tfl)) = variant.field_list() {
+                    // We strictly support polymorphism which wraps the subtype.
+                    // So we look for exactly one field.
+                    if let Some(first) = tfl.fields().next() {
+                        if let Some(ty) = first.ty() {
+                            vty = Some(ty.syntax().text().to_string());
                         }
                     }
                 }
@@ -147,6 +147,7 @@ fn parse_enum_node(enum_def: ast::Enum, name: &str) -> AppResult<ParsedEnum> {
                     ty: vty,
                     description: extract_doc_comment(variant.syntax()),
                     rename: vattrs.rename,
+                    aliases: None, // Aliases parsing not yet implemented in AST reader
                 });
             }
         }

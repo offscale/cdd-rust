@@ -40,8 +40,10 @@ pub struct ParsedVariant {
     pub ty: Option<String>,
     /// Doc comments.
     pub description: Option<String>,
-    /// Serde rename.
+    /// Serde rename (primary identifier).
     pub rename: Option<String>,
+    /// Serde aliases (alternative identifiers).
+    pub aliases: Option<Vec<String>>,
 }
 
 /// Represents a fully parsed enum.

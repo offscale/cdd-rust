@@ -229,12 +229,14 @@ mod tests {
                     ty: Some("CatInfo".into()),
                     description: None,
                     rename: None,
+                    aliases: None,
                 },
                 ParsedVariant {
                     name: "Dog".into(),
                     ty: Some("DogInfo".into()),
                     description: None,
                     rename: None,
+                    aliases: None,
                 },
             ],
         };

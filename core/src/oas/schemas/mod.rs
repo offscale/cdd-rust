@@ -10,12 +10,16 @@
 //! - Handle `oneOf` and `anyOf` polymorphism.
 //! - Resolve `Ref` pointers within the schema scope.
 
+pub mod enums;
+pub mod refs;
+pub mod structs;
+
 use crate::error::{AppError, AppResult};
-use crate::oas::resolver::map_schema_to_rust_type;
-use crate::parser::{ParsedEnum, ParsedField, ParsedModel, ParsedStruct, ParsedVariant};
-use std::collections::HashSet;
-use utoipa::openapi::schema::{Schema, SchemaType, Type};
-use utoipa::openapi::{Components, OpenApi, RefOr};
+use crate::oas::schemas::enums::parse_variants;
+use crate::oas::schemas::refs::resolve_ref_local;
+use crate::oas::schemas::structs::flatten_schema_fields;
+use crate::parser::{ParsedEnum, ParsedModel, ParsedStruct};
+use utoipa::openapi::{schema::Schema, OpenApi};
 
 /// Parses a raw OpenAPI YAML string and extracts definitions.
 ///
@@ -111,181 +115,6 @@ pub fn parse_openapi_spec(yaml_content: &str) -> AppResult<Vec<ParsedModel>> {
     }
 
     Ok(models)
-}
-
-/// Helpers to extract variants from RefOr list (used by OneOf and AnyOf)
-fn parse_variants(
-    items: &[RefOr<Schema>],
-    mapping: Option<&std::collections::BTreeMap<String, String>>,
-) -> Vec<ParsedVariant> {
-    let mut variants = Vec::new();
-
-    for item in items {
-        let variant_ref_name = match item {
-            RefOr::Ref(r) => extract_ref_name(&r.ref_location),
-            RefOr::T(_) => "AnonymousVariant".to_string(),
-        };
-
-        // By default, variant name matches the referenced component name
-        let variant_name = variant_ref_name.clone();
-
-        // Map the discriminator value to this variant if a 'mapping' exists in spec.
-        let mut rename = None;
-        if let Some(map) = mapping {
-            // Reverse lookup: Find Key where Value corresponds to this schema.
-            // The mapping value is a Ref string (e.g. "#/components/schemas/Dog").
-            for (mapped_key, mapped_ref) in map {
-                let mapped_target = extract_ref_name(mapped_ref);
-                if mapped_target == variant_ref_name {
-                    rename = Some(mapped_key.clone());
-                    break;
-                }
-            }
-        }
-
-        let type_name = if let RefOr::Ref(_) = item {
-            Some(variant_name.clone())
-        } else {
-            // Inline schema in OneOf/AnyOf - try to map to basic type or Value
-            match item {
-                RefOr::T(s) => match map_schema_to_rust_type(&RefOr::T(s.clone()), true) {
-                    Ok(t) => Some(t),
-                    Err(_) => Some("serde_json::Value".to_string()),
-                },
-                _ => None,
-            }
-        };
-
-        variants.push(ParsedVariant {
-            name: variant_name,
-            ty: type_name,
-            description: None,
-            rename,
-        });
-    }
-    variants
-}
-
-/// Recursively gathers fields from a schema, handling `allOf` flattening and `Ref` lookup.
-fn flatten_schema_fields(
-    root_schema: &Schema,
-    components: &Components,
-) -> AppResult<Vec<ParsedField>> {
-    // Use Vec to preserve order, handle overrides manually
-    let mut fields: Vec<ParsedField> = Vec::new();
-    let mut visited_refs = HashSet::new();
-
-    collect_fields_recursive(root_schema, components, &mut fields, &mut visited_refs)?;
-
-    Ok(fields)
-}
-
-/// Helper for recursive field merging.
-///
-/// Logic:
-/// - If `Object`: extract properties. Check if field already exists in accumulator; if so, replace it (override).
-/// - If `AllOf`: recursively collect for all items. Rules of overrides apply sequentially.
-fn collect_fields_recursive(
-    schema: &Schema,
-    components: &Components,
-    fields: &mut Vec<ParsedField>,
-    visited: &mut HashSet<String>,
-) -> AppResult<()> {
-    match schema {
-        Schema::Object(obj) => {
-            // Check type. If it's valid object or unspecified (inference), read properties.
-            if matches!(obj.schema_type, SchemaType::Type(Type::Object))
-                || obj.schema_type == SchemaType::AnyValue
-            {
-                for (field_name, field_schema) in &obj.properties {
-                    let is_required = obj.required.contains(field_name);
-                    let rust_type = map_schema_to_rust_type(field_schema, is_required)?;
-
-                    let description = match field_schema {
-                        RefOr::T(Schema::Object(o)) => o.description.clone(),
-                        RefOr::T(Schema::AllOf(a)) => a.description.clone(),
-                        _ => None,
-                    };
-
-                    let field = ParsedField {
-                        name: field_name.clone(),
-                        ty: rust_type,
-                        description,
-                        rename: None,
-                        is_skipped: false,
-                    };
-
-                    // Upsert mechanism to handle overrides
-                    if let Some(idx) = fields.iter().position(|f| f.name == *field_name) {
-                        fields[idx] = field;
-                    } else {
-                        fields.push(field);
-                    }
-                }
-            }
-        }
-        Schema::AllOf(all_of) => {
-            // Iterate items and merge
-            for item in &all_of.items {
-                match item {
-                    RefOr::T(s) => collect_fields_recursive(s, components, fields, visited)?,
-                    RefOr::Ref(r) => {
-                        let ref_name = extract_ref_name(&r.ref_location);
-
-                        // Cycle detection
-                        if visited.contains(&ref_name) {
-                            continue; // Skip cycle
-                        }
-                        visited.insert(ref_name.clone());
-
-                        if let Some(resolved) = resolve_ref_name(&ref_name, components) {
-                            collect_fields_recursive(resolved, components, fields, visited)?;
-                        }
-
-                        visited.remove(&ref_name);
-                    }
-                }
-            }
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-/// Resolves a `RefOr` to a `Schema` against `components`.
-/// Only resolves one level deep to avoid infinite recursion loops in logic outside `collect_fields`.
-fn resolve_ref_local<'a>(
-    ref_or: &'a RefOr<Schema>,
-    components: &'a Components,
-) -> Option<&'a Schema> {
-    match ref_or {
-        RefOr::T(s) => Some(s),
-        RefOr::Ref(r) => {
-            let name = extract_ref_name(&r.ref_location);
-            resolve_ref_name(&name, components)
-        }
-    }
-}
-
-/// Resolves a schema name (simple string) to a Schema object in components.
-fn resolve_ref_name<'a>(name: &str, components: &'a Components) -> Option<&'a Schema> {
-    components
-        .schemas
-        .get(name)
-        .and_then(|ref_or| match ref_or {
-            RefOr::T(s) => Some(s),
-            RefOr::Ref(_) => None, // Double ref resolution avoided for simplicity
-        })
-}
-
-/// Extracts the simple name from a reference string.
-/// e.g. `#/components/schemas/User` -> `User`
-fn extract_ref_name(ref_loc: &str) -> String {
-    ref_loc
-        .split('/')
-        .next_back()
-        .unwrap_or("Unknown")
-        .to_string()
 }
 
 #[cfg(test)]
