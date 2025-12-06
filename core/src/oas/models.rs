@@ -85,8 +85,7 @@ pub enum BodyFormat {
 }
 
 /// Parameter serialization style as defined in RFC 6570 and OpenAPI 3.x.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ParamStyle {
     /// Path-style parameters defined by RFC6570 (matrix).
     Matrix,
