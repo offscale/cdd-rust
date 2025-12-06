@@ -195,6 +195,12 @@ fn generate_enum_body(en: &ParsedEnum) -> String {
             code.push_str(&format!("    #[serde(rename = \"{}\")]\n", r));
         }
 
+        if let Some(aliases) = &variant.aliases {
+            for alias in aliases {
+                code.push_str(&format!("    #[serde(alias = \"{}\")]\n", alias));
+            }
+        }
+
         if let Some(ty) = &variant.ty {
             code.push_str(&format!("    {}({}),\n", variant.name, ty));
         } else {
@@ -277,12 +283,14 @@ mod tests {
                     ty: Some("CatInfo".into()),
                     description: None,
                     rename: Some("cat".into()),
+                    aliases: Some(vec!["kitty".into()]),
                 },
                 ParsedVariant {
                     name: "Dog".into(),
                     ty: Some("DogInfo".into()),
                     description: None,
                     rename: Some("dog".into()),
+                    aliases: None,
                 },
             ],
         };
@@ -291,6 +299,7 @@ mod tests {
         assert!(code.contains("pub enum Pet"));
         assert!(code.contains("#[serde(tag = \"type\")]"));
         assert!(code.contains("    #[serde(rename = \"cat\")]"));
+        assert!(code.contains("    #[serde(alias = \"kitty\")]"));
         assert!(code.contains("    Cat(CatInfo),"));
     }
 

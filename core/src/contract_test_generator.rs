@@ -166,11 +166,15 @@ mod tests {
                 name: "id".into(),
                 source: ParamSource::Path,
                 ty: "Uuid".into(),
+                style: None,
+                explode: false,
+                allow_reserved: false,
             }],
             request_body: None,
             security: vec![],
             response_type: None,
             kind: RouteKind::Path,
+            callbacks: vec![],
         }];
 
         let strategy = ActixStrategy;
@@ -204,17 +208,24 @@ mod tests {
                     name: "q".into(),
                     source: ParamSource::Query,
                     ty: "String".into(),
+                    style: None,
+                    explode: false,
+                    allow_reserved: false,
                 },
                 crate::oas::RouteParam {
                     name: "page".into(),
                     source: ParamSource::Query,
                     ty: "i32".into(),
+                    style: None,
+                    explode: false,
+                    allow_reserved: false,
                 },
             ],
             request_body: None,
             security: vec![],
             response_type: None,
             kind: RouteKind::Path,
+            callbacks: vec![],
         }];
 
         let strategy = ActixStrategy;
@@ -237,6 +248,7 @@ mod tests {
             security: vec![],
             response_type: None,
             kind: RouteKind::Path,
+            callbacks: vec![],
         }];
 
         let strategy = ActixStrategy;

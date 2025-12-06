@@ -1,3 +1,7 @@
+#![deny(missing_docs)]
+
+//! # OpenAPI Models
+//!
 //! definitions for Intermediate Representation of OpenAPI elements.
 //!
 //! These structs are used to transport parsed data from the YAML spec
@@ -32,6 +36,23 @@ pub struct ParsedRoute {
     pub response_type: Option<String>,
     /// The classification of this route.
     pub kind: RouteKind,
+    /// Callback definitions attached to this route (OAS 3.0+).
+    pub callbacks: Vec<ParsedCallback>,
+}
+
+/// Represents a callback definition (outgoing webhook).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedCallback {
+    /// The callback name (key in the callbacks map).
+    pub name: String,
+    /// The runtime expression URL (e.g. "{$request.query.callbackUrl}").
+    pub expression: String,
+    /// The HTTP method for the callback request.
+    pub method: String,
+    /// The expected body sent in the callback (if any).
+    pub request_body: Option<RequestBodyDefinition>,
+    /// The expected response type from the callback receiver.
+    pub response_type: Option<String>,
 }
 
 /// A single security requirement (AND logic).
@@ -63,6 +84,29 @@ pub enum BodyFormat {
     Multipart,
 }
 
+/// Parameter serialization style as defined in RFC 6570 and OpenAPI 3.x.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default)]
+pub enum ParamStyle {
+    /// Path-style parameters defined by RFC6570 (matrix).
+    Matrix,
+    /// Label style parameters defined by RFC6570 (label).
+    Label,
+    /// Form style parameters defined by RFC6570 (form).
+    /// Standard for query (e.g. `id=5&name=foo`) and cookie.
+    Form,
+    /// Simple style parameters defined by RFC6570 (simple).
+    /// Standard for path (e.g. `/users/5,6,7`) and header.
+    #[default]
+    Simple,
+    /// Space separated array values (e.g. `key=a b c`).
+    SpaceDelimited,
+    /// Pipe separated array values (e.g. `key=a|b|c`).
+    PipeDelimited,
+    /// Deep object serialization (e.g. `key[prop]=val`).
+    DeepObject,
+}
+
 /// Represents a parameter in a route (Path, Query, Header, Cookie).
 #[derive(Debug, Clone, PartialEq)]
 pub struct RouteParam {
@@ -72,6 +116,12 @@ pub struct RouteParam {
     pub source: ParamSource,
     /// Rust type (e.g. `Uuid`, `i32`, `Option<String>`)
     pub ty: String,
+    /// Serialization style (e.g. Form, Simple).
+    pub style: Option<ParamStyle>,
+    /// Whether arrays/objects generate separate parameters.
+    pub explode: bool,
+    /// Whether reserved characters (RFC3986) are allowed.
+    pub allow_reserved: bool,
 }
 
 /// The source location of a parameter.
