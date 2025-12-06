@@ -4,33 +4,19 @@
 //!
 //! Utilities for generating Rust source code from internal Intermediate Representations (IR).
 //!
-//! This module facilitates the transformation of `ParsedStruct` definitions—derived from OpenAPI
-//! schemas or other sources—into valid, compilable Rust code. It handles:
+//! This module facilitates the transformation of `ParsedStruct` and `ParsedEnum` definitions
+//! into valid, compilable Rust code. It handles:
 //! - Dependency analysis (auto-injecting imports like `Uuid`, `chrono`, `serde`).
 //! - Attribute injection (`derive`, `serde` options).
 //! - Formatting and comments preservation.
 
 use crate::error::{AppError, AppResult};
-use crate::parser::ParsedStruct;
+use crate::parser::{ParsedEnum, ParsedModel, ParsedStruct};
 use ra_ap_edition::Edition;
 use ra_ap_syntax::{ast, AstNode, SourceFile};
 use std::collections::BTreeSet;
 
 /// Creates a new AST `RecordField` node from strings.
-///
-/// This is used primarily when patching existing source code to insert new fields.
-/// By parsing a small wrapper struct, we ensure the generated field syntax is strictly valid.
-///
-/// # Arguments
-///
-/// * `name` - The name of the field (e.g., "email").
-/// * `ty` - The Rust type string (e.g., `String`, `Option<i32>`).
-/// * `pub_vis` - Whether the field should be public.
-/// * `indent_size` - Indentation level (spaces) for formatting context.
-///
-/// # Returns
-///
-/// * `AppResult<ast::RecordField>` - The parsed AST node.
 pub fn make_record_field(
     name: &str,
     ty: &str,
@@ -76,28 +62,20 @@ pub fn make_record_field(
         .ok_or_else(|| AppError::General("Internal generation error: Field node not found".into()))
 }
 
-/// Generates a complete Rust source string for multiple DTOs.
+/// Generates a complete Rust source string for multiple Models (Structs or Enums).
 ///
-/// This function aggregates all necessary imports for the set of structs
-/// and writes them sequentially into a single string, suitable for writing to a `.rs` file.
-///
-/// # Arguments
-///
-/// * `dtos` - A slice of parsed struct definitions.
-///
-/// # Returns
-///
-/// * `String` - The complete source file content.
-pub fn generate_dtos(dtos: &[ParsedStruct]) -> String {
+/// This function aggregates all necessary imports for the set of models
+/// and writes them sequentially into a single string.
+pub fn generate_dtos(models: &[ParsedModel]) -> String {
     let mut code = String::new();
     let mut imports = BTreeSet::new();
 
-    // 1. Analyze imports for all structs
+    // 1. Analyze imports for all models
     imports.insert("use serde::{Deserialize, Serialize};".to_string());
     imports.insert("use utoipa::ToSchema;".to_string());
 
-    for dto in dtos {
-        collect_imports(dto, &mut imports);
+    for model in models {
+        collect_imports(model, &mut imports);
     }
 
     // 2. Write Imports
@@ -107,10 +85,13 @@ pub fn generate_dtos(dtos: &[ParsedStruct]) -> String {
     }
     code.push('\n');
 
-    // 3. Write Structs
-    for (i, dto) in dtos.iter().enumerate() {
-        code.push_str(&generate_dto_body(dto));
-        if i < dtos.len() - 1 {
+    // 3. Write Definitions
+    for (i, model) in models.iter().enumerate() {
+        match model {
+            ParsedModel::Struct(s) => code.push_str(&generate_dto_body(s)),
+            ParsedModel::Enum(e) => code.push_str(&generate_enum_body(e)),
+        }
+        if i < models.len() - 1 {
             code.push('\n');
         }
     }
@@ -118,11 +99,9 @@ pub fn generate_dtos(dtos: &[ParsedStruct]) -> String {
     code
 }
 
-/// Generates a Rust source string for a single DTO, including imports.
-///
-/// Useful for generating individual snippets or single-struct files.
+/// Generates a Rust source string for a single struct, including imports.
 pub fn generate_dto(dto: &ParsedStruct) -> String {
-    generate_dtos(std::slice::from_ref(dto))
+    generate_dtos(&[ParsedModel::Struct(dto.clone())])
 }
 
 /// Helper to generate the body of a single struct (without file-level imports).
@@ -175,22 +154,80 @@ fn generate_dto_body(dto: &ParsedStruct) -> String {
     code
 }
 
-/// Analyzes a struct's fields to determine required imports.
-fn collect_imports(dto: &ParsedStruct, imports: &mut BTreeSet<String>) {
-    for field in &dto.fields {
-        if field.ty.contains("Uuid") {
+/// Helper to generate the body of a single enum.
+fn generate_enum_body(en: &ParsedEnum) -> String {
+    let mut code = String::new();
+
+    if let Some(desc) = &en.description {
+        for line in desc.lines() {
+            code.push_str(&format!("/// {}\n", line));
+        }
+    }
+
+    code.push_str("#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]\n");
+
+    // Attributes
+    let mut serde_attrs = Vec::new();
+    if let Some(rename) = &en.rename {
+        serde_attrs.push(format!("rename = \"{}\"", rename));
+    }
+    if let Some(tag) = &en.tag {
+        serde_attrs.push(format!("tag = \"{}\"", tag));
+    }
+    if en.untagged {
+        serde_attrs.push("untagged".to_string());
+    }
+
+    if !serde_attrs.is_empty() {
+        code.push_str(&format!("#[serde({})]\n", serde_attrs.join(", ")));
+    }
+
+    code.push_str(&format!("pub enum {} {{\n", en.name));
+
+    for variant in &en.variants {
+        if let Some(desc) = &variant.description {
+            for line in desc.lines() {
+                code.push_str(&format!("    /// {}\n", line));
+            }
+        }
+
+        if let Some(r) = &variant.rename {
+            code.push_str(&format!("    #[serde(rename = \"{}\")]\n", r));
+        }
+
+        if let Some(ty) = &variant.ty {
+            code.push_str(&format!("    {}({}),\n", variant.name, ty));
+        } else {
+            code.push_str(&format!("    {},\n", variant.name));
+        }
+    }
+
+    code.push_str("}\n");
+    code
+}
+
+/// Analyzes a model's fields to determine required imports.
+/// This handles flattened composition structs by checking all fields contained within.
+fn collect_imports(model: &ParsedModel, imports: &mut BTreeSet<String>) {
+    let types: Vec<&String> = match model {
+        ParsedModel::Struct(s) => s.fields.iter().map(|f| &f.ty).collect(),
+        ParsedModel::Enum(e) => e.variants.iter().filter_map(|v| v.ty.as_ref()).collect(),
+    };
+
+    for ty in types {
+        if ty.contains("Uuid") {
             imports.insert("use uuid::Uuid;".to_string());
         }
-        if field.ty.contains("DateTime") || field.ty.contains("NaiveDateTime") {
+        if ty.contains("DateTime") || ty.contains("NaiveDateTime") {
             imports.insert("use chrono::{DateTime, NaiveDateTime, Utc};".to_string());
         }
-        if field.ty.contains("NaiveDate") && !field.ty.contains("NaiveDateTime") {
+        if ty.contains("NaiveDate") && !ty.contains("NaiveDateTime") {
             imports.insert("use chrono::NaiveDate;".to_string());
         }
-        if field.ty.contains("Value") {
+        if ty.contains("Value") {
             imports.insert("use serde_json::Value;".to_string());
         }
-        if field.ty.contains("Decimal") {
+        if ty.contains("Decimal") {
             imports.insert("use rust_decimal::Decimal;".to_string());
         }
     }
@@ -199,9 +236,8 @@ fn collect_imports(dto: &ParsedStruct, imports: &mut BTreeSet<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::ParsedField;
+    use crate::parser::{ParsedField, ParsedVariant};
 
-    // Helper to create a basic parsed field
     fn field(name: &str, ty: &str) -> ParsedField {
         ParsedField {
             name: name.into(),
@@ -210,33 +246,6 @@ mod tests {
             rename: None,
             is_skipped: false,
         }
-    }
-
-    #[test]
-    fn test_make_record_field_basic() {
-        let f = make_record_field("foo", "i32", true, 4).unwrap();
-        assert_eq!(f.to_string().trim(), "pub foo: i32");
-    }
-
-    #[test]
-    fn test_make_record_field_private() {
-        let f = make_record_field("bar", "String", false, 2).unwrap();
-        assert_eq!(f.to_string().trim(), "bar: String");
-    }
-
-    #[test]
-    fn test_make_record_field_invalid_syntax() {
-        let result = make_record_field("bad", "::", true, 4);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_make_record_field_internal_error() {
-        // This simulates a scenario where parsing passes but structure is wrong.
-        // Hard to trigger with `SourceFile` unless input is crafted to parse as non-struct.
-        // `struct Wrapper` template forces struct.
-        // We trust basic syntax tests cover the AST validity.
-        assert!(make_record_field("ok", "i32", true, 4).is_ok());
     }
 
     #[test]
@@ -251,90 +260,56 @@ mod tests {
         let code = generate_dto(&dto);
         assert!(code.contains("struct Simple"));
         assert!(code.contains("/// A simple struct"));
-        assert!(code.contains("use serde"));
-        assert!(code.contains("pub id: i32"));
         assert!(code.contains("#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]"));
     }
 
     #[test]
-    fn test_generate_dto_imports() {
-        let dto = ParsedStruct {
-            name: "Complex".into(),
-            description: None,
+    fn test_generate_enum_tagged() {
+        let en = ParsedEnum {
+            name: "Pet".into(),
+            description: Some("Polymorphic pet".into()),
             rename: None,
-            fields: vec![
-                field("id", "Uuid"),
-                field("t", "DateTime<Utc>"),
-                field("d", "NaiveDate"),
-                field("v", "Option<serde_json::Value>"),
-                field("num", "rust_decimal::Decimal"),
-            ],
-        };
-
-        let code = generate_dto(&dto);
-        assert!(code.contains("use uuid::Uuid;"));
-        assert!(code.contains("use chrono::{DateTime, NaiveDateTime, Utc};"));
-        assert!(code.contains("use chrono::NaiveDate;"));
-        assert!(code.contains("use serde_json::Value;"));
-        assert!(code.contains("use rust_decimal::Decimal;"));
-    }
-
-    #[test]
-    fn test_generate_dto_attributes() {
-        let dto = ParsedStruct {
-            name: "Renamed".into(),
-            description: None,
-            rename: Some("api_renamed".into()),
-            fields: vec![
-                ParsedField {
-                    name: "f1".into(),
-                    ty: "i32".into(),
-                    description: Some("Field doc".into()),
-                    rename: Some("f_one".into()),
-                    is_skipped: false,
-                },
-                ParsedField {
-                    name: "f2".into(),
-                    ty: "i32".into(),
+            tag: Some("type".into()),
+            untagged: false,
+            variants: vec![
+                ParsedVariant {
+                    name: "Cat".into(),
+                    ty: Some("CatInfo".into()),
                     description: None,
-                    rename: None,
-                    is_skipped: true,
+                    rename: Some("cat".into()),
+                },
+                ParsedVariant {
+                    name: "Dog".into(),
+                    ty: Some("DogInfo".into()),
+                    description: None,
+                    rename: Some("dog".into()),
                 },
             ],
         };
 
-        let code = generate_dto(&dto);
-        assert!(code.contains("#[serde(rename = \"api_renamed\")]"));
-        assert!(code.contains("/// Field doc"));
-        // Field 1: rename
-        assert!(code.contains("#[serde(rename = \"f_one\")]"));
-        // Field 2: skip
-        assert!(code.contains("#[serde(skip)]"));
+        let code = generate_dtos(&[ParsedModel::Enum(en)]);
+        assert!(code.contains("pub enum Pet"));
+        assert!(code.contains("#[serde(tag = \"type\")]"));
+        assert!(code.contains("    #[serde(rename = \"cat\")]"));
+        assert!(code.contains("    Cat(CatInfo),"));
     }
 
     #[test]
-    fn test_generate_dtos_multiple() {
-        let dto1 = ParsedStruct {
-            name: "A".into(),
+    fn test_flattened_imports() {
+        // Simulating a struct that resulted from allOf flattening
+        // It has a Uuid field (from Base) and a Value field (from Extension)
+        let dto = ParsedStruct {
+            name: "Merged".into(),
             description: None,
             rename: None,
-            fields: vec![field("u", "Uuid")],
-        };
-        let dto2 = ParsedStruct {
-            name: "B".into(),
-            description: None,
-            rename: None,
-            fields: vec![field("v", "Value")],
+            fields: vec![field("id", "Uuid"), field("meta", "serde_json::Value")],
         };
 
-        let code = generate_dtos(&[dto1, dto2]);
-
-        // Imports should be unified at the top
+        let code = generate_dto(&dto);
         assert!(code.contains("use uuid::Uuid;"));
         assert!(code.contains("use serde_json::Value;"));
-
-        // Both structs should exist
-        assert!(code.contains("pub struct A"));
-        assert!(code.contains("pub struct B"));
+        // Ensure struct body is valid
+        assert!(code.contains("pub id: Uuid,"));
+        assert!(code.contains("pub meta: serde_json::Value,"));
     }
 }

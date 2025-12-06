@@ -5,6 +5,7 @@
 //! Defines the `BackendStrategy` trait and implementations (e.g. `ActixStrategy`)
 //! to allow generating code for different web frameworks.
 
+use crate::oas::models::SecurityRequirement;
 use crate::oas::ParsedRoute;
 
 /// A strategy trait for decoupling framework-specific code generation.
@@ -24,7 +25,13 @@ pub trait BackendStrategy {
     ///
     /// * `func_name` - The name of the function.
     /// * `args` - A list of argument declaration strings (e.g. `id: web::Path<Uuid>`).
-    fn handler_signature(&self, func_name: &str, args: &[String]) -> String;
+    /// * `response_type` - The specific return type if identified (e.g. `UserResponse`).
+    fn handler_signature(
+        &self,
+        func_name: &str,
+        args: &[String],
+        response_type: Option<&str>,
+    ) -> String;
 
     /// Generates the type string for path parameter extraction.
     ///
@@ -36,12 +43,34 @@ pub trait BackendStrategy {
     /// Generates the type string for query parameter extraction.
     fn query_extractor(&self) -> String;
 
-    /// Generates the type string for request body extraction.
+    /// Generates the type string for Header parameter extraction.
+    fn header_extractor(&self, inner_type: &str) -> String;
+
+    /// Generates the type string for Cookie parameter extraction.
+    fn cookie_extractor(&self) -> String;
+
+    /// Generates the type string for JSON request body extraction.
     ///
     /// # Arguments
     ///
     /// * `body_type` - The Rust type of the body (e.g. `CreateUserRequest`).
     fn body_extractor(&self, body_type: &str) -> String;
+
+    /// Generates the type string for Form request body extraction.
+    ///
+    /// # Arguments
+    ///
+    /// * `body_type` - The Rust type of the body (e.g. `SearchForm`).
+    fn form_extractor(&self, body_type: &str) -> String;
+
+    /// Generates the type string for Multipart request body extraction.
+    fn multipart_extractor(&self) -> String;
+
+    /// Generates the type string for a Security extraction/Guard.
+    /// Used when `security: [{...}]` is present.
+    /// Expects a placeholder type name (e.g. `UserPrincipal` or generic `Auth`)
+    /// based on scheme.
+    fn security_extractor(&self, requirements: &[SecurityRequirement]) -> String;
 
     /// Generates the route registration code statement.
     ///
@@ -95,17 +124,32 @@ impl BackendStrategy for ActixStrategy {
     fn handler_imports(&self) -> String {
         let mut imports = String::new();
         imports.push_str("use actix_web::{web, HttpResponse, Responder};\n");
+        // We include actix_multipart generic import just in case, though usually requires separate crate dependency
+        imports.push_str("use actix_multipart::Multipart;\n");
         imports.push_str("use serde_json::Value;\n");
         imports.push_str("use uuid::Uuid;\n");
         imports.push_str("use chrono::{DateTime, Utc, NaiveDate, NaiveDateTime};\n");
         imports
     }
 
-    fn handler_signature(&self, func_name: &str, args: &[String]) -> String {
+    fn handler_signature(
+        &self,
+        func_name: &str,
+        args: &[String],
+        response_type: Option<&str>,
+    ) -> String {
         let args_str = args.join(", ");
+        let return_type = if let Some(rt) = response_type {
+            // Strictly typed return: actix_web::Result<web::Json<T>>
+            // Note: Error type is implicit or actix_web::Error
+            format!("actix_web::Result<web::Json<{}>>", rt)
+        } else {
+            "impl Responder".to_string()
+        };
+
         format!(
-            "pub async fn {}({}) -> impl Responder {{\n    todo!()\n}}\n",
-            func_name, args_str
+            "pub async fn {}({}) -> {} {{\n    todo!()\n}}\n",
+            func_name, args_str, return_type
         )
     }
 
@@ -122,15 +166,69 @@ impl BackendStrategy for ActixStrategy {
         "web::Query<Value>".to_string()
     }
 
+    fn header_extractor(&self, _inner_type: &str) -> String {
+        "web::Header<String>".to_string()
+    }
+
+    fn cookie_extractor(&self) -> String {
+        "web::Cookie".to_string()
+    }
+
     fn body_extractor(&self, body_type: &str) -> String {
         format!("web::Json<{}>", body_type)
     }
 
+    fn form_extractor(&self, body_type: &str) -> String {
+        format!("web::Form<{}>", body_type)
+    }
+
+    fn multipart_extractor(&self) -> String {
+        "Multipart".to_string()
+    }
+
+    fn security_extractor(&self, requirements: &[SecurityRequirement]) -> String {
+        if requirements.is_empty() {
+            return "".to_string();
+        }
+        // Generate a Stub Extractor using Actix ReqData or custom Trait
+        // For simplicity, we generate `_auth: web::ReqData<AuthenticatedUser>` or similar.
+        // Or if we know the scheme name, `_auth: Auth<ApiKey>`
+        // Since we don't define the extractor structs in the strategy, we use a placeholder.
+
+        let schemes: Vec<&String> = requirements.iter().map(|r| &r.scheme_name).collect();
+        // Just use the first one name for the type placeholder or generic 'Auth'
+        let name = schemes.first().unwrap();
+        format!("_auth: web::ReqData<{}>", name)
+    }
+
     fn route_registration_statement(&self, route: &ParsedRoute, handler_full_path: &str) -> String {
-        let method = route.method.to_lowercase();
+        let method = route.method.to_uppercase();
+        let actix_method = match method.as_str() {
+            "GET" => "get()".to_string(),
+            "POST" => "post()".to_string(),
+            "PUT" => "put()".to_string(),
+            "DELETE" => "delete()".to_string(),
+            "PATCH" => "patch()".to_string(),
+            "HEAD" => "head()".to_string(),
+            "TRACE" => "trace()".to_string(),
+            // "OPTIONS" usually implies Generic route if using web::options() check docs, but web::resource("..").route(web::options()) works.
+            // Note: actix_web::web::options() does exist.
+            "OPTIONS" => "options()".to_string(),
+            // "QUERY" is OAS 3.2.0 specific and Actix might not have a helper.
+            // We use the generic method construction.
+            "QUERY" => {
+                "method(actix_web::http::Method::from_bytes(b\"QUERY\").unwrap())".to_string()
+            }
+            // Fallback for unknown standard verbs or extensions
+            str_method => format!(
+                "method(actix_web::http::Method::from_bytes(b\"{}\").unwrap())",
+                str_method
+            ),
+        };
+
         format!(
-            "\n    cfg.service(web::resource(\"{}\").route(web::{}().to({})));",
-            route.path, method, handler_full_path
+            "\n    cfg.service(web::resource(\"{}\").route(web::{}.to({})));",
+            route.path, actix_method, handler_full_path
         )
     }
 
@@ -162,15 +260,21 @@ impl BackendStrategy for ActixStrategy {
 
     fn test_request_builder(&self, method: &str, uri: &str, body_setup: &str) -> String {
         let method_lower = method.to_lowercase();
-        // handling specialized methods if needed, but actix test::TestRequest::{method}() works for std ones
-        // actually test::TestRequest::get(), post(), etc.
-        // Dynamic dispatch: test::TestRequest::default().method(...).
-        // But the original code used `test::TestRequest::{method}()`.
-        // We assume strictly standard methods or match.
-        // For simplicity and matching original logic:
+        // Actix TestRequest helpers exist for standard verbs: get(), post(), put(), delete(), patch().
+        // For others, we use method().
+        let builder_call = match method_lower.as_str() {
+            "get" | "post" | "put" | "delete" | "patch" => format!("{}()", method_lower),
+            // TestRequest::head() doesn't exist in some versions, depends on crate.
+            // Safest to use .method(...) for extended verbs.
+            _ => format!(
+                "method(actix_web::http::Method::from_bytes(b\"{}\").unwrap())",
+                method.to_uppercase()
+            ),
+        };
+
         format!(
-            "    let req = test::TestRequest::{}().uri(\"{}\")\n{}        .to_request();",
-            method_lower, uri, body_setup
+            "    let req = test::TestRequest::{}.uri(\"{}\")\n{}        .to_request();",
+            builder_call, uri, body_setup
         )
     }
 
@@ -217,6 +321,7 @@ async fn validate_response(resp: actix_web::dev::ServiceResponse, method: &str, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::oas::models::RouteKind;
 
     #[test]
     fn test_actix_handler_imports() {
@@ -224,15 +329,30 @@ mod tests {
         let imports = s.handler_imports();
         assert!(imports.contains("use actix_web"));
         assert!(imports.contains("use uuid::Uuid"));
+        assert!(imports.contains("use actix_multipart::Multipart"));
     }
 
     #[test]
-    fn test_actix_handler_signature() {
+    fn test_actix_handler_signature_generic() {
         let s = ActixStrategy;
-        let sig = s.handler_signature("my_handler", &["id: usize".into(), "q: String".into()]);
+        let sig = s.handler_signature(
+            "my_handler",
+            &["id: usize".into(), "q: String".into()],
+            None,
+        );
         assert_eq!(
             sig,
             "pub async fn my_handler(id: usize, q: String) -> impl Responder {\n    todo!()\n}\n"
+        );
+    }
+
+    #[test]
+    fn test_actix_handler_signature_typed() {
+        let s = ActixStrategy;
+        let sig = s.handler_signature("get_user", &["id: usize".into()], Some("User"));
+        assert_eq!(
+            sig,
+            "pub async fn get_user(id: usize) -> actix_web::Result<web::Json<User>> {\n    todo!()\n}\n"
         );
     }
 
@@ -247,15 +367,50 @@ mod tests {
     }
 
     #[test]
+    fn test_actix_security_extractor() {
+        let s = ActixStrategy;
+        let reqs = vec![SecurityRequirement {
+            scheme_name: "ApiKey".into(),
+            scopes: vec![],
+        }];
+        // Expect: _auth: web::ReqData<ApiKey>
+        assert_eq!(s.security_extractor(&reqs), "_auth: web::ReqData<ApiKey>");
+    }
+
+    #[test]
     fn test_actix_query_extractor() {
         let s = ActixStrategy;
         assert_eq!(s.query_extractor(), "web::Query<Value>");
     }
 
     #[test]
+    fn test_actix_header_extractor() {
+        let s = ActixStrategy;
+        assert_eq!(s.header_extractor("String"), "web::Header<String>");
+    }
+
+    #[test]
+    fn test_actix_cookie_extractor() {
+        let s = ActixStrategy;
+        assert_eq!(s.cookie_extractor(), "web::Cookie");
+    }
+
+    #[test]
     fn test_actix_body_extractor() {
         let s = ActixStrategy;
         assert_eq!(s.body_extractor("MyDto"), "web::Json<MyDto>");
+    }
+
+    #[test]
+    fn test_actix_form_extractor() {
+        let s = ActixStrategy;
+        assert_eq!(s.form_extractor("SearchForm"), "web::Form<SearchForm>");
+    }
+
+    #[test]
+    fn test_actix_multipart_extractor() {
+        let s = ActixStrategy;
+        assert_eq!(s.multipart_extractor(), "Multipart");
     }
 
     #[test]
@@ -267,12 +422,32 @@ mod tests {
             handler_name: "handler".into(),
             params: vec![],
             request_body: None,
+            security: vec![],
+            response_type: None,
+            kind: RouteKind::Path,
         };
         let code = s.route_registration_statement(&route, "mod::handler");
         assert_eq!(
             code,
             "\n    cfg.service(web::resource(\"/path\").route(web::post().to(mod::handler)));"
         );
+    }
+
+    #[test]
+    fn test_actix_route_registration_custom_verb() {
+        let s = ActixStrategy;
+        let route = ParsedRoute {
+            path: "/path".into(),
+            method: "QUERY".into(),
+            handler_name: "query_handler".into(),
+            params: vec![],
+            request_body: None,
+            security: vec![],
+            response_type: None,
+            kind: RouteKind::Path,
+        };
+        let code = s.route_registration_statement(&route, "mod::qh");
+        assert!(code.contains(".route(web::method(actix_web::http::Method::from_bytes(b\"QUERY\").unwrap()).to(mod::qh)));"));
     }
 
     #[test]
@@ -294,5 +469,15 @@ mod tests {
         assert!(s
             .test_validation_helper()
             .contains("actix_web::dev::ServiceResponse"));
+    }
+
+    #[test]
+    fn test_actix_test_generation_custom_method() {
+        let s = ActixStrategy;
+        let req = s.test_request_builder("HEAD", "/uri", "");
+        assert!(req.contains(
+            "test::TestRequest::method(actix_web::http::Method::from_bytes(b\"HEAD\").unwrap())"
+        ));
+        assert!(req.contains(".uri(\"/uri\")"));
     }
 }
