@@ -111,6 +111,7 @@ pub fn register_routes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::oas::models::RouteKind;
     use crate::oas::ParsedRoute;
     use crate::strategies::ActixStrategy;
 
@@ -133,6 +134,9 @@ mod tests {
             handler_name: "get_users".into(),
             params: vec![],
             request_body: None,
+            security: vec![],
+            response_type: None,
+            kind: RouteKind::Path,
         };
 
         // Simulating a fresh file scaffolded content
@@ -159,6 +163,9 @@ pub fn config(cfg: &mut web::ServiceConfig) {
             handler_name: "new_fn".into(),
             params: vec![],
             request_body: None,
+            security: vec![],
+            response_type: None,
+            kind: RouteKind::Path,
         };
 
         // Existing file has one route already with a semicolon
@@ -186,6 +193,9 @@ pub fn config(cfg: &mut web::ServiceConfig) {
             handler_name: "create_user".into(),
             params: vec![],
             request_body: None,
+            security: vec![],
+            response_type: None,
+            kind: RouteKind::Path,
         };
 
         // Simulation: Route already exists
@@ -208,6 +218,9 @@ pub fn config(cfg: &mut web::ServiceConfig) {
             handler_name: "a".into(),
             params: vec![],
             request_body: None,
+            security: vec![],
+            response_type: None,
+            kind: RouteKind::Path,
         };
         let r2 = ParsedRoute {
             path: "/b".into(),
@@ -215,6 +228,9 @@ pub fn config(cfg: &mut web::ServiceConfig) {
             handler_name: "b".into(),
             params: vec![],
             request_body: None,
+            security: vec![],
+            response_type: None,
+            kind: RouteKind::Path,
         };
 
         let source = "pub fn config(cfg: &mut web::ServiceConfig) { }";

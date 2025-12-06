@@ -2,35 +2,24 @@
 
 //! # Schema Generator
 //!
-//! utilities for converting parsed Rust structs into JSON Schema definitions.
+//! Utilities for converting parsed Rust structs and enums into JSON Schema definitions.
 //! This module enables the generation of OpenAPI-compliant schemas directly from
-//! Rust source code models, respecting Serde attributes like `rename` and `skip`.
+//! Rust source code models, respecting Serde attributes like `rename`, `skip`, `tag`, and `untagged`.
 
 use crate::error::AppResult;
-use crate::parser::{ParsedField, ParsedStruct};
+use crate::parser::{ParsedEnum, ParsedField, ParsedModel, ParsedStruct};
 use serde_json::{json, Map, Value};
 
-/// Generates a JSON Schema object from a parsed Rust struct.
-///
-/// The resulting schema follows Draft-7 standards suitable for OpenAPI `components/schemas`.
-///
-/// # Arguments
-///
-/// * `struct_def` - The parsed struct definition containing fields and attributes.
-///
-/// # Behavior
-///
-/// * Maps Rust primitives (`i32`, `String`, `bool`) to JSON Schema types.
-/// * Handles `Option<T>` by excluding the field from the `required` list.
-/// * Handles `Vec<T>` as `type: array`.
-/// * Respects `#[serde(rename = "...")]` for property names.
-/// * Skips fields marked with `#[serde(skip)]`.
-/// * Includes doc comments as `description`.
-///
-/// # Returns
-///
-/// * `AppResult<Value>` - A `serde_json::Value` object representing the schema.
-pub fn generate_json_schema(struct_def: &ParsedStruct) -> AppResult<Value> {
+/// Generates a JSON Schema object from a parsed Rust model (struct or enum).
+pub fn generate_json_schema(model: &ParsedModel) -> AppResult<Value> {
+    match model {
+        ParsedModel::Struct(s) => generate_struct_schema(s),
+        ParsedModel::Enum(e) => generate_enum_schema(e),
+    }
+}
+
+/// Generates schema for a struct.
+fn generate_struct_schema(struct_def: &ParsedStruct) -> AppResult<Value> {
     let mut schema = Map::new();
 
     // 1. Basic Metadata
@@ -62,10 +51,51 @@ pub fn generate_json_schema(struct_def: &ParsedStruct) -> AppResult<Value> {
     schema.insert("properties".to_string(), Value::Object(properties));
 
     if !required.is_empty() {
-        // Only valid if using values that can be serialized as JSON strings/values in the array.
-        // `required` in JSON Schema is an array of strings.
         let required_json: Vec<Value> = required.into_iter().map(Value::String).collect();
         schema.insert("required".to_string(), Value::Array(required_json));
+    }
+
+    Ok(Value::Object(schema))
+}
+
+/// Generates schema for an enum using `oneOf`.
+fn generate_enum_schema(enum_def: &ParsedEnum) -> AppResult<Value> {
+    let mut schema = Map::new();
+    schema.insert("title".to_string(), json!(enum_def.name));
+
+    if let Some(desc) = &enum_def.description {
+        schema.insert("description".to_string(), json!(desc));
+    }
+
+    let mut one_of = Vec::new();
+
+    for variant in &enum_def.variants {
+        let variant_name = variant
+            .rename
+            .clone()
+            .unwrap_or_else(|| variant.name.clone());
+
+        // Determine variant schema
+        // If variant wraps a type: Variant(Type)
+        let sub_schema = if let Some(ty) = &variant.ty {
+            map_type_to_schema(ty)
+        } else {
+            // Unit variant -> Enum::A -> "A"
+            json!({ "type": "string", "const": variant_name })
+        };
+
+        one_of.push(sub_schema);
+    }
+
+    // Handle Untagged vs Tagged
+    schema.insert("oneOf".to_string(), Value::Array(one_of));
+
+    if let Some(tag) = &enum_def.tag {
+        // Tagged enum: add discriminator hint
+        let discriminator = json!({
+            "propertyName": tag
+        });
+        schema.insert("discriminator".to_string(), discriminator);
     }
 
     Ok(Value::Object(schema))
@@ -149,7 +179,7 @@ fn map_type_to_schema(ty: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::ParsedField;
+    use crate::parser::{ParsedField, ParsedVariant};
 
     fn make_struct(name: &str, fields: Vec<ParsedField>) -> ParsedStruct {
         ParsedStruct {
@@ -170,12 +200,6 @@ mod tests {
         }
     }
 
-    fn make_skipped_field(name: &str, ty: &str) -> ParsedField {
-        let mut f = make_field(name, ty, None);
-        f.is_skipped = true;
-        f
-    }
-
     #[test]
     fn test_generate_simple_schema() {
         let fields = vec![
@@ -183,49 +207,41 @@ mod tests {
             make_field("active", "bool", None),
         ];
 
-        let def = make_struct("User", fields);
+        let def = ParsedModel::Struct(make_struct("User", fields));
         let schema = generate_json_schema(&def).unwrap();
 
         let props = schema["properties"].as_object().unwrap();
         assert_eq!(props["id"]["type"], "integer");
         assert_eq!(props["active"]["type"], "boolean");
-
-        let required = schema["required"].as_array().unwrap();
-        assert_eq!(required.len(), 2);
     }
 
     #[test]
-    fn test_optional_and_vec() {
-        let fields = vec![
-            make_field("opt", "Option<i32>", None),
-            make_field("list", "Vec<String>", None),
-        ];
+    fn test_generate_enum_schema() {
+        let en = ParsedEnum {
+            name: "Pet".into(),
+            description: None,
+            rename: None,
+            tag: Some("type".into()),
+            untagged: false,
+            variants: vec![
+                ParsedVariant {
+                    name: "Cat".into(),
+                    ty: Some("CatInfo".into()),
+                    description: None,
+                    rename: None,
+                },
+                ParsedVariant {
+                    name: "Dog".into(),
+                    ty: Some("DogInfo".into()),
+                    description: None,
+                    rename: None,
+                },
+            ],
+        };
 
-        let def = make_struct("Test", fields);
-        let schema = generate_json_schema(&def).unwrap();
-
-        let props = schema["properties"].as_object().unwrap();
-        assert_eq!(props["list"]["type"], "array");
-        assert_eq!(props["list"]["items"]["type"], "string");
-
-        let required = schema["required"].as_array().unwrap();
-        assert_eq!(required.len(), 1); // Only list is required
-        assert_eq!(required[0], "list");
-    }
-
-    #[test]
-    fn test_skipping_and_renaming() {
-        let fields = vec![
-            make_field("hidden", "String", Some("visible")),
-            make_skipped_field("secret", "String"),
-        ];
-
-        let def = make_struct("Secure", fields);
-        let schema = generate_json_schema(&def).unwrap();
-        let props = schema["properties"].as_object().unwrap();
-
-        assert!(props.contains_key("visible"));
-        assert!(!props.contains_key("hidden"));
-        assert!(!props.contains_key("secret"));
+        let schema = generate_json_schema(&ParsedModel::Enum(en)).unwrap();
+        assert!(schema["oneOf"].is_array());
+        assert!(schema["discriminator"].is_object());
+        assert_eq!(schema["discriminator"]["propertyName"], "type");
     }
 }

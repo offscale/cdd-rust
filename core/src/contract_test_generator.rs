@@ -152,7 +152,8 @@ fn get_dummy_value(ty: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::oas::ParsedRoute;
+    use crate::oas::models::RouteKind;
+    use crate::oas::{BodyFormat, ParamSource, ParsedRoute, RequestBodyDefinition};
     use crate::strategies::ActixStrategy;
 
     #[test]
@@ -167,6 +168,9 @@ mod tests {
                 ty: "Uuid".into(),
             }],
             request_body: None,
+            security: vec![],
+            response_type: None,
+            kind: RouteKind::Path,
         }];
 
         let strategy = ActixStrategy;
@@ -208,6 +212,9 @@ mod tests {
                 },
             ],
             request_body: None,
+            security: vec![],
+            response_type: None,
+            kind: RouteKind::Path,
         }];
 
         let strategy = ActixStrategy;
@@ -223,7 +230,13 @@ mod tests {
             method: "POST".into(),
             handler_name: "create_item".into(),
             params: vec![],
-            request_body: Some("Item".into()),
+            request_body: Some(RequestBodyDefinition {
+                ty: "Item".into(),
+                format: BodyFormat::Json,
+            }),
+            security: vec![],
+            response_type: None,
+            kind: RouteKind::Path,
         }];
 
         let strategy = ActixStrategy;

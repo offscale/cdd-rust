@@ -45,7 +45,10 @@ pub use contract_test_generator::generate_contract_tests_file;
 pub use diff::{calculate_diff, Diff};
 pub use error::{AppError, AppResult};
 pub use handler_generator::update_handler_module;
-pub use oas::{parse_openapi_routes, parse_openapi_spec, ParamSource, ParsedRoute, RouteParam};
+pub use oas::{
+    parse_openapi_routes, parse_openapi_spec, BodyFormat, ParamSource, ParsedRoute,
+    RequestBodyDefinition, RouteParam,
+};
 pub use parser::{
     extract_struct, extract_struct_fields, extract_struct_names, ParsedField, ParsedStruct,
 };
