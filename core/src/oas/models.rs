@@ -2,7 +2,7 @@
 
 //! # OpenAPI Models
 //!
-//! definitions for Intermediate Representation of OpenAPI elements.
+//! definition of Intermediate Representation (IR) structures for parsed OpenAPI elements.
 //!
 //! These structs are used to transport parsed data from the YAML spec
 //! into the code generation strategies.
@@ -67,10 +67,14 @@ pub struct SecurityRequirement {
 /// Definition of a request body type and format.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RequestBodyDefinition {
-    /// The Rust type name (e.g. "CreateUserRequest")
+    /// The Rust type name (e.g. "CreateUserRequest").
     pub ty: String,
-    /// The format of the body (JSON, Form, etc.)
+    /// The format of the body (JSON, Form, etc.).
     pub format: BodyFormat,
+    /// Multipart/Form Encoding details.
+    /// Maps property name -> Content-Type (e.g. "profileImage" -> "image/png").
+    /// Only populated if format is Multipart or Form.
+    pub encoding: Option<std::collections::HashMap<String, String>>,
 }
 
 /// Supported body content types.
@@ -80,7 +84,7 @@ pub enum BodyFormat {
     Json,
     /// application/x-www-form-urlencoded
     Form,
-    /// multipart/form-data
+    /// multipart/form-data or multipart/mixed
     Multipart,
 }
 

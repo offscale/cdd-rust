@@ -139,6 +139,7 @@ mod tests {
             request_body: Some(RequestBodyDefinition {
                 ty: "SearchFilter".into(),
                 format: BodyFormat::Json,
+                encoding: None,
             }),
             security: vec![],
             response_type: None,
@@ -170,6 +171,9 @@ mod tests {
         };
         let strategy = ActixStrategy;
         let code = update_handler_module("", &[route], &strategy).unwrap();
-        assert!(code.contains("_auth: web::ReqData<ApiKey>"));
+
+        // Updated expectation: ActixStrategy now prefixes with security::
+        // e.g. _auth: web::ReqData<security::ApiKey>
+        assert!(code.contains("_auth: web::ReqData<security::ApiKey>"));
     }
 }

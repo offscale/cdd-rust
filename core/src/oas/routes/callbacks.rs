@@ -8,15 +8,14 @@
 use crate::error::{AppError, AppResult};
 use crate::oas::models::ParsedCallback;
 use crate::oas::resolver::{extract_request_body_type, extract_response_success_type};
-use crate::oas::routes::shims::{ShimOperation, ShimPathItem};
-use serde_json::Value;
+use crate::oas::routes::shims::{ShimComponents, ShimOperation, ShimPathItem};
 use std::collections::BTreeMap;
 use utoipa::openapi::RefOr;
 
 /// Resolves a Callback object which can be an inline map or a Reference.
 pub fn resolve_callback_object(
     cb_ref: &RefOr<BTreeMap<String, ShimPathItem>>,
-    components: Option<&Value>,
+    components: Option<&ShimComponents>,
 ) -> AppResult<BTreeMap<String, ShimPathItem>> {
     match cb_ref {
         RefOr::T(map) => Ok(map.clone()),
@@ -29,7 +28,8 @@ pub fn resolve_callback_object(
                 .to_string();
 
             if let Some(comps) = components {
-                if let Some(cb_json) = comps.get("callbacks").and_then(|c| c.get(&ref_name)) {
+                // callbacks are in extra
+                if let Some(cb_json) = comps.extra.get("callbacks").and_then(|c| c.get(&ref_name)) {
                     let map =
                         serde_json::from_value::<BTreeMap<String, ShimPathItem>>(cb_json.clone())
                             .map_err(|e| {
@@ -55,7 +55,7 @@ pub fn extract_callback_operations(
     name: &str,
     expression: &str,
     path_item: &ShimPathItem,
-    components: Option<&Value>,
+    components: Option<&ShimComponents>,
 ) -> AppResult<()> {
     // We treat callbacks as outgoing requests, so we care about the Method, Body, and Response (meaning what the receiver returns)
     // Unlike the main route, we don't need full parameter resolution for the handler generation loop yet,

@@ -8,8 +8,8 @@
 use crate::error::AppResult;
 use crate::oas::models::{ParamSource, ParamStyle, RouteParam};
 use crate::oas::resolver::types::map_schema_to_rust_type;
+use crate::oas::routes::shims::ShimComponents;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::fmt;
 use utoipa::openapi::{schema::Schema, RefOr};
 
@@ -57,7 +57,7 @@ impl fmt::Debug for ShimParameter {
 /// Resolves a list of OpenAPI parameters into internal `RouteParam` structs.
 pub fn resolve_parameters(
     params: &[RefOr<ShimParameter>],
-    components: Option<&Value>,
+    components: Option<&ShimComponents>,
 ) -> AppResult<Vec<RouteParam>> {
     let mut result = Vec::new();
     for param_or_ref in params {
@@ -77,12 +77,13 @@ pub fn resolve_parameters(
 /// Helper to resolve a `Ref` to its target Parameter definition.
 fn resolve_parameter_ref(
     r: &utoipa::openapi::Ref,
-    components: Option<&Value>,
+    components: Option<&ShimComponents>,
 ) -> Option<ShimParameter> {
     let ref_name = r.ref_location.split('/').next_back()?;
 
     if let Some(comps) = components {
-        if let Some(param_json) = comps.get("parameters").and_then(|p| p.get(ref_name)) {
+        // Note: Generic components are now in `extra`.
+        if let Some(param_json) = comps.extra.get("parameters").and_then(|p| p.get(ref_name)) {
             if let Ok(param) = serde_json::from_value::<ShimParameter>(param_json.clone()) {
                 return Some(param);
             }
@@ -283,6 +284,8 @@ mod tests {
 
     #[test]
     fn test_resolve_reusable_parameters() {
+        // New structure requires generic components to be in 'extra' for legacy resolution.
+        // ShimComponents handles this via flattening.
         let components_json = serde_json::json!({
             "parameters": {
                 "limitParam": {
@@ -295,11 +298,13 @@ mod tests {
             }
         });
 
+        let components: ShimComponents = serde_json::from_value(components_json).unwrap();
+
         let op_params = vec![RefOr::Ref(utoipa::openapi::Ref::new(
             "#/components/parameters/limitParam",
         ))];
 
-        let resolved = resolve_parameters(&op_params, Some(&components_json)).unwrap();
+        let resolved = resolve_parameters(&op_params, Some(&components)).unwrap();
 
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].name, "limit");

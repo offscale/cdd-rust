@@ -12,8 +12,7 @@ use crate::oas::resolver::{
 };
 use crate::oas::routes::callbacks::{extract_callback_operations, resolve_callback_object};
 use crate::oas::routes::naming::{derive_handler_name, to_snake_case};
-use crate::oas::routes::shims::{ShimOperation, ShimPathItem};
-use serde_json::Value;
+use crate::oas::routes::shims::{ShimComponents, ShimOperation, ShimPathItem};
 use std::collections::HashMap;
 
 /// Helper to iterate methods in a ShimPathItem and extract all operations as Routes.
@@ -30,7 +29,7 @@ pub fn parse_path_item(
     path_or_name: &str,
     path_item: ShimPathItem,
     kind: RouteKind,
-    components: Option<&Value>,
+    components: Option<&ShimComponents>,
 ) -> AppResult<()> {
     // Handle common parameters defined at PathItem level.
     let common_params_list = path_item.parameters.as_deref().unwrap_or(&[]);
@@ -68,7 +67,7 @@ fn build_route(
     op: ShimOperation,
     common_params: &[RouteParam],
     kind: RouteKind,
-    components: Option<&Value>,
+    components: Option<&ShimComponents>,
 ) -> AppResult<ParsedRoute> {
     // 1. Handler Name
     let handler_name = if let Some(op_id) = &op.operation_id {

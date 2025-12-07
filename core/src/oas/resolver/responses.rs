@@ -6,13 +6,13 @@
 
 use crate::error::AppResult;
 use crate::oas::resolver::types::map_schema_to_rust_type;
-use serde_json::Value;
+use crate::oas::routes::shims::ShimComponents;
 use utoipa::openapi::{RefOr, Responses};
 
 /// Extracts the success response type (200 OK or 201 Created).
 pub fn extract_response_success_type(
     responses: &Responses,
-    components: Option<&Value>,
+    components: Option<&ShimComponents>,
 ) -> AppResult<Option<String>> {
     // Check 200 then 201
     let success = responses
@@ -41,11 +41,12 @@ pub fn extract_response_success_type(
 
 fn resolve_response_from_components(
     r: &utoipa::openapi::Ref,
-    components: Option<&Value>,
+    components: Option<&ShimComponents>,
 ) -> Option<utoipa::openapi::Response> {
     let ref_name = r.ref_location.split('/').next_back()?;
     if let Some(comps) = components {
-        if let Some(resp_json) = comps.get("responses").and_then(|r| r.get(ref_name)) {
+        // Access via 'extra' flattening for generic items
+        if let Some(resp_json) = comps.extra.get("responses").and_then(|r| r.get(ref_name)) {
             if let Ok(resp) = serde_json::from_value::<utoipa::openapi::Response>(resp_json.clone())
             {
                 return Some(resp);
