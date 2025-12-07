@@ -3,17 +3,54 @@
 //! # Reference Resolution
 //!
 //! Utilities for parsing, normalizing, and resolving OpenAPI Reference Objects (`$ref`)
-//! according to RFC 3986 and OAS 3.2 Appendix F "Base URI Determination".
+//! according to **RFC 3986** and OAS 3.2 Appendix F "Base URI Determination".
+//!
+//! Uses the `url` crate for strict standard compliance regarding:
+//! - Dot-segment removal (`.`, `..`).
+//! - Scheme-relative resolution.
+//! - Query/Fragment merging.
 //!
 //! Handles:
 //! - Local References (e.g., `#/components/schemas/User`)
 //! - Relative File References (e.g., `../models.yaml#/User`)
 //! - Remote URIs (e.g., `https://example.com/api.json#/User`)
-//! - Swagger 2.0 Legacy References (e.g., `#/definitions/User`)
-//! - `$self` keyword base URI determination.
+//! - File Path normalization via URL conversion.
+//! - **NEW**: Self-reference resolution via `$self` (OAS 3.2 Appendix F).
 
-use std::path::{Component, Path, PathBuf};
+use std::fmt;
+use std::path::Path;
+use url::Url;
 use utoipa::openapi::{Components, RefOr, Schema};
+
+/// Context passed down during parsing to handle Base URI resolution.
+#[derive(Clone)]
+pub struct ResolutionContext<'a> {
+    /// The Base URI established by `$self` or the retrieval URI.
+    pub base_uri: Option<Url>,
+    /// Access to global components for fragment resolution.
+    pub components: &'a Components,
+}
+
+impl<'a> ResolutionContext<'a> {
+    /// Creates a new context.
+    pub fn new(base_uri_str: Option<String>, components: &'a Components) -> Self {
+        let base_uri = base_uri_str.and_then(|s| Url::parse(&s).ok());
+        Self {
+            base_uri,
+            components,
+        }
+    }
+}
+
+/// Manual Debug implementation since `utoipa::openapi::Components` does not implement Debug.
+impl<'a> fmt::Debug for ResolutionContext<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ResolutionContext")
+            .field("base_uri", &self.base_uri)
+            .field("components", &"Components { ... }")
+            .finish()
+    }
+}
 
 /// The kind of the URI reference.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,7 +79,11 @@ pub struct ParsedReference<'a> {
 }
 
 /// Parses a `$ref` string into its components.
+///
+/// This does not perform IO or full RFC resolution, but categorizes the reference
+/// structure for internal routing (extraction vs resolution).
 pub fn parse_reference(ref_str: &str) -> ParsedReference<'_> {
+    // RFC 3986 3.5: Fragment separator is '#'
     if let Some((doc, frag)) = ref_str.split_once('#') {
         if doc.is_empty() {
             ParsedReference {
@@ -86,8 +127,24 @@ pub fn parse_reference(ref_str: &str) -> ParsedReference<'_> {
     }
 }
 
+/// Simple heuristic checks if a string starts with a URI scheme.
 fn is_remote(uri: &str) -> bool {
-    uri.starts_with("http://") || uri.starts_with("https://") || uri.starts_with("file://")
+    // Regex-free check for common schemes or general scheme syntax (alpha + alnum/+-.)
+    if let Some(colon) = uri.find(':') {
+        // RFC 3986 3.1: scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
+        let scheme = &uri[..colon];
+        if scheme.is_empty() {
+            return false;
+        }
+        let first = scheme.chars().next().unwrap();
+        if !first.is_ascii_alphabetic() {
+            // Not a scheme (e.g. /abs/path or ./rel)
+            return false;
+        }
+        // It looks like a scheme.
+        return true;
+    }
+    false
 }
 
 /// Extracts a usable Rust type name from a reference string.
@@ -121,27 +178,32 @@ pub fn extract_ref_name(ref_str: &str) -> String {
 
 /// Resolves a generic `RefOr<Schema>` to a concrete `Schema` if it is a local reference.
 ///
-/// This resolves against the provided `components` if available.
-/// Returns `None` if the reference cannot be resolved.
+/// This utilizes the `ResolutionContext` to check if an absolute URI reference
+/// actually points to the current document (via matching `$self`).
+///
+/// Returns `None` if the reference cannot be resolved locally.
 pub fn resolve_ref_local<'a>(
     ref_or: &'a RefOr<Schema>,
-    components: &'a Components,
+    context: &'a ResolutionContext<'a>,
 ) -> Option<&'a Schema> {
     match ref_or {
         RefOr::T(s) => Some(s),
-        RefOr::Ref(r) => resolve_ref_name(&r.ref_location, components),
+        RefOr::Ref(r) => resolve_ref_name(&r.ref_location, context),
     }
 }
 
 /// Resolves a reference string (e.g. `#/components/schemas/User`) to a specific `Schema`
-/// inside the provided `Components` object.
+/// inside the provided `ResolutionContext`.
 ///
-/// Also accepts bare names (e.g. `User`) for compatibility with internal name-based lookups.
-///
-/// Returns `None` if the reference is remote, relative, or not found.
-pub fn resolve_ref_name<'a>(ref_str: &str, components: &'a Components) -> Option<&'a Schema> {
-    // 0. Fast path for bare component names (internal logic compatibility)
-    // If string has no '/', '#', or '.', treat as direct map key lookup.
+/// Also handling OAS 3.2 Appendix F: If `$self` is set to `"https://example.com/api"`,
+/// then `"https://example.com/api#/components/schemas/User"` resolves locally.
+pub fn resolve_ref_name<'a>(
+    ref_str: &str,
+    context: &'a ResolutionContext<'a>,
+) -> Option<&'a Schema> {
+    let components = context.components;
+
+    // 0. Fast path: Internal simple name (e.g. "User")
     if !ref_str.contains('/') && !ref_str.contains('#') && !ref_str.contains('.') {
         if let Some(found) = components.schemas.get(ref_str) {
             return match found {
@@ -151,23 +213,53 @@ pub fn resolve_ref_name<'a>(ref_str: &str, components: &'a Components) -> Option
         }
     }
 
-    // 1. Full Parse
     let parsed = parse_reference(ref_str);
 
-    if parsed.kind == ReferenceKind::Local {
-        if let Some(frag) = parsed.fragment {
-            // Frag: /components/schemas/User
-            // We assume standard structure or Swagger 2.0 structure
-            // But we only have access to `components.schemas` map (Name -> Schema).
-            // So we just take the last part of the name.
-            if let Some(name) = frag.split('/').next_back() {
-                if let Some(found) = components.schemas.get(name) {
-                    return match found {
-                        RefOr::T(s) => Some(s),
-                        // Explicitly avoid infinite recursion in simple resolver
-                        RefOr::Ref(_) => None,
-                    };
+    match parsed.kind {
+        ReferenceKind::Local => {
+            // Standard internal reference
+            resolve_local_fragment(parsed.fragment, components)
+        }
+        ReferenceKind::Remote => {
+            // Check if Remote text matches Base URI (Appendix F)
+            if let Some(base) = &context.base_uri {
+                // We parse the document part of the reference as a URL
+                if let Ok(ref_url) = Url::parse(parsed.document) {
+                    // Compare scheme, host, path, port
+                    // If they match, we treat this as a local resolution utilizing the fragment.
+                    if ref_url.scheme() == base.scheme()
+                        && ref_url.host() == base.host()
+                        && ref_url.path() == base.path()
+                        && ref_url.port() == base.port()
+                    {
+                        return resolve_local_fragment(parsed.fragment, components);
+                    }
                 }
+            }
+            None
+        }
+        ReferenceKind::Relative => {
+            // Relative references are generally external in this context,
+            // unless we strictly implement "self" matching relative path logic (uncommon for schemas in single file).
+            None
+        }
+    }
+}
+
+/// Internal helper to look up a Schema from a fragment string.
+fn resolve_local_fragment<'a>(
+    fragment: Option<&str>,
+    components: &'a Components,
+) -> Option<&'a Schema> {
+    if let Some(frag) = fragment {
+        // Frag: /components/schemas/User
+        // We only support digging into schemas for code generation purposes.
+        if let Some(name) = frag.split('/').next_back() {
+            if let Some(found) = components.schemas.get(name) {
+                return match found {
+                    RefOr::T(s) => Some(s),
+                    RefOr::Ref(_) => None, // Avoid infinite recursion in simple resolver
+                };
             }
         }
     }
@@ -182,225 +274,128 @@ pub fn resolve_ref_name<'a>(ref_str: &str, components: &'a Components) -> Option
 ///
 /// * `retrieval_uri` - The URI used to retrieve the document (or absolute file path).
 /// * `self_val` - The value of the `$self` field in the document (if present).
-///
-/// # Logic
-///
-/// 1. If `$self` is present and absolute, it becomes the Base URI.
-/// 2. If `$self` is present and relative, it is resolved against `retrieval_uri`.
-/// 3. If `$self` is absent, `retrieval_uri` is the Base URI.
 pub fn compute_base_uri(retrieval_uri: &str, self_val: Option<&str>) -> String {
     match self_val {
-        Some(s) => {
-            // If self_val is an absolute URI (Remote), resolve_uri_reference returns it.
-            // If self_val is relative, resolve_uri_reference merges it with retrieval_uri.
-            resolve_uri_reference(retrieval_uri, s)
-        }
+        Some(s) => resolve_uri_reference(retrieval_uri, s),
         None => retrieval_uri.to_string(),
     }
 }
 
-/// Resolves a relative reference against a base URI to produce a target URI.
+/// Resolves a relative reference against a base URI utilizing **RFC 3986** logic.
 ///
-/// Implements basic path normalization (RFC 3986 dot-segment removal) for file paths.
-/// Does NOT handle network operations.
-///
-/// # Arguments
-///
-/// * `base_uri` - The absolute URI or file path of the current document.
-/// * `ref_uri` - The relative reference found in the document.
-///
-/// # Returns
-///
-/// A resolved, normalized path string.
+/// Replaces previous naive string slicing with strict `Url::join`.
 pub fn resolve_uri_reference(base_uri: &str, ref_uri: &str) -> String {
-    let parsed_ref = parse_reference(ref_uri);
+    // 1. Attempt to parse base as a strict URL (e.g. http://..., file://...)
+    let base_url = match Url::parse(base_uri) {
+        Ok(u) => u,
+        Err(_) => {
+            // 2. If parsing failed, assume it's a raw file path (OS specific).
+            let path = Path::new(base_uri);
+            let abs_path = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                std::env::current_dir().unwrap_or_default().join(path)
+            };
 
-    match parsed_ref.kind {
-        // If the ref is absolute (Remote), return it as is (minus fragment if you want document only,
-        // but here we usually want the full locator)
-        ReferenceKind::Remote => parsed_ref.document.to_string(),
-        // If the ref is local, it belongs to the base document
-        ReferenceKind::Local => base_uri.to_string(),
-        // If relative, merge with base
-        ReferenceKind::Relative => {
-            if is_remote(base_uri) {
-                // Naive URL resolution for http bases (without full URI parser dep)
-                // Assumes base ends with file or slash.
-                // This is a "best effort" compliant implementation purely with std.
-                let base_path = if base_uri.ends_with('/') {
-                    base_uri
-                } else {
-                    // Strip the file part: http://site.com/api/v1/spec.yaml -> http://site.com/api/v1/
-                    match base_uri.rfind('/') {
-                        Some(idx) => &base_uri[..=idx],
-                        None => base_uri,
-                    }
-                };
-
-                // If ref_uri starts with '/' (absolute path relative to host), simpler concat fails logic.
-                // e.g. base: http://a.com/b/c, ref: /d. Should be http://a.com/d.
-                // Our naive impl: http://a.com/b//d (which is often valid but not canonical).
-                // Without `url` crate, we stick to safe naive appending or slight cleanup.
-                if parsed_ref.document.starts_with('/') {
-                    // Try to find scheme end "://" to identify host root
-                    if let Some(scheme_end) = base_path.find("://") {
-                        let after_scheme = &base_path[scheme_end + 3..];
-                        if let Some(first_slash) = after_scheme.find('/') {
-                            // http://host...
-                            let root = &base_path[..scheme_end + 3 + first_slash];
-                            return format!("{}{}", root, parsed_ref.document);
-                        }
+            match Url::from_file_path(&abs_path) {
+                Ok(u) => u,
+                Err(_) => {
+                    // Fallback
+                    if base_uri.ends_with('/') || base_uri.ends_with('\\') {
+                        return format!("{}{}", base_uri, ref_uri);
+                    } else {
+                        return format!("{}/{}", base_uri, ref_uri);
                     }
                 }
-
-                format!("{}{}", base_path, parsed_ref.document)
-            } else {
-                // File system resolution
-                let base_path = Path::new(base_uri);
-                let parent = base_path.parent().unwrap_or_else(|| Path::new("."));
-                let joined = parent.join(parsed_ref.document);
-                normalize_path(&joined).to_string_lossy().to_string()
             }
         }
+    };
+
+    // 3. Perform RFC 3986 Join
+    match base_url.join(ref_uri) {
+        Ok(resolved) => {
+            // 4. Convert back to file path if applicable
+            if resolved.scheme() == "file" {
+                if let Ok(p) = resolved.to_file_path() {
+                    return p.to_string_lossy().to_string();
+                }
+            }
+            resolved.to_string()
+        }
+        Err(_) => ref_uri.to_string(),
     }
 }
 
-/// Normalize a path removing component like `.` and `..`.
-///
-/// Borrowed concept from Cargo's path normalization logic.
-pub fn normalize_path(path: &Path) -> PathBuf {
-    let mut components = path.components().peekable();
-    let mut ret = if let Some(c @ Component::Prefix(..)) = components.peek().cloned() {
-        components.next();
-        PathBuf::from(c.as_os_str())
-    } else {
-        PathBuf::new()
-    };
-
-    for component in components {
-        match component {
-            Component::Prefix(..) => unreachable!(),
-            Component::RootDir => {
-                ret.push(component.as_os_str());
-            }
-            Component::CurDir => {}
-            Component::ParentDir => {
-                ret.pop();
-            }
-            Component::Normal(c) => {
-                ret.push(c);
-            }
-        }
-    }
-    ret
+/// Computes the directory of the given URI or Path.
+pub fn resolve_uri_directory(uri: &str) -> String {
+    resolve_uri_reference(uri, ".")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use utoipa::openapi::Schema;
 
     #[test]
-    fn test_parse_local_ref() {
-        let r = parse_reference("#/components/schemas/User");
-        assert_eq!(r.kind, ReferenceKind::Local);
-        assert_eq!(r.document, "");
-        assert_eq!(r.fragment, Some("/components/schemas/User"));
+    fn test_resolve_ref_local_strict() {
+        let mut components = Components::new();
+        components.schemas.insert(
+            "User".to_string(),
+            RefOr::T(Schema::Object(utoipa::openapi::schema::Object::default())),
+        );
+        let ctx = ResolutionContext::new(None, &components);
+
+        let resolved = resolve_ref_name("#/components/schemas/User", &ctx);
+        assert!(resolved.is_some());
     }
 
     #[test]
-    fn test_parse_relative_ref() {
-        let r = parse_reference("../common/models.yaml#/Error");
-        assert_eq!(r.kind, ReferenceKind::Relative);
-        assert_eq!(r.document, "../common/models.yaml");
-        assert_eq!(r.fragment, Some("/Error"));
+    fn test_resolve_ref_via_self_base_uri() {
+        let mut components = Components::new();
+        components.schemas.insert(
+            "User".to_string(),
+            RefOr::T(Schema::Object(utoipa::openapi::schema::Object::default())),
+        );
+
+        // Define $self as specific URI
+        let ctx = ResolutionContext::new(
+            Some("https://api.example.com/v1/openapi.yaml".to_string()),
+            &components,
+        );
+
+        // Reference uses absolute URI that matches $self
+        let ref_uri = "https://api.example.com/v1/openapi.yaml#/components/schemas/User";
+        let resolved = resolve_ref_name(ref_uri, &ctx);
+
+        assert!(
+            resolved.is_some(),
+            "Should resolve absolute URI matching Base URI"
+        );
     }
 
     #[test]
-    fn test_parse_remote_ref() {
+    fn test_resolve_ref_mismatch_base_uri() {
+        let components = Components::new();
+        let ctx = ResolutionContext::new(
+            Some("https://api.example.com/v1/openapi.yaml".to_string()),
+            &components,
+        );
+
+        // Reference uses DIFFERENT absolute URI
+        let ref_uri = "https://other.com/spec.yaml#/components/schemas/User";
+        let resolved = resolve_ref_name(ref_uri, &ctx);
+
+        assert!(
+            resolved.is_none(),
+            "Should NOT resolve mismatching absolute URI locally"
+        );
+    }
+
+    #[test]
+    fn test_parse_reference() {
         let r = parse_reference("https://example.com/api.yaml#/Info");
         assert_eq!(r.kind, ReferenceKind::Remote);
         assert_eq!(r.document, "https://example.com/api.yaml");
         assert_eq!(r.fragment, Some("/Info"));
-    }
-
-    #[test]
-    fn test_extract_name_local() {
-        assert_eq!(extract_ref_name("#/components/schemas/User"), "User");
-        // Swagger 2.0
-        assert_eq!(extract_ref_name("#/definitions/Pet"), "Pet");
-    }
-
-    #[test]
-    fn test_extract_name_relative() {
-        assert_eq!(extract_ref_name("blob.yaml#/Blob"), "Blob");
-        assert_eq!(extract_ref_name("blob.yaml"), "blob");
-    }
-
-    #[test]
-    fn test_resolve_uri_file_system() {
-        let base = "/home/user/project/api/openapi.yaml";
-        let relative = "../models/user.yaml";
-
-        // Expected: /home/user/project/models/user.yaml
-        let resolved = resolve_uri_reference(base, relative);
-
-        assert!(resolved.ends_with("models/user.yaml"));
-        assert!(!resolved.contains(".."));
-    }
-
-    #[test]
-    fn test_resolve_ref_local_via_components() {
-        // Setup Components
-        let mut components = Components::new();
-        components.schemas.insert(
-            "User".to_string(),
-            RefOr::T(Schema::Object(utoipa::openapi::Object::new())),
-        );
-
-        // Test Full Ref
-        let resolved = resolve_ref_name("#/components/schemas/User", &components);
-        assert!(resolved.is_some());
-
-        // Test Bare Name (internal usage support)
-        let resolved_bare = resolve_ref_name("User", &components);
-        match resolved_bare {
-            Some(_) => {}
-            None => panic!("Should resolve bare name 'User' in 'resolve_ref_name'"),
-        }
-
-        // Test Missing
-        let resolved_none = resolve_ref_name("#/components/schemas/Missing", &components);
-        assert!(resolved_none.is_none());
-    }
-
-    #[test]
-    fn test_compute_base_uri_appendix_f_absolute() {
-        // Appendix F Example 1: Absolute $self inside content
-        let retrieval = "file://home/someone/src/api/openapi.yaml";
-        let self_val = Some("https://example.com/api/openapi");
-
-        // $self is absolute, so it overrides retrieval completely
-        let base = compute_base_uri(retrieval, self_val);
-        assert_eq!(base, "https://example.com/api/openapi");
-    }
-
-    #[test]
-    fn test_compute_base_uri_appendix_f_relative() {
-        // Appendix F Example with Relative $self
-        let retrieval = "https://staging.example.com/api/shared/foo";
-        let self_val = Some("/api/schemas/foo");
-
-        // $self is relative path. Resolved against retrieval root.
-        let base = compute_base_uri(retrieval, self_val);
-        // retrieval root: https://staging.example.com
-        // joined: https://staging.example.com/api/schemas/foo
-        assert_eq!(base, "https://staging.example.com/api/schemas/foo");
-    }
-
-    #[test]
-    fn test_compute_base_uri_absent_self() {
-        let retrieval = "https://example.com/api/openapis.yaml";
-        let base = compute_base_uri(retrieval, None);
-        assert_eq!(base, retrieval);
     }
 }

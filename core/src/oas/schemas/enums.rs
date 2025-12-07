@@ -60,10 +60,12 @@ pub(crate) fn parse_variants(
         let mut aliases = Vec::new();
 
         if let Some(map) = mapping {
+            // Only Refs can be reliably mapped via reference target matching in this static analyzer
             if let RefOr::Ref(r) = item {
                 let ref_target_name = extract_ref_name(&r.ref_location);
                 for (mapped_key, mapped_ref) in map {
                     let mapped_target = extract_ref_name(mapped_ref);
+                    // Matches if the Ref in oneOf points to "Cat" and mapping points to "Cat"
                     if mapped_target == ref_target_name {
                         if rename.is_none() {
                             rename = Some(mapped_key.clone());

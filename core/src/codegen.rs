@@ -8,6 +8,7 @@
 //! into valid, compilable Rust code. It handles:
 //! - Dependency analysis (auto-injecting imports like `Uuid`, `chrono`, `serde`).
 //! - Attribute injection (`derive`, `serde` options, `deprecated`).
+//! - Formats `discriminator` mappings into Serde attributes (`tag`, `rename`, `alias`).
 //! - Formatting and comments preservation including external docs links.
 
 use crate::error::{AppError, AppResult};
@@ -203,6 +204,15 @@ fn generate_enum_body(en: &ParsedEnum) -> String {
         "",
     ));
 
+    if let Some(mapping) = &en.discriminator_mapping {
+        if !mapping.is_empty() {
+            code.push_str("///\n/// **Discriminator Mapping:**\n");
+            for (key, val) in mapping {
+                code.push_str(&format!("/// * `{}` -> `{}`\n", key, val));
+            }
+        }
+    }
+
     if en.is_deprecated {
         code.push_str("#[deprecated]\n");
     }
@@ -293,6 +303,7 @@ fn collect_imports(model: &ParsedModel, imports: &mut BTreeSet<String>) {
 mod tests {
     use super::*;
     use crate::parser::{ParsedExternalDocs, ParsedField, ParsedVariant};
+    use std::collections::BTreeMap;
 
     fn field(name: &str, ty: &str) -> ParsedField {
         ParsedField {
@@ -358,7 +369,7 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_enum_tagged() {
+    fn test_generate_enum_tagged_with_alias() {
         let en = ParsedEnum {
             name: "Pet".into(),
             description: Some("Polymorphic pet".into()),
@@ -367,24 +378,15 @@ mod tests {
             untagged: false,
             is_deprecated: false,
             external_docs: None,
-            variants: vec![
-                ParsedVariant {
-                    name: "Cat".into(),
-                    ty: Some("CatInfo".into()),
-                    description: None,
-                    rename: Some("cat".into()),
-                    aliases: Some(vec!["kitty".into()]),
-                    is_deprecated: false,
-                },
-                ParsedVariant {
-                    name: "Dog".into(),
-                    ty: Some("DogInfo".into()),
-                    description: None,
-                    rename: Some("dog".into()),
-                    aliases: None,
-                    is_deprecated: false,
-                },
-            ],
+            variants: vec![ParsedVariant {
+                name: "Cat".into(),
+                ty: Some("CatInfo".into()),
+                description: None,
+                rename: Some("cat".into()),
+                aliases: Some(vec!["kitty".into()]),
+                is_deprecated: false,
+            }],
+            discriminator_mapping: None,
         };
 
         let code = generate_dtos(&[ParsedModel::Enum(en)]);
@@ -393,6 +395,31 @@ mod tests {
         assert!(code.contains("    #[serde(rename = \"cat\")]"));
         assert!(code.contains("    #[serde(alias = \"kitty\")]"));
         assert!(code.contains("    Cat(CatInfo),"));
+    }
+
+    #[test]
+    fn test_generate_enum_with_mapping_comments() {
+        let mut mapping = BTreeMap::new();
+        mapping.insert(
+            "mapped_val".to_string(),
+            "#/components/schemas/Mapped".to_string(),
+        );
+
+        let en = ParsedEnum {
+            name: "MappedEnum".into(),
+            description: None,
+            rename: None,
+            tag: Some("kind".into()),
+            untagged: false,
+            is_deprecated: false,
+            external_docs: None,
+            variants: vec![],
+            discriminator_mapping: Some(mapping),
+        };
+
+        let code = generate_dtos(&[ParsedModel::Enum(en)]);
+        assert!(code.contains("/// **Discriminator Mapping:**"));
+        assert!(code.contains("/// * `mapped_val` -> `#/components/schemas/Mapped`"));
     }
 
     #[test]
@@ -424,6 +451,7 @@ mod tests {
                     is_deprecated: false,
                 },
             ],
+            discriminator_mapping: None,
         };
 
         let code = generate_dtos(&[ParsedModel::Enum(en)]);

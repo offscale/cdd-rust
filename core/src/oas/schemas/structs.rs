@@ -6,12 +6,12 @@
 
 use crate::error::AppResult;
 use crate::oas::resolver::map_schema_to_rust_type;
-use crate::oas::schemas::refs::{extract_ref_name, resolve_ref_name};
+use crate::oas::schemas::refs::{extract_ref_name, resolve_ref_name, ResolutionContext};
 use crate::parser::ParsedField;
 use std::collections::HashSet;
 use utoipa::openapi::{
     schema::{Schema, SchemaType, Type},
-    Components, Deprecated, RefOr,
+    Deprecated, RefOr,
 };
 
 /// Recursively gathers fields from a schema, handling `allOf` flattening and `Ref` lookup.
@@ -19,16 +19,16 @@ use utoipa::openapi::{
 /// # Arguments
 ///
 /// * `root_schema` - The schema definition to process (Object or AllOf).
-/// * `components` - Global definitions for resolving references.
+/// * `context` - Resolution context containing components and base URI.
 pub(crate) fn flatten_schema_fields(
     root_schema: &Schema,
-    components: &Components,
+    context: &ResolutionContext,
 ) -> AppResult<Vec<ParsedField>> {
     // Use Vec to preserve order, handle overrides manually
     let mut fields: Vec<ParsedField> = Vec::new();
     let mut visited_refs = HashSet::new();
 
-    collect_fields_recursive(root_schema, components, &mut fields, &mut visited_refs)?;
+    collect_fields_recursive(root_schema, context, &mut fields, &mut visited_refs)?;
 
     Ok(fields)
 }
@@ -41,7 +41,7 @@ pub(crate) fn flatten_schema_fields(
 /// - If `additionalProperties` is present: add a flattened HashMap field.
 fn collect_fields_recursive(
     schema: &Schema,
-    components: &Components,
+    context: &ResolutionContext,
     fields: &mut Vec<ParsedField>,
     visited: &mut HashSet<String>,
 ) -> AppResult<()> {
@@ -122,7 +122,7 @@ fn collect_fields_recursive(
             // Iterate items and merge
             for item in &all_of.items {
                 match item {
-                    RefOr::T(s) => collect_fields_recursive(s, components, fields, visited)?,
+                    RefOr::T(s) => collect_fields_recursive(s, context, fields, visited)?,
                     RefOr::Ref(r) => {
                         let ref_name = extract_ref_name(&r.ref_location);
 
@@ -132,8 +132,9 @@ fn collect_fields_recursive(
                         }
                         visited.insert(ref_name.clone());
 
-                        if let Some(resolved) = resolve_ref_name(&ref_name, components) {
-                            collect_fields_recursive(resolved, components, fields, visited)?;
+                        // Use Context-aware resolution
+                        if let Some(resolved) = resolve_ref_name(&r.ref_location, context) {
+                            collect_fields_recursive(resolved, context, fields, visited)?;
                         }
 
                         visited.remove(&ref_name);

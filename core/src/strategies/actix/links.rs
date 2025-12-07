@@ -27,14 +27,16 @@ pub fn generate_link_construction(link: &ParsedLink) -> (String, String) {
         // Static link
         code.push_str(&format!("    let {} = \"{}\";\n", var_name, uri_template));
     } else {
-        // Dynamic link: format!(".../{id}", id = ...)
+        // Dynamic link formatting
         let mut format_args = Vec::new();
         let rust_template = uri_template.clone();
 
-        for (param_name, expr) in &link.parameters {
-            let source_var = resolve_runtime_expr(expr);
+        for (param_name, expr_obj) in &link.parameters {
+            // Resolve the Runtime Expression into a Rust variable accessor / code snippet
+            let source_var = resolve_runtime_expr(expr_obj);
 
             // If the template contains {param_name}, we can use format! args.
+            // OAS Rule: Parameters can also be passed to operation args, not just template subst.
             if rust_template.contains(&format!("{{{}}}", param_name)) {
                 format_args.push(format!("{} = {}", param_name, source_var));
             }
@@ -48,8 +50,9 @@ pub fn generate_link_construction(link: &ParsedLink) -> (String, String) {
                 format_args.join(", ")
             ));
         } else {
+            // Fallback: Parameters defined but not used in template (likely query params or body transfer)
             code.push_str(&format!(
-                "    let {} = \"{}\"; // Params: {:?}\n",
+                "    let {} = \"{}\"; // Unused Params: {:?}\n",
                 var_name, uri_template, link.parameters
             ));
         }

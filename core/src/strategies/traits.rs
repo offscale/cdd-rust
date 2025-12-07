@@ -75,7 +75,11 @@ pub trait BackendStrategy {
     fn form_extractor(&self, body_type: &str) -> String;
 
     /// Generates the type string for Multipart request body extraction.
-    fn multipart_extractor(&self) -> String;
+    ///
+    /// # Arguments
+    ///
+    /// * `body_type` - The Rust type of the body (e.g. `UploadForm`).
+    fn multipart_extractor(&self, body_type: &str) -> String;
 
     /// Generates the type string for a Security extraction/Guard.
     /// Used when `security: [{...}]` is present.

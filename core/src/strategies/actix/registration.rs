@@ -42,6 +42,7 @@ mod tests {
     fn test_custom_registration() {
         let route = ParsedRoute {
             path: "/p".into(),
+            base_path: None,
             method: "CUSTOM".into(),
             handler_name: "h".into(),
             params: vec![],

@@ -45,7 +45,15 @@ fn generate_test_fn(
 ) -> String {
     let fn_name = format!("test_{}", route.handler_name);
 
-    let mut uri = route.path.clone();
+    // Prepend base_path if it exists.
+    // This allows tests to hit scopes like `/api/v1/users` even if the route definition is just `/users`.
+    let full_path_template = if let Some(base) = &route.base_path {
+        format!("{}{}", base, route.path)
+    } else {
+        route.path.clone()
+    };
+
+    let mut uri = full_path_template.clone();
 
     for param in &route.params {
         if param.source == ParamSource::Path {
@@ -130,6 +138,7 @@ mod tests {
     fn test_generate_contract_test_structure() {
         let routes = vec![ParsedRoute {
             path: "/users/{id}".into(),
+            base_path: None,
             method: "GET".into(),
             handler_name: "get_user".into(),
             params: vec![crate::oas::RouteParam {
@@ -170,6 +179,7 @@ mod tests {
     fn test_generate_with_query_params() {
         let routes = vec![ParsedRoute {
             path: "/search".into(),
+            base_path: None,
             method: "GET".into(),
             handler_name: "search_items".into(),
             params: vec![
@@ -210,6 +220,7 @@ mod tests {
     fn test_generate_with_body() {
         let routes = vec![ParsedRoute {
             path: "/create".into(),
+            base_path: None,
             method: "POST".into(),
             handler_name: "create_item".into(),
             params: vec![],
@@ -231,5 +242,32 @@ mod tests {
         let strategy = ActixStrategy;
         let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy).unwrap();
         assert!(code.contains(".set_json(serde_json::json!"));
+    }
+
+    #[test]
+    fn test_generate_with_base_path() {
+        let routes = vec![ParsedRoute {
+            path: "/ping".into(),
+            base_path: Some("/api/v1".into()),
+            method: "GET".into(),
+            handler_name: "ping".into(),
+            params: vec![],
+            request_body: None,
+            security: vec![],
+            response_type: None,
+            response_headers: vec![],
+            response_links: None,
+            kind: RouteKind::Path,
+            callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
+        }];
+
+        let strategy = ActixStrategy;
+        let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy).unwrap();
+        // Expect URI to include base path
+        assert!(code.contains(".uri(\"/api/v1/ping\")"));
+        // Expect validation logic to use original template
+        assert!(code.contains("validate_response(resp, \"GET\", \"/ping\").await;"));
     }
 }

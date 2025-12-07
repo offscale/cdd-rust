@@ -79,7 +79,8 @@ pub(crate) fn generate_function(
         let extractor = match def.format {
             BodyFormat::Json => strategy.body_extractor(&def.ty),
             BodyFormat::Form => strategy.form_extractor(&def.ty),
-            BodyFormat::Multipart => strategy.multipart_extractor(),
+            // Pass the type to the multipart extractor
+            BodyFormat::Multipart => strategy.multipart_extractor(&def.ty),
         };
         args.push(format!("body: {}", extractor));
     }
@@ -112,6 +113,7 @@ mod tests {
     fn test_single_path_param() {
         let route = ParsedRoute {
             path: "/users/{id}".into(),
+            base_path: None,
             method: "GET".into(),
             handler_name: "get_user".into(),
             params: vec![RouteParam {
@@ -142,6 +144,7 @@ mod tests {
     fn test_query_and_body() {
         let route = ParsedRoute {
             path: "/search".into(),
+            base_path: None,
             method: "POST".into(),
             handler_name: "search".into(),
             params: vec![RouteParam {
@@ -174,9 +177,38 @@ mod tests {
     }
 
     #[test]
+    fn test_multipart_extractor_generates_typed() {
+        let route = ParsedRoute {
+            path: "/upload".into(),
+            base_path: None,
+            method: "POST".into(),
+            handler_name: "upload_file".into(),
+            params: vec![],
+            request_body: Some(RequestBodyDefinition {
+                ty: "UploadForm".into(),
+                format: BodyFormat::Multipart,
+                encoding: None,
+            }),
+            security: vec![],
+            response_type: None,
+            response_headers: vec![],
+            response_links: None,
+            kind: RouteKind::Path,
+            callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
+        };
+
+        let strategy = ActixStrategy;
+        let code = update_handler_module("", &[route], &strategy).unwrap();
+        assert!(code.contains("body: actix_multipart::form::MultipartForm<UploadForm>"));
+    }
+
+    #[test]
     fn test_oas_3_2_querystring_extractor() {
         let route = ParsedRoute {
             path: "/raw".into(),
+            base_path: None,
             method: "GET".into(),
             handler_name: "raw_search".into(),
             params: vec![RouteParam {
@@ -207,6 +239,7 @@ mod tests {
     fn test_security_stub_gen() {
         let route = ParsedRoute {
             path: "/api".into(),
+            base_path: None,
             method: "POST".into(),
             handler_name: "secure_ops".into(),
             params: vec![],
@@ -214,6 +247,7 @@ mod tests {
             security: vec![SecurityRequirement {
                 scheme_name: "ApiKey".into(),
                 scopes: vec![],
+                scheme: None, // Simplified for this test file context
             }],
             response_type: None,
             response_headers: vec![],
@@ -233,6 +267,7 @@ mod tests {
     fn test_extractor_passes_headers_info() {
         let route = ParsedRoute {
             path: "/headers".into(),
+            base_path: None,
             method: "GET".into(),
             handler_name: "get_headers".into(),
             params: vec![],

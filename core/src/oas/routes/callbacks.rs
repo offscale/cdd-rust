@@ -2,11 +2,10 @@
 
 //! # Callback Parsing
 //!
-//! Logic for extracting and resolving Callback objects (Outgoing Webhooks)
-//! from an Operation.
+//! Logic for extracting and resolving Callback objects (Outgoing Webhooks).
 
 use crate::error::{AppError, AppResult};
-use crate::oas::models::ParsedCallback;
+use crate::oas::models::{ParsedCallback, RuntimeExpression};
 use crate::oas::resolver::extract_request_body_type;
 use crate::oas::resolver::responses::extract_response_details;
 use crate::oas::routes::shims::{ShimComponents, ShimOperation, ShimPathItem};
@@ -29,7 +28,6 @@ pub fn resolve_callback_object(
                 .to_string();
 
             if let Some(comps) = components {
-                // callbacks are in extra
                 if let Some(cb_json) = comps.extra.get("callbacks").and_then(|c| c.get(&ref_name)) {
                     let map =
                         serde_json::from_value::<BTreeMap<String, ShimPathItem>>(cb_json.clone())
@@ -58,10 +56,6 @@ pub fn extract_callback_operations(
     path_item: &ShimPathItem,
     components: Option<&ShimComponents>,
 ) -> AppResult<()> {
-    // We treat callbacks as outgoing requests, so we care about the Method, Body, and Response (meaning what the receiver returns)
-    // Unlike the main route, we don't need full parameter resolution for the handler generation loop yet,
-    // but we capture enough to generate a client or stub.
-
     let mut add_cb_op = |method: &str, op: &Option<ShimOperation>| -> AppResult<()> {
         if let Some(o) = op {
             let mut req_body = None;
@@ -80,7 +74,7 @@ pub fn extract_callback_operations(
 
             callbacks.push(ParsedCallback {
                 name: name.to_string(),
-                expression: expression.to_string(),
+                expression: RuntimeExpression::new(expression),
                 method: method.to_string(),
                 request_body: req_body,
                 response_type: resp_type,

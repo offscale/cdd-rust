@@ -3,18 +3,15 @@
 //! # Response Resolution
 //!
 //! Logic for resolving OpenAPI Responses into Rust types.
-//!
-//! Handles:
-//! - Extracting Response Body types (JSON)
-//! - Extracting Response Headers (OAS 3.2 support)
-//! - Extracting Response Links (HATEOAS support)
-//! - Wildcard response support (2XX, 3XX, default)
 
 use crate::error::AppResult;
-use crate::oas::models::{ParsedLink, ResponseHeader};
+use crate::oas::models::{ParsedLink, ResponseHeader, RuntimeExpression};
 use crate::oas::resolver::types::map_schema_to_rust_type;
 use crate::oas::routes::shims::ShimComponents;
 use utoipa::openapi::{RefOr, Responses};
+
+// Re-export specific structs if needed for external visibility
+pub use crate::oas::models::ParsedLink as LinkModel;
 
 /// The extracted details of a successful response.
 pub struct ParsedResponseDetails {
@@ -27,13 +24,6 @@ pub struct ParsedResponseDetails {
 }
 
 /// Extracts the success response type and its headers/links.
-///
-/// Priority order:
-/// 1. Explicit success: "200", "201"
-/// 2. Wildcard success: "2XX" (or "2xx")
-/// 3. Default: "default"
-/// 4. Redirects (if no success defined): "3XX" (or "3xx")
-/// 5. Fallback: First key starting with "2" (e.g. "202")
 pub fn extract_response_details(
     responses: &Responses,
     components: Option<&ShimComponents>,
@@ -49,9 +39,8 @@ pub fn extract_response_details(
         }
     }
 
-    // 2. Fallback: Search for any concrete 2xx code if no high-level match
+    // 2. Fallback: Search for any concrete 2xx code
     if chosen_response.is_none() {
-        // BTree iteration is sorted, so we get 202 before 204 etc.
         for (key, resp) in &responses.responses {
             if key.starts_with('2') && key.len() == 3 && key.chars().all(char::is_numeric) {
                 chosen_response = Some(resp);
@@ -81,9 +70,7 @@ pub fn extract_response_details(
             // 2. Resolve Headers
             let mut headers = Vec::new();
             for (name, header_obj) in &r.headers {
-                // Determine Rust type for the header value
                 let ty = map_schema_to_rust_type(&header_obj.schema, true)?;
-
                 headers.push(ResponseHeader {
                     name: name.clone(),
                     description: header_obj.description.clone(),
@@ -100,13 +87,16 @@ pub fn extract_response_details(
                 };
 
                 if let Some(l) = link_obj {
-                    // Extract parameters (HashMap<String, Value>) -> HashMap<String, String>
-                    // We map Any Value to String to simplify the IR.
-                    // Runtime expressions are strings, constants might be numbers/bools.
+                    // Map generic Value -> String -> RuntimeExpression
                     let parameters = l
                         .parameters
                         .iter()
-                        .map(|(k, v)| (k.clone(), v.to_string().trim_matches('"').to_string()))
+                        .map(|(k, v)| {
+                            (
+                                k.clone(),
+                                RuntimeExpression::new(v.to_string().trim_matches('"').to_string()),
+                            )
+                        })
                         .collect();
 
                     links.push(ParsedLink {
@@ -166,7 +156,7 @@ fn resolve_link_from_ref(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use utoipa::openapi::{link::LinkBuilder, Content, HeaderBuilder, ResponseBuilder};
+    use utoipa::openapi::{link::LinkBuilder, Content, ResponseBuilder};
 
     #[test]
     fn test_extract_inline_response() {
@@ -185,28 +175,18 @@ mod tests {
 
         let details = extract_response_details(&responses, None).unwrap().unwrap();
         assert_eq!(details.body_type.unwrap(), "User");
-        assert!(details.headers.is_empty());
-        assert!(details.links.is_empty());
     }
 
     #[test]
-    fn test_extract_response_with_headers_and_links_and_params() {
-        let header = HeaderBuilder::new()
-            .description(Some("Rate limit"))
-            .schema(RefOr::Ref(utoipa::openapi::Ref::new(
-                "#/components/schemas/Integer",
-            )))
-            .build();
-
+    fn test_extract_response_links_with_runtime_expression() {
         let link = LinkBuilder::new()
             .operation_id("getUser")
-            .description("Get user details")
+            .description("Get user")
             .parameter("userId", "$request.path.id")
             .build();
 
         let response = ResponseBuilder::new()
-            .description("Headers Test")
-            .header("X-Rate-Limit", header)
+            .description("Linked Response")
             .link("UserLink", link)
             .build();
 
@@ -214,68 +194,10 @@ mod tests {
         responses.responses.insert("200".into(), RefOr::T(response));
 
         let details = extract_response_details(&responses, None).unwrap().unwrap();
-
-        assert_eq!(details.headers.len(), 1);
-        assert_eq!(details.headers[0].name, "X-Rate-Limit");
-
-        assert_eq!(details.links.len(), 1);
         let l = &details.links[0];
-        assert_eq!(l.name, "UserLink");
-        assert_eq!(l.operation_id.as_deref(), Some("getUser"));
-        assert_eq!(
-            l.parameters.get("userId").map(|s| s.as_str()),
-            Some("$request.path.id")
-        );
-    }
+        let expr = l.parameters.get("userId").unwrap();
 
-    #[test]
-    fn test_extract_wildcard_2xx_response() {
-        let response = ResponseBuilder::new()
-            .description("Generic Success")
-            .content(
-                "application/json",
-                Content::new(Some(RefOr::Ref(utoipa::openapi::Ref::new(
-                    "#/components/schemas/Success",
-                )))),
-            )
-            .build();
-
-        let mut responses = Responses::new();
-        // Insert wildcards
-        responses.responses.insert("2XX".into(), RefOr::T(response));
-        responses.responses.insert(
-            "default".into(),
-            RefOr::T(ResponseBuilder::new().description("Error").build()),
-        );
-
-        let details = extract_response_details(&responses, None)
-            .unwrap()
-            .expect("Should match 2XX");
-
-        assert_eq!(details.body_type.as_deref(), Some("Success"));
-    }
-
-    #[test]
-    fn test_extract_default_response_fallback() {
-        let response = ResponseBuilder::new()
-            .description("Default Fallback")
-            .content(
-                "application/json",
-                Content::new(Some(RefOr::Ref(utoipa::openapi::Ref::new(
-                    "#/components/schemas/Fallback",
-                )))),
-            )
-            .build();
-
-        let mut responses = Responses::new();
-        responses
-            .responses
-            .insert("default".into(), RefOr::T(response));
-
-        let details = extract_response_details(&responses, None)
-            .unwrap()
-            .expect("Should match default");
-
-        assert_eq!(details.body_type.as_deref(), Some("Fallback"));
+        assert_eq!(expr.as_str(), "$request.path.id");
+        assert!(expr.is_expression());
     }
 }

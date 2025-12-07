@@ -51,6 +51,11 @@ pub struct ShimOpenApi {
     #[serde(default)]
     pub servers: Option<Vec<ShimServer>>,
 
+    /// Base path (Swagger 2.0 Legacy).
+    /// Prepended to all paths in valid Swagger 2.0 docs.
+    #[serde(rename = "basePath")]
+    pub base_path: Option<String>,
+
     /// Path items.
     #[serde(default)]
     pub paths: BTreeMap<String, ShimPathItem>,
@@ -70,6 +75,10 @@ pub struct ShimOpenApi {
     /// External documentation.
     #[serde(rename = "externalDocs")]
     pub external_docs: Option<ShimExternalDocs>,
+
+    /// Specification Extensions (x-...).
+    #[serde(flatten)]
+    pub extensions: BTreeMap<String, Value>,
 }
 
 /// Components object (OAS 3.x) holding reusable definitions.
@@ -84,6 +93,9 @@ pub struct ShimComponents {
 
     /// Capture other loosely typed component maps (schemas, parameters, etc.)
     /// to maintain compatibility with existing resolvers that expect generic Value lookups.
+    ///
+    /// Note: This field effectively captures both standard component types we don't strictly type yet
+    /// AND specification extensions at the component level.
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -123,6 +135,9 @@ pub struct ShimApiKey {
     pub in_loc: String,
     /// Description.
     pub description: Option<String>,
+    /// Extensions.
+    #[serde(flatten)]
+    pub extensions: BTreeMap<String, Value>,
 }
 
 /// HTTP Authentication definition.
@@ -135,6 +150,9 @@ pub struct ShimHttpAuth {
     pub bearer_format: Option<String>,
     /// Description.
     pub description: Option<String>,
+    /// Extensions.
+    #[serde(flatten)]
+    pub extensions: BTreeMap<String, Value>,
 }
 
 /// OpenID Connect definition.
@@ -145,6 +163,9 @@ pub struct ShimOpenIdConnect {
     pub open_id_connect_url: String,
     /// Description.
     pub description: Option<String>,
+    /// Extensions.
+    #[serde(flatten)]
+    pub extensions: BTreeMap<String, Value>,
 }
 
 /// Mutual TLS definition.
@@ -152,6 +173,9 @@ pub struct ShimOpenIdConnect {
 pub struct ShimMutualTls {
     /// Description.
     pub description: Option<String>,
+    /// Extensions.
+    #[serde(flatten)]
+    pub extensions: BTreeMap<String, Value>,
 }
 
 /// OAuth2 definition.
@@ -174,6 +198,9 @@ pub struct ShimOAuth2 {
     pub token_url: Option<String>,
     /// Scopes (OAS 2.0 legacy).
     pub scopes: Option<BTreeMap<String, String>>,
+    /// Extensions.
+    #[serde(flatten)]
+    pub extensions: BTreeMap<String, Value>,
 }
 
 /// Container for OAuth2 Flows (OAS 3.x).
@@ -189,6 +216,9 @@ pub struct ShimOAuthFlows {
     /// Authorization Code Flow.
     #[serde(rename = "authorizationCode")]
     pub authorization_code: Option<ShimOAuthFlow>,
+    /// Extensions.
+    #[serde(flatten)]
+    pub extensions: BTreeMap<String, Value>,
 }
 
 /// Single OAuth Flow definition.
@@ -206,6 +236,9 @@ pub struct ShimOAuthFlow {
     /// Available scopes and descriptions.
     #[serde(default)]
     pub scopes: BTreeMap<String, String>,
+    /// Extensions.
+    #[serde(flatten)]
+    pub extensions: BTreeMap<String, Value>,
 }
 
 /// Metadata about the API (Info Object).
@@ -226,6 +259,9 @@ pub struct ShimInfo {
     pub license: Option<ShimLicense>,
     /// The version of the OpenAPI document.
     pub version: String,
+    /// Extensions.
+    #[serde(flatten)]
+    pub extensions: BTreeMap<String, Value>,
 }
 
 /// Contact information for the exposed API.
@@ -237,6 +273,9 @@ pub struct ShimContact {
     pub url: Option<String>,
     /// The email address of the contact person/organization.
     pub email: Option<String>,
+    /// Extensions.
+    #[serde(flatten)]
+    pub extensions: BTreeMap<String, Value>,
 }
 
 /// License information for the exposed API.
@@ -248,6 +287,9 @@ pub struct ShimLicense {
     pub identifier: Option<String>,
     /// A URL to the license used for the API.
     pub url: Option<String>,
+    /// Extensions.
+    #[serde(flatten)]
+    pub extensions: BTreeMap<String, Value>,
 }
 
 /// An object representing a Server.
@@ -260,6 +302,9 @@ pub struct ShimServer {
     /// A map between a variable name and its value.
     #[serde(default)]
     pub variables: Option<BTreeMap<String, ShimServerVariable>>,
+    /// Extensions.
+    #[serde(flatten)]
+    pub extensions: BTreeMap<String, Value>,
 }
 
 /// An object representing a Server Variable.
@@ -272,6 +317,9 @@ pub struct ShimServerVariable {
     pub default: String,
     /// An optional description for the server variable.
     pub description: Option<String>,
+    /// Extensions.
+    #[serde(flatten)]
+    pub extensions: BTreeMap<String, Value>,
 }
 
 /// Allows referencing an external resource for extended documentation.
@@ -281,6 +329,9 @@ pub struct ShimExternalDocs {
     pub description: Option<String>,
     /// The URL for the target documentation.
     pub url: String,
+    /// Extensions.
+    #[serde(flatten)]
+    pub extensions: BTreeMap<String, Value>,
 }
 
 /// Adds metadata to a single tag that is used by the Operation Object.
@@ -295,6 +346,9 @@ pub struct ShimTag {
     /// Additional external documentation for this tag.
     #[serde(rename = "externalDocs")]
     pub external_docs: Option<ShimExternalDocs>,
+    /// Extensions.
+    #[serde(flatten)]
+    pub extensions: BTreeMap<String, Value>,
 }
 
 /// A Path Item containing operations for a specific URL/Webhook.
@@ -321,6 +375,9 @@ pub struct ShimPathItem {
     pub trace: Option<ShimOperation>,
     /// QUERY operation (OAS 3.2+).
     pub query: Option<ShimOperation>,
+    /// Extensions.
+    #[serde(flatten)]
+    pub extensions: BTreeMap<String, Value>,
 }
 
 /// A single HTTP Operation definition.
@@ -353,6 +410,9 @@ pub struct ShimOperation {
     /// External documentation definition.
     #[serde(rename = "externalDocs")]
     pub external_docs: Option<ShimExternalDocs>,
+    /// Extensions.
+    #[serde(flatten)]
+    pub extensions: BTreeMap<String, Value>,
 }
 
 #[cfg(test)]
@@ -490,5 +550,56 @@ paths: {}
             definitions.get("basicAuth"),
             Some(ShimSecurityScheme::Basic)
         ));
+    }
+
+    #[test]
+    fn test_shim_swagger_base_path() {
+        let yaml = r#"
+swagger: "2.0"
+info: {title: Legacy with Base, version: 1}
+basePath: /api/v1
+paths: {}
+"#;
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(openapi.base_path.as_deref(), Some("/api/v1"));
+    }
+
+    #[test]
+    fn test_extensions_captured() {
+        // Test that x- vendor extensions are preserved
+        let yaml = r#"
+openapi: 3.2.0
+info:
+  title: Ext test
+  version: 1.0
+  x-internal: true
+paths:
+  /foo:
+    get:
+      x-controller: FooController
+      responses: {}
+x-global-config:
+  env: dev
+"#;
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
+
+        // Root extension
+        let global = openapi.extensions.get("x-global-config").unwrap();
+        assert_eq!(global["env"], "dev");
+
+        // Info extension
+        let info = openapi.info.unwrap();
+        assert_eq!(
+            info.extensions.get("x-internal").unwrap(),
+            &Value::Bool(true)
+        );
+
+        // Operation extension
+        let path_item = openapi.paths.get("/foo").unwrap();
+        let op = path_item.get.as_ref().unwrap();
+        assert_eq!(
+            op.extensions.get("x-controller").unwrap(),
+            &Value::String("FooController".to_string())
+        );
     }
 }

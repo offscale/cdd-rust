@@ -71,8 +71,8 @@ impl BackendStrategy for ActixStrategy {
         extractors::form_extractor(body_type)
     }
 
-    fn multipart_extractor(&self) -> String {
-        extractors::multipart_extractor()
+    fn multipart_extractor(&self, body_type: &str) -> String {
+        extractors::multipart_extractor(body_type)
     }
 
     fn security_extractor(&self, requirements: &[SecurityRequirement]) -> String {
@@ -119,7 +119,7 @@ impl BackendStrategy for ActixStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::oas::models::{ParsedLink, RouteKind};
+    use crate::oas::models::{ParsedLink, RouteKind, RuntimeExpression};
     use crate::oas::ParsedRoute;
     use std::collections::HashMap;
 
@@ -135,7 +135,7 @@ mod tests {
     fn test_actix_handler_signature_with_links_generated() {
         let s = ActixStrategy;
         let mut params = HashMap::new();
-        params.insert("id".to_string(), "$request.path.id".to_string());
+        params.insert("id".to_string(), RuntimeExpression::new("$request.path.id"));
 
         let links = vec![ParsedLink {
             name: "Self".to_string(),
@@ -161,6 +161,7 @@ mod tests {
         let s = ActixStrategy;
         let route = ParsedRoute {
             path: "/path".into(),
+            base_path: None,
             method: "QUERY".into(),
             handler_name: "query_handler".into(),
             params: vec![],
