@@ -25,6 +25,11 @@ pub struct ShimOpenApi {
     /// Swagger version (e.g. "2.0") for legacy support.
     pub swagger: Option<String>,
 
+    /// The `$self` keyword (OAS 3.2+).
+    /// Establishes the Base URI for the document.
+    #[serde(rename = "$self")]
+    pub self_uri: Option<String>,
+
     /// Metadata about the API.
     /// Required in OAS 3.x.
     pub info: Option<ShimInfo>,
@@ -270,7 +275,7 @@ pub struct ShimServerVariable {
 }
 
 /// Allows referencing an external resource for extended documentation.
-#[derive(Deserialize, Serialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub struct ShimExternalDocs {
     /// A description of the target documentation.
     pub description: Option<String>,
@@ -314,6 +319,8 @@ pub struct ShimPathItem {
     pub head: Option<ShimOperation>,
     /// TRACE operation.
     pub trace: Option<ShimOperation>,
+    /// QUERY operation (OAS 3.2+).
+    pub query: Option<ShimOperation>,
 }
 
 /// A single HTTP Operation definition.
@@ -340,6 +347,12 @@ pub struct ShimOperation {
     /// A list of tags for API documentation control.
     #[serde(default)]
     pub tags: Option<Vec<String>>,
+    /// Whether this operation is deprecated.
+    #[serde(default)]
+    pub deprecated: bool,
+    /// External documentation definition.
+    #[serde(rename = "externalDocs")]
+    pub external_docs: Option<ShimExternalDocs>,
 }
 
 #[cfg(test)]
@@ -361,6 +374,55 @@ paths: {}
             openapi.json_schema_dialect.as_deref(),
             Some("https://spec.openapis.org/oas/3.1/dialect/base")
         );
+    }
+
+    #[test]
+    fn test_shim_self_uri_parsing() {
+        let yaml = r#"
+openapi: 3.2.0
+$self: https://example.com/api/v1/definition.yaml
+info:
+  title: Self Test
+  version: 1.0.0
+paths: {}
+"#;
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(
+            openapi.self_uri.as_deref(),
+            Some("https://example.com/api/v1/definition.yaml")
+        );
+    }
+
+    #[test]
+    fn test_shim_path_item_query_method_parsing() {
+        // Test ensuring 'query' field is parseable in ShimPathItem
+        let yaml = r#"
+query:
+  operationId: queryOp
+  responses: {}
+"#;
+        let path_item: ShimPathItem = serde_yaml::from_str(yaml).unwrap();
+        assert!(path_item.query.is_some());
+        assert_eq!(
+            path_item.query.unwrap().operation_id.as_deref(),
+            Some("queryOp")
+        );
+    }
+
+    #[test]
+    fn test_shim_operation_metadata() {
+        let yaml = r#"
+operationId: testOp
+deprecated: true
+externalDocs:
+  url: https://example.com
+  description: More info
+responses: {}
+"#;
+        let op: ShimOperation = serde_yaml::from_str(yaml).unwrap();
+        assert!(op.deprecated);
+        assert!(op.external_docs.is_some());
+        assert_eq!(op.external_docs.unwrap().url, "https://example.com");
     }
 
     #[test]

@@ -6,7 +6,7 @@
 //! Support for OAS 3.2 `encoding` definitions in multipart and url-encoded forms.
 
 use crate::error::AppResult;
-use crate::oas::models::{BodyFormat, RequestBodyDefinition};
+use crate::oas::models::{BodyFormat, EncodingInfo, RequestBodyDefinition};
 use crate::oas::resolver::types::map_schema_to_rust_type;
 use std::collections::HashMap;
 use utoipa::openapi::encoding::Encoding;
@@ -38,7 +38,7 @@ pub fn extract_request_body_type(
     if let Some(media) = content.get("application/x-www-form-urlencoded") {
         if let Some(schema_ref) = &media.schema {
             let type_str = map_schema_to_rust_type(schema_ref, true)?;
-            let encoding = extract_encoding_map(&media.encoding);
+            let encoding = extract_encoding_map(&media.encoding)?;
 
             return Ok(Some(RequestBodyDefinition {
                 ty: type_str,
@@ -58,7 +58,7 @@ pub fn extract_request_body_type(
             "Multipart".to_string()
         };
 
-        let encoding = extract_encoding_map(&media.encoding);
+        let encoding = extract_encoding_map(&media.encoding)?;
 
         return Ok(Some(RequestBodyDefinition {
             ty: type_str,
@@ -70,34 +70,44 @@ pub fn extract_request_body_type(
     Ok(None)
 }
 
-/// Helper to extract encoding map (property -> content-type).
+/// Helper to extract encoding map (property -> EncodingInfo).
 fn extract_encoding_map(
     encoding: &std::collections::BTreeMap<String, Encoding>,
-) -> Option<HashMap<String, String>> {
+) -> AppResult<Option<HashMap<String, EncodingInfo>>> {
     if encoding.is_empty() {
-        return None;
+        return Ok(None);
     }
 
     let mut map = HashMap::new();
     for (prop, enc) in encoding {
-        // According to OAS 3.2: contentType is string.
-        // We capture it to allow specific part handling in Strategies.
-        if let Some(ct) = &enc.content_type {
-            map.insert(prop.clone(), ct.clone());
+        // Extract headers if present
+        let mut headers = HashMap::new();
+        for (h_name, h_ref) in &enc.headers {
+            let ty = map_schema_to_rust_type(&h_ref.schema, true)?;
+            headers.insert(h_name.clone(), ty);
         }
+
+        map.insert(
+            prop.clone(),
+            EncodingInfo {
+                content_type: enc.content_type.clone(),
+                headers,
+            },
+        );
     }
 
     if map.is_empty() {
-        None
+        Ok(None)
     } else {
-        Some(map)
+        Ok(Some(map))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use utoipa::openapi::encoding::Encoding;
+    use utoipa::openapi::encoding::EncodingBuilder;
+    use utoipa::openapi::header::HeaderBuilder;
     use utoipa::openapi::request_body::RequestBodyBuilder;
     use utoipa::openapi::Content;
 
@@ -119,12 +129,21 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_multipart_with_encoding() {
-        // Encoding::builder().content_type(...) takes Option<String>
-        let png_encoding = Encoding::builder()
+    fn test_extract_multipart_with_encoding_and_headers() {
+        // Encoding with Content-Type and Custom Header
+        let png_encoding = EncodingBuilder::new()
             .content_type(Some("image/png".to_string()))
+            .header(
+                "X-Image-Id",
+                HeaderBuilder::new()
+                    .schema(RefOr::Ref(utoipa::openapi::Ref::new(
+                        "#/components/schemas/Uuid",
+                    )))
+                    .build(),
+            )
             .build();
-        let json_encoding = Encoding::builder()
+
+        let json_encoding = EncodingBuilder::new()
             .content_type(Some("application/json".to_string()))
             .build();
 
@@ -147,8 +166,16 @@ mod tests {
         assert_eq!(def.format, BodyFormat::Multipart);
 
         let enc = def.encoding.unwrap();
-        assert_eq!(enc.get("profileImage"), Some(&"image/png".to_string()));
-        assert_eq!(enc.get("metadata"), Some(&"application/json".to_string()));
+        let profile = enc.get("profileImage").unwrap();
+        assert_eq!(profile.content_type.as_deref(), Some("image/png"));
+        assert_eq!(
+            profile.headers.get("X-Image-Id").map(|s| s.as_str()),
+            Some("Uuid")
+        );
+
+        let meta = enc.get("metadata").unwrap();
+        assert_eq!(meta.content_type.as_deref(), Some("application/json"));
+        assert!(meta.headers.is_empty());
     }
 
     #[test]

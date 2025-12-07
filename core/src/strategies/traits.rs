@@ -5,7 +5,7 @@
 //! Defines the interface required to generate code for a specific web framework
 //! (e.g. Actix, Axum, Poem, etc.).
 
-use crate::oas::models::SecurityRequirement;
+use crate::oas::models::{ParsedLink, ResponseHeader, SecurityRequirement};
 use crate::oas::ParsedRoute;
 
 /// A strategy trait for decoupling framework-specific code generation.
@@ -26,11 +26,15 @@ pub trait BackendStrategy {
     /// * `func_name` - The name of the function.
     /// * `args` - A list of argument declaration strings (e.g. `id: web::Path<Uuid>`).
     /// * `response_type` - The specific return type if identified (e.g. `UserResponse`).
+    /// * `response_headers` - List of headers the response is expected to include.
+    /// * `response_links` - List of links associated with the response (HATEOAS).
     fn handler_signature(
         &self,
         func_name: &str,
         args: &[String],
         response_type: Option<&str>,
+        response_headers: &[ResponseHeader],
+        response_links: Option<&[ParsedLink]>,
     ) -> String;
 
     /// Generates the type string for path parameter extraction.
@@ -42,6 +46,13 @@ pub trait BackendStrategy {
 
     /// Generates the type string for query parameter extraction.
     fn query_extractor(&self) -> String;
+
+    /// Generates the type string for the entire Query String extraction (OAS 3.2).
+    ///
+    /// # Arguments
+    ///
+    /// * `inner_type` - The specific type the entire query string should map to.
+    fn query_string_extractor(&self, inner_type: &str) -> String;
 
     /// Generates the type string for Header parameter extraction.
     fn header_extractor(&self, inner_type: &str) -> String;

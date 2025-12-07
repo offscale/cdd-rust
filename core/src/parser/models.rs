@@ -2,6 +2,15 @@
 //!
 //! definition of Intermediate Representation (IR) structures for parsed Rust code.
 
+/// Represents a link to external documentation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedExternalDocs {
+    /// The URL to the documentation.
+    pub url: String,
+    /// A short description of the target documentation.
+    pub description: Option<String>,
+}
+
 /// Represents a field extracted from a struct or enum variant.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedField {
@@ -15,6 +24,10 @@ pub struct ParsedField {
     pub rename: Option<String>,
     /// Whether the field is marked to be skipped in serialization/schema.
     pub is_skipped: bool,
+    /// Whether the field is marked as deprecated.
+    pub is_deprecated: bool,
+    /// External documentation associated with this field.
+    pub external_docs: Option<ParsedExternalDocs>,
 }
 
 /// Represents a fully parsed struct including field and doc metadata.
@@ -28,6 +41,10 @@ pub struct ParsedStruct {
     pub rename: Option<String>,
     /// The list of fields.
     pub fields: Vec<ParsedField>,
+    /// Whether the struct is marked as deprecated.
+    pub is_deprecated: bool,
+    /// External documentation associated with this struct.
+    pub external_docs: Option<ParsedExternalDocs>,
 }
 
 /// Represents a variant in an enum.
@@ -44,6 +61,8 @@ pub struct ParsedVariant {
     pub rename: Option<String>,
     /// Serde aliases (alternative identifiers).
     pub aliases: Option<Vec<String>>,
+    /// Whether the variant is marked as deprecated.
+    pub is_deprecated: bool,
 }
 
 /// Represents a fully parsed enum.
@@ -61,6 +80,10 @@ pub struct ParsedEnum {
     pub untagged: bool,
     /// Variants.
     pub variants: Vec<ParsedVariant>,
+    /// Whether the enum is marked as deprecated.
+    pub is_deprecated: bool,
+    /// External documentation associated with this enum.
+    pub external_docs: Option<ParsedExternalDocs>,
 }
 
 /// Enum wrapper for either a Struct or an Enum model.

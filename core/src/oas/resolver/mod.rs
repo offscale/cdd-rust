@@ -19,5 +19,4 @@ pub mod types;
 // Re-export public members to maintain API compatibility
 pub use body::extract_request_body_type;
 pub use params::{resolve_parameters, ShimParameter};
-pub use responses::extract_response_success_type;
 pub use types::map_schema_to_rust_type;

@@ -7,12 +7,12 @@
 
 use crate::error::AppResult;
 use crate::oas::models::{ParsedRoute, RouteKind, RouteParam, SecurityRequirement};
-use crate::oas::resolver::{
-    extract_request_body_type, extract_response_success_type, resolve_parameters,
-};
+use crate::oas::resolver::responses::extract_response_details;
+use crate::oas::resolver::{extract_request_body_type, resolve_parameters};
 use crate::oas::routes::callbacks::{extract_callback_operations, resolve_callback_object};
 use crate::oas::routes::naming::{derive_handler_name, to_snake_case};
 use crate::oas::routes::shims::{ShimComponents, ShimOperation, ShimPathItem};
+use crate::parser::models::ParsedExternalDocs;
 use std::collections::HashMap;
 
 /// Helper to iterate methods in a ShimPathItem and extract all operations as Routes.
@@ -57,6 +57,7 @@ pub fn parse_path_item(
     add_op("OPTIONS", path_item.options)?;
     add_op("HEAD", path_item.head)?;
     add_op("TRACE", path_item.trace)?;
+    add_op("QUERY", path_item.query)?;
 
     Ok(())
 }
@@ -117,8 +118,13 @@ fn build_route(
         }
     }
 
-    // 5. Response Type
-    let response_type = extract_response_success_type(&op.responses, components)?;
+    // 5. Response Type, Headers, and Links
+    let (response_type, response_headers, response_links) =
+        if let Some(details) = extract_response_details(&op.responses, components)? {
+            (details.body_type, details.headers, details.links)
+        } else {
+            (None, Vec::new(), Vec::new())
+        };
 
     // 6. Callbacks
     let mut parsed_callbacks = Vec::new();
@@ -140,6 +146,12 @@ fn build_route(
         }
     }
 
+    // 7. Metadata (Deprecated & External Docs)
+    let external_docs = op.external_docs.map(|d| ParsedExternalDocs {
+        url: d.url,
+        description: d.description,
+    });
+
     Ok(ParsedRoute {
         path: path.to_string(),
         method: method.to_string(),
@@ -148,7 +160,78 @@ fn build_route(
         request_body,
         security,
         response_type,
+        response_headers,
+        response_links: Some(response_links),
         kind,
         callbacks: parsed_callbacks,
+        deprecated: op.deprecated,
+        external_docs,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::oas::routes::shims::ShimPathItem;
+
+    #[test]
+    fn test_parse_query_method() {
+        let yaml = r#"
+query:
+  operationId: QueryUsers
+  responses:
+    '200':
+      description: OK
+"#;
+        let path_item: ShimPathItem = serde_yaml::from_str(yaml).unwrap();
+        let mut routes = Vec::new();
+
+        parse_path_item(
+            &mut routes,
+            "/users/search",
+            path_item,
+            RouteKind::Path,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(routes.len(), 1);
+        let route = &routes[0];
+        assert_eq!(route.method, "QUERY");
+        assert_eq!(route.handler_name, "query_users");
+        assert_eq!(route.path, "/users/search");
+    }
+
+    #[test]
+    fn test_parse_routes_metadata() {
+        let yaml = r#"
+post:
+  operationId: DeprecatedOp
+  deprecated: true
+  externalDocs:
+    url: https://docs.api/deprecated
+    description: Migration Guide
+  responses: {}
+"#;
+        let path_item: ShimPathItem = serde_yaml::from_str(yaml).unwrap();
+        let mut routes = Vec::new();
+
+        parse_path_item(&mut routes, "/old", path_item, RouteKind::Path, None).unwrap();
+
+        assert_eq!(routes.len(), 1);
+        assert!(routes[0].deprecated);
+        assert_eq!(
+            routes[0].external_docs.as_ref().unwrap().url,
+            "https://docs.api/deprecated"
+        );
+        assert_eq!(
+            routes[0]
+                .external_docs
+                .as_ref()
+                .unwrap()
+                .description
+                .as_deref(),
+            Some("Migration Guide")
+        );
+    }
 }
