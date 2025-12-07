@@ -105,6 +105,7 @@ mod tests {
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            tags: vec![],
         };
 
         let source = r#"
@@ -138,6 +139,7 @@ pub fn config(cfg: &mut web::ServiceConfig) {
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            tags: vec![],
         };
 
         let source = r#"
@@ -169,6 +171,7 @@ pub fn config(cfg: &mut web::ServiceConfig) {
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            tags: vec![],
         };
 
         let source = r#"
@@ -198,6 +201,7 @@ pub fn config(cfg: &mut web::ServiceConfig) {
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            tags: vec![],
         };
         let r2 = ParsedRoute {
             path: "/b".into(),
@@ -214,6 +218,7 @@ pub fn config(cfg: &mut web::ServiceConfig) {
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            tags: vec![],
         };
 
         let source = "pub fn config(cfg: &mut web::ServiceConfig) { }";

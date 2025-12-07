@@ -7,6 +7,8 @@
 //! Supported Commands:
 //! - `sync`: Pipeline DB -> Diesel -> Model -> Schema -> OpenAPI.
 //! - `test-gen`: Generates integration tests from OpenAPI specs.
+//! - `scaffold`: Generates handler scaffolding from OpenAPI specs.
+//! - `schema-gen`: Generates JSON Schemas from Rust structs.
 
 use cdd_core::strategies::ActixStrategy;
 use cdd_core::AppResult;
@@ -16,6 +18,8 @@ use crate::generator::DieselMapper;
 
 mod error;
 mod generator;
+mod scaffold;
+mod schema_gen;
 mod sync;
 mod test_gen;
 
@@ -32,6 +36,11 @@ enum Commands {
     Sync(sync::SyncArgs),
     /// Generates integration tests based on OpenAPI contracts.
     TestGen(test_gen::TestGenArgs),
+    /// Scaffolds handler functions from OpenAPI Routes.
+    Scaffold(scaffold::ScaffoldArgs),
+    /// Generates a JSON Schema from a Rust struct or enum.
+    #[clap(name = "schema-gen")]
+    SchemaGen(schema_gen::SchemaGenArgs),
 }
 
 fn main() -> AppResult<()> {
@@ -47,6 +56,14 @@ fn main() -> AppResult<()> {
             // Injecting Actix Web strategy
             let strategy = ActixStrategy;
             test_gen::execute(args, &strategy)?;
+        }
+        Commands::Scaffold(args) => {
+            // Injecting Actix Web strategy
+            let strategy = ActixStrategy;
+            scaffold::execute(args, &strategy)?;
+        }
+        Commands::SchemaGen(args) => {
+            schema_gen::execute(args)?;
         }
     }
 

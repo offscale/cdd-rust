@@ -1,18 +1,51 @@
 cdd-rust: OpenAPI ↔ Rust
 ========================
-[![Rust: nightly](https://img.shields.io/badge/Rust-nightly-blue.svg)](https://www.rust-lang.org) 
-[![License: (Apache-2.0 OR MIT)](https://img.shields.io/badge/LICENSE-Apache--2.0%20OR%20MIT-orange)](LICENSE-APACHE) 
-[![CI](https://github.com/offscale/cdd-rust/actions/workflows/ci-cargo.yml/badge.svg)](https://github.com/offscale/cdd-rust/actions/workflows/ci-cargo.yml) 
+[![Rust: nightly](https://img.shields.io/badge/Rust-nightly-blue.svg)](https://www.rust-lang.org)
+[![License: (Apache-2.0 OR MIT)](https://img.shields.io/badge/LICENSE-Apache--2.0%20OR%20MIT-orange)](LICENSE-APACHE)
+[![CI](https://github.com/offscale/cdd-rust/actions/workflows/ci-cargo.yml/badge.svg)](https://github.com/offscale/cdd-rust/actions/workflows/ci-cargo.yml)
 
-**Compiler Driven Development (CDD)** for Rust. 
+**cdd-rust** is a compiler-driven development toolchain designed to enable "Surgical" Compiler-Driven Development.
 
-**cdd-rust** creates a symbiotic link between your **Database**, **Rust Code**, and **OpenAPI Specifications**. Unlike traditional generators that overwrite files or hide code in "generated" directories, `cdd-rust` uses advanced AST parsing (`ra_ap_syntax`) to surgically patch your *existing* source files, strictly typed handlers, and integration tests. 
+Unlike traditional generators that blindly overwrite files or dump code into "generated" folders, `cdd-rust` understands
+the Abstract Syntax Tree (AST) of your Rust code. It uses `ra_ap_syntax` (the underlying parser of **rust-analyzer**) to
+read, understand, and safely patch your existing source code to match your OpenAPI specifications (and vice-versa).
 
-Uniquely, `cdd-rust` is built on a **strategy-based architecture**. While the default implementation provides a robust **Actix Web + Diesel** workflow, the core logic is decoupled into strategies and mappers, making it extensible to other ecosystems (e.g., Axum, SQLx) in the future.
+## ⚡️ Key Capabilities
 
-It supports two distinct workflows: 
-1.  **Scaffold | Patch (OpenAPI ➔ Rust):** Generate/update handlers, routes, and models via `BackendStrategy`.
-2.  **Reflect & Sync (Rust ➔ OpenAPI):** Generate OpenAPI specifications from your source code and DB via `ModelMapper`.
+### 1. Surgical Merging (OpenAPI ➔ Existing Rust)
+
+The core engine features a non-destructive patcher (`cdd-core/patcher`) capable of merging OpenAPI definitions into an
+existing codebase.
+
+* **AST-Aware:** It preserves your comments, whitespace, and manual formatting.
+* **Smart Routing:** It can parse your existing `actix_web` configuration functions and inject missing `.service()`
+  calls without duplicating existing ones.
+* **Type Safety:** OpenAPI types are strictly mapped to Rust constraints:
+    * `format: uuid` ➔ `uuid::Uuid`
+    * `format: date-time` ➔ `chrono::DateTime<Utc>`
+    * `format: password` ➔ `Secret<String>`
+
+### 2. Synchronization (Database ➔ Rust ➔ OpenAPI)
+
+Keep your code as the single source of truth. The `sync` workflow ensures your Rust models match your Postgres database
+and are ready for OpenAPI generation.
+
+* **DB Inspection:** Uses `dsync` to generate strictly typed Diesel structs from the DB schema.
+* **Attribute Injection:** Automatically parses generated structs to inject
+  `#[derive(ToSchema, Serialize, Deserialize)]` and necessary imports, ensuring compatibility
+  with [utoipa](https://github.com/juhaku/utoipa).
+
+### 3. Contract Verification (OpenAPI ➔ Tests)
+
+Generate strictly typed integration tests (`tests/api_contracts.rs`) that treat your application as a black box to
+verify compliance with the spec.
+
+* **Smart Mocking:** Automatically creates dummy values for Path, Query, and Body parameters based on strict type
+  definitions.
+* **Runtime Expression Resolution:** fully supports OAS 3.2 runtime expressions (e.g., `{$request.body#/id}`) for
+  HATEOAS link validation.
+* **Schema Validation:** Verifies that API responses strictly match the JSON Schema defined in your OpenAPI document
+  using `jsonschema`.
 
 ## ⚡️ The CDD Loop
 
@@ -66,7 +99,8 @@ graph TD
 
 ## 🏗 Architecture
 
-The internal architecture separates the core AST/OpenAPI parsing logic from the target code generation. This allows the tool to support multiple web frameworks and ORMs through the `BackendStrategy` and `ModelMapper` traits.
+The internal architecture separates the core AST/OpenAPI parsing logic from the target code generation. This allows the
+tool to support multiple web frameworks and ORMs through the `BackendStrategy` and `ModelMapper` traits.
 
 ```mermaid
 graph LR
@@ -126,82 +160,97 @@ graph LR
     class T_Future future
 ```
 
---- 
+The project is workspace-based to separate core logic from the command-line interface.
 
-## 🚀 Features
+| Crate          | Purpose                                                                                                                                                                                    |
+|----------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **`cdd-core`** | **The Engine.** Contains the `ra_ap_syntax` parsers, the OpenAPI 3.x parser (with 3.2 shims), AST diffing logic, and the Backend Strategy traits (currently implementing `ActixStrategy`). |
+| **`cdd-cli`**  | **The Interface.** Provides the `sync` and `test-gen` commands.                                                                                                                            |
+| **`cdd-web`**  | **The Reference.** An Actix+Diesel implementation demonstrating the generated code and tests in action.                                                                                    |
 
-### 1. Framework-Agnostic Scaffolding (OpenAPI ➔ Rust)
-Stop manually writing repetitive handler signatures. `cdd-rust` reads your spec and generates strictly typed code based on the active `BackendStrategy`.
-*   **Handler Scaffolding:** Transforms OpenAPI paths into `async fn` signatures with correct extractors (currently `ActixStrategy` defaults):
-    *   Path variables ➔ `web::Path<Uuid>`
-    *   Query strings ➔ `web::Query<Value>`
-    *   Request bodies ➔ `web::Json<T>`
-*   **Route Registration:** Surgically injects route configuration strings (e.g., `cfg.service(...)`) using AST analysis, preserving existing logic.
-*   **Non-Destructive Patching:** Uses [`ra_ap_syntax`](https://docs.rs/ra_ap_syntax/) (official [rust-analyzer](https://github.com/rust-lang/rust-analyzer) parser) to edit files safely.
+## 📦 CLI Usage
 
-### 2. Source-of-Truth Reflection (Rust ➔ OpenAPI)
-Keep your documentation alive. Your Rust code *is* the spec.
-*   **Model Mapper Trait:** Extracts DB Schemas via `ModelMapper` (currently `DieselMapper` wrapping `dsync`) to generate/update Rust structs.
-*   **Attribute Injection:** Automatically parses structs and injects `#[derive(ToSchema)]` and `#[serde(...)]` attributes to make models OpenAPI-compatible.
-*   **Type Mapping:** Maps Rust types (`Uuid`, `chrono::NaiveDateTime`, `Decimal`) back to OpenAPI formats automatically using the `TypeMapper` module.
+### 1. Sync Pipeline (DB ➔ Models)
 
-### 3. Contract Safety (`test-gen`)
-Ensure your implementation actually matches the spec using the same strategies used for code generation.
-*   **Test Generation:** Generates `tests/api_contracts.rs` based on your `openapi.yaml`.
-*   **Smart Mocking:** Automatically fills request parameters with valid dummy data based on type signatures.
-*   **Validation:** Verifies that API responses align with the JSON Schema defined in your spec.
-
---- 
-
-## 📦 Command Usage
-
-### 1. The Sync Pipeline
-**DB ➔ Rust Models ➔ OpenAPI Attributes**
-Synchronizes your database schema to your Rust structs using the configured `ModelMapper`.
+Synchronize Diesel models and inject OpenAPI attributes.
 
 ```bash
-cargo run -p cdd-cli -- sync \ 
-  --schema-path web/src/schema.rs \ 
+cargo run -p cdd-cli -- sync \
+  --schema-path web/src/schema.rs \
   --model-dir web/src/models
 ```
 
-### 2. The Test Pipeline
-**OpenAPI ➔ Integration Tests**
-Generates a test suite via `BackendStrategy` (default: Actix) that treats your app as a black box.
+This performs the following:
+
+1. Reads `schema.rs`.
+2. Generates rust structs in `models/` using `diesel/dsync` logic.
+3. **Patches** the files to add `#![allow(missing_docs)]`, `use utoipa::ToSchema;`, and derive macros.
+
+### 2. Test Generation (OpenAPI ➔ Tests)
+
+Scaffold integration tests to verify your implementation meets the contract.
 
 ```bash
-cargo run -p cdd-cli -- test-gen \ 
-  --openapi-path docs/openapi.yaml \ 
-  --output-path web/tests/api_contracts.rs \ 
+cargo run -p cdd-cli -- test-gen \
+  --openapi-path docs/openapi.yaml \
+  --output-path web/tests/api_contracts.rs \
   --app-factory crate::create_app
 ```
 
---- 
+This generates a test file that:
 
-## 🛠 Project Structure
+1. Initializes your App factory.
+2. Iterates through every route in your OpenAPI spec.
+3. Sensibly mocks requests.
+4. Validates that your Rust implementation returns the headers and bodies defined in the YAML.
 
-*   **`core/`**: The engine. Contains AST parsers, strategies, and the diff/patch logic.
-    *   `strategies.rs`: Defines `BackendStrategy` trait and `ActixStrategy`.
-    *   `patcher.rs`: Surgical code editing.
-    *   `oas.rs`: Parses OpenAPI YAML into Intermediate Representations.
-    *   `handlers/routes/contract_test`: Functional modules utilizing strategies to generate code.
-*   **`cli/`**: The workflow runner. Wires up specific strategies to commands.
-    *   `generator.rs`: Defines `ModelMapper` and `DieselMapper`.
-    *   `main.rs`: Dependency injection root.
-*   **`web/`**: Reference implementation. An Actix Web + Diesel project demonstrating the generated code in action.
+## 🛠 OpenAPI Compliance
 
-## 🎨 Design Principles
+`cdd-rust` features a highly compliant custom parser found in `core/src/oas`.
 
-*   **No Magic Folders:** We generate code you can read, debug, and commit.
-*   **Lossless Patching:** We edit your source files without breaking your style.
-*   **Pluggable Backend:** Core logic is decoupled from specific frameworks (Actix, Axum, etc.).
-*   **Type Safety:** `Uuid`, `chrono`, and `rust_decimal` are first-class citizens.
+* **Versions:** Supports OpenAPI 3.0 and 3.1 directly.
+* **Compatibility:** Implements shims for **OpenAPI 3.2**, specifically handling the `$self` keyword for Base URI
+  determination (Appendix F) and downgrading version strings for library compatibility.
+* **Resolution:** Full support for local, relative, and remote `$ref` resolution.
+* **Polymorphism:** handles `oneOf`, `anyOf`, and `allOf` (flattening) into Rust Enums and Structs.
+* **Extractors:** Maps OAS parameters to backend-specific extractors (e.g., `web::Query`, `web::Path`, `web::Json`,
+  `SecurityScheme`).
+
+## Developer Guide
+
+### Prerequisites
+
+* Rust (Nightly toolchain required for `ra_ap_syntax` compatibility feature flags in some contexts).
+* PostgreSQL (if running the reference web implementation).
+
+### Installation
+
+```bash
+git clone https://github.com/offscale/cdd-rust
+cd cdd-rust
+cargo build
+```
+
+### Running Tests
+
+```bash
+# Run unit tests
+cargo test
+
+# Run the generated contract tests (requires web/tests/api_contracts.rs to be generated)
+cargo test -p cdd-web
+```
+
+## License
+
+Licensed under either of Apache License, Version 2.0 or MIT license at your option.
 
 --- 
 
 ## Developer guide
 
-Install the latest version of [Rust](https://www.rust-lang.org). We tend to use nightly versions. [CLI tool for installing Rust](https://rustup.rs).
+Install the latest version of [Rust](https://www.rust-lang.org). We tend to use nightly
+versions. [CLI tool for installing Rust](https://rustup.rs).
 
 We use [rust-clippy](https://github.com/rust-lang-nursery/rust-clippy) linters to improve code quality.
 

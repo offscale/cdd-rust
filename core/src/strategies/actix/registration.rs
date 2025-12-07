@@ -55,6 +55,7 @@ mod tests {
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            tags: vec![],
         };
         let stmt = route_registration_statement(&route, "h");
         assert!(stmt.contains("Method::from_bytes(b\"CUSTOM\")"));

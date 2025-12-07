@@ -5,10 +5,12 @@ edition = "2021"
 
 [dependencies]
 cdd-core = { path = "../core" }
-clap = { version = "4.4", features = ["derive"] }
-dsync = "0.1.0"
-walkdir = "2.5.0"
+clap = { version = "^4", features = ["derive"] }
+dsync = "^0.1"
+walkdir = "^2.5"
 derive_more = { version = "^2.1", features = ["from", "display"] }
+serde_json = { version = "^1", features = ["indexmap"] }
+serde_yaml = "^0.9"
 
 [dev-dependencies]
-tempfile = "3.8"
+tempfile = "^3"

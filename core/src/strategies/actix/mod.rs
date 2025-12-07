@@ -174,6 +174,7 @@ mod tests {
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            tags: vec![],
         };
         let code = s.route_registration_statement(&route, "mod::qh");
         assert!(code.contains(

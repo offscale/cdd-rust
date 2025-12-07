@@ -130,6 +130,7 @@ mod tests {
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
+            tags: vec![],
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
@@ -165,6 +166,7 @@ mod tests {
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
+            tags: vec![],
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
@@ -194,6 +196,7 @@ mod tests {
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
+            tags: vec![],
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
@@ -225,6 +228,7 @@ mod tests {
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
+            tags: vec![],
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
@@ -253,6 +257,7 @@ mod tests {
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
+            tags: vec![],
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
@@ -260,7 +265,8 @@ mod tests {
         let strategy = ActixStrategy;
         let code = update_handler_module("", &[route], &strategy).unwrap();
 
-        assert!(code.contains("_auth: web::ReqData<security::ApiKey>"));
+        // UPDATED EXPECTATION: Variable is now `api_key` due to smarter naming
+        assert!(code.contains("api_key: web::ReqData<security::ApiKey>"));
     }
 
     #[test]
@@ -281,6 +287,7 @@ mod tests {
             }],
             response_links: None,
             kind: RouteKind::Path,
+            tags: vec![],
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
