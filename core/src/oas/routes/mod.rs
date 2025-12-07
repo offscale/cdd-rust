@@ -26,7 +26,7 @@ pub fn parse_openapi_routes(yaml_content: &str) -> AppResult<Vec<ParsedRoute>> {
 
     // Version Validation
     if let Some(version) = &openapi.openapi {
-        if !version.starts_with("3.") {
+        if !(version as &String).starts_with("3.") {
             return Err(AppError::General(format!(
                 "Unsupported OpenAPI version: {}. Only 3.x is supported by this parser.",
                 version

@@ -10,6 +10,7 @@
 //! - Relative File References (e.g., `../models.yaml#/User`)
 //! - Remote URIs (e.g., `https://example.com/api.json#/User`)
 //! - Swagger 2.0 Legacy References (e.g., `#/definitions/User`)
+//! - `$self` keyword base URI determination.
 
 use std::path::{Component, Path, PathBuf};
 use utoipa::openapi::{Components, RefOr, Schema};
@@ -173,6 +174,31 @@ pub fn resolve_ref_name<'a>(ref_str: &str, components: &'a Components) -> Option
     None
 }
 
+/// Determines the effective Base URI for a document.
+///
+/// Implements OAS 3.2 Appendix F "Base URI Within Content".
+///
+/// # Arguments
+///
+/// * `retrieval_uri` - The URI used to retrieve the document (or absolute file path).
+/// * `self_val` - The value of the `$self` field in the document (if present).
+///
+/// # Logic
+///
+/// 1. If `$self` is present and absolute, it becomes the Base URI.
+/// 2. If `$self` is present and relative, it is resolved against `retrieval_uri`.
+/// 3. If `$self` is absent, `retrieval_uri` is the Base URI.
+pub fn compute_base_uri(retrieval_uri: &str, self_val: Option<&str>) -> String {
+    match self_val {
+        Some(s) => {
+            // If self_val is an absolute URI (Remote), resolve_uri_reference returns it.
+            // If self_val is relative, resolve_uri_reference merges it with retrieval_uri.
+            resolve_uri_reference(retrieval_uri, s)
+        }
+        None => retrieval_uri.to_string(),
+    }
+}
+
 /// Resolves a relative reference against a base URI to produce a target URI.
 ///
 /// Implements basic path normalization (RFC 3986 dot-segment removal) for file paths.
@@ -190,7 +216,8 @@ pub fn resolve_uri_reference(base_uri: &str, ref_uri: &str) -> String {
     let parsed_ref = parse_reference(ref_uri);
 
     match parsed_ref.kind {
-        // If the ref is absolute (Remote), return it as is (minus fragment if you want document only)
+        // If the ref is absolute (Remote), return it as is (minus fragment if you want document only,
+        // but here we usually want the full locator)
         ReferenceKind::Remote => parsed_ref.document.to_string(),
         // If the ref is local, it belongs to the base document
         ReferenceKind::Local => base_uri.to_string(),
@@ -209,6 +236,23 @@ pub fn resolve_uri_reference(base_uri: &str, ref_uri: &str) -> String {
                         None => base_uri,
                     }
                 };
+
+                // If ref_uri starts with '/' (absolute path relative to host), simpler concat fails logic.
+                // e.g. base: http://a.com/b/c, ref: /d. Should be http://a.com/d.
+                // Our naive impl: http://a.com/b//d (which is often valid but not canonical).
+                // Without `url` crate, we stick to safe naive appending or slight cleanup.
+                if parsed_ref.document.starts_with('/') {
+                    // Try to find scheme end "://" to identify host root
+                    if let Some(scheme_end) = base_path.find("://") {
+                        let after_scheme = &base_path[scheme_end + 3..];
+                        if let Some(first_slash) = after_scheme.find('/') {
+                            // http://host...
+                            let root = &base_path[..scheme_end + 3 + first_slash];
+                            return format!("{}{}", root, parsed_ref.document);
+                        }
+                    }
+                }
+
                 format!("{}{}", base_path, parsed_ref.document)
             } else {
                 // File system resolution
@@ -327,5 +371,36 @@ mod tests {
         // Test Missing
         let resolved_none = resolve_ref_name("#/components/schemas/Missing", &components);
         assert!(resolved_none.is_none());
+    }
+
+    #[test]
+    fn test_compute_base_uri_appendix_f_absolute() {
+        // Appendix F Example 1: Absolute $self inside content
+        let retrieval = "file://home/someone/src/api/openapi.yaml";
+        let self_val = Some("https://example.com/api/openapi");
+
+        // $self is absolute, so it overrides retrieval completely
+        let base = compute_base_uri(retrieval, self_val);
+        assert_eq!(base, "https://example.com/api/openapi");
+    }
+
+    #[test]
+    fn test_compute_base_uri_appendix_f_relative() {
+        // Appendix F Example with Relative $self
+        let retrieval = "https://staging.example.com/api/shared/foo";
+        let self_val = Some("/api/schemas/foo");
+
+        // $self is relative path. Resolved against retrieval root.
+        let base = compute_base_uri(retrieval, self_val);
+        // retrieval root: https://staging.example.com
+        // joined: https://staging.example.com/api/schemas/foo
+        assert_eq!(base, "https://staging.example.com/api/schemas/foo");
+    }
+
+    #[test]
+    fn test_compute_base_uri_absent_self() {
+        let retrieval = "https://example.com/api/openapis.yaml";
+        let base = compute_base_uri(retrieval, None);
+        assert_eq!(base, retrieval);
     }
 }

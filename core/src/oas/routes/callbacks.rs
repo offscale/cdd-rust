@@ -7,7 +7,8 @@
 
 use crate::error::{AppError, AppResult};
 use crate::oas::models::ParsedCallback;
-use crate::oas::resolver::{extract_request_body_type, extract_response_success_type};
+use crate::oas::resolver::extract_request_body_type;
+use crate::oas::resolver::responses::extract_response_details;
 use crate::oas::routes::shims::{ShimComponents, ShimOperation, ShimPathItem};
 use std::collections::BTreeMap;
 use utoipa::openapi::RefOr;
@@ -69,7 +70,13 @@ pub fn extract_callback_operations(
                     req_body = Some(def);
                 }
             }
-            let resp_type = extract_response_success_type(&o.responses, components)?;
+
+            let (resp_type, resp_headers) =
+                if let Some(details) = extract_response_details(&o.responses, components)? {
+                    (details.body_type, details.headers)
+                } else {
+                    (None, Vec::new())
+                };
 
             callbacks.push(ParsedCallback {
                 name: name.to_string(),
@@ -77,6 +84,7 @@ pub fn extract_callback_operations(
                 method: method.to_string(),
                 request_body: req_body,
                 response_type: resp_type,
+                response_headers: resp_headers,
             });
         }
         Ok(())

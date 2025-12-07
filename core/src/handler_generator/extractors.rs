@@ -38,13 +38,24 @@ pub(crate) fn generate_function(
         }
     }
 
-    // 2. Query Parameters
-    let has_query = route.params.iter().any(|p| p.source == ParamSource::Query);
-    if has_query {
-        args.push(format!("query: {}", strategy.query_extractor()));
+    if let Some(qs_param) = route
+        .params
+        .iter()
+        .find(|p| p.source == ParamSource::QueryString)
+    {
+        let var_name = to_snake_case(&qs_param.name);
+        args.push(format!(
+            "{}: {}",
+            var_name,
+            strategy.query_string_extractor(&qs_param.ty)
+        ));
+    } else {
+        let has_query = route.params.iter().any(|p| p.source == ParamSource::Query);
+        if has_query {
+            args.push(format!("query: {}", strategy.query_extractor()));
+        }
     }
 
-    // 3. Headers
     for param in route
         .params
         .iter()
@@ -55,7 +66,6 @@ pub(crate) fn generate_function(
         args.push(format!("{}: {}", var_name, extractor_type));
     }
 
-    // 4. Cookies
     for param in route
         .params
         .iter()
@@ -65,7 +75,6 @@ pub(crate) fn generate_function(
         args.push(format!("{}: {}", var_name, strategy.cookie_extractor()));
     }
 
-    // 5. Request Body
     if let Some(def) = &route.request_body {
         let extractor = match def.format {
             BodyFormat::Json => strategy.body_extractor(&def.ty),
@@ -75,15 +84,18 @@ pub(crate) fn generate_function(
         args.push(format!("body: {}", extractor));
     }
 
-    // 6. Security Requirements
     let security_arg = strategy.security_extractor(&route.security);
     if !security_arg.is_empty() {
         args.push(security_arg);
     }
 
-    // 7. Construct Function Body
-    let code =
-        strategy.handler_signature(&route.handler_name, &args, route.response_type.as_deref());
+    let code = strategy.handler_signature(
+        &route.handler_name,
+        &args,
+        route.response_type.as_deref(),
+        &route.response_headers,
+        route.response_links.as_deref(),
+    );
 
     Ok(code)
 }
@@ -92,7 +104,7 @@ pub(crate) fn generate_function(
 mod tests {
     use super::*;
     use crate::handler_generator::builder::update_handler_module;
-    use crate::oas::models::{RouteKind, SecurityRequirement};
+    use crate::oas::models::{ResponseHeader, RouteKind, SecurityRequirement};
     use crate::oas::{BodyFormat, RequestBodyDefinition, RouteParam};
     use crate::strategies::ActixStrategy;
 
@@ -113,8 +125,12 @@ mod tests {
             request_body: None,
             security: vec![],
             response_type: None,
+            response_headers: vec![],
+            response_links: None,
             kind: RouteKind::Path,
             callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
         };
 
         let strategy = ActixStrategy;
@@ -143,14 +159,48 @@ mod tests {
             }),
             security: vec![],
             response_type: None,
+            response_headers: vec![],
+            response_links: None,
             kind: RouteKind::Path,
             callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
         };
 
         let strategy = ActixStrategy;
         let code = update_handler_module("", &[route], &strategy).unwrap();
         assert!(code.contains("query: web::Query<Value>"));
         assert!(code.contains("body: web::Json<SearchFilter>"));
+    }
+
+    #[test]
+    fn test_oas_3_2_querystring_extractor() {
+        let route = ParsedRoute {
+            path: "/raw".into(),
+            method: "GET".into(),
+            handler_name: "raw_search".into(),
+            params: vec![RouteParam {
+                name: "filter".into(),
+                source: ParamSource::QueryString,
+                ty: "FilterStruct".into(),
+                style: None,
+                explode: false,
+                allow_reserved: false,
+            }],
+            request_body: None,
+            security: vec![],
+            response_type: None,
+            response_headers: vec![],
+            response_links: None,
+            kind: RouteKind::Path,
+            callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
+        };
+
+        let strategy = ActixStrategy;
+        let code = update_handler_module("", &[route], &strategy).unwrap();
+        assert!(code.contains("filter: web::Query<FilterStruct>"));
     }
 
     #[test]
@@ -166,14 +216,42 @@ mod tests {
                 scopes: vec![],
             }],
             response_type: None,
+            response_headers: vec![],
+            response_links: None,
             kind: RouteKind::Path,
             callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
         };
         let strategy = ActixStrategy;
         let code = update_handler_module("", &[route], &strategy).unwrap();
 
-        // Updated expectation: ActixStrategy now prefixes with security::
-        // e.g. _auth: web::ReqData<security::ApiKey>
         assert!(code.contains("_auth: web::ReqData<security::ApiKey>"));
+    }
+
+    #[test]
+    fn test_extractor_passes_headers_info() {
+        let route = ParsedRoute {
+            path: "/headers".into(),
+            method: "GET".into(),
+            handler_name: "get_headers".into(),
+            params: vec![],
+            request_body: None,
+            security: vec![],
+            response_type: Some("Body".to_string()),
+            response_headers: vec![ResponseHeader {
+                name: "X-Custom".to_string(),
+                description: None,
+                ty: "String".to_string(),
+            }],
+            response_links: None,
+            kind: RouteKind::Path,
+            callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
+        };
+        let strategy = ActixStrategy;
+        let code = update_handler_module("", &[route], &strategy).unwrap();
+        assert!(code.contains("-> actix_web::Result<HttpResponse>"));
     }
 }

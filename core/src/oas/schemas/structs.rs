@@ -11,7 +11,7 @@ use crate::parser::ParsedField;
 use std::collections::HashSet;
 use utoipa::openapi::{
     schema::{Schema, SchemaType, Type},
-    Components, RefOr,
+    Components, Deprecated, RefOr,
 };
 
 /// Recursively gathers fields from a schema, handling `allOf` flattening and `Ref` lookup.
@@ -38,6 +38,7 @@ pub(crate) fn flatten_schema_fields(
 /// Logic:
 /// - If `Object`: extract properties. Check if field already exists in accumulator; if so, replace it (override).
 /// - If `AllOf`: recursively collect for all items. Rules of overrides apply sequentially.
+/// - If `additionalProperties` is present: add a flattened HashMap field.
 fn collect_fields_recursive(
     schema: &Schema,
     components: &Components,
@@ -50,14 +51,20 @@ fn collect_fields_recursive(
             if matches!(obj.schema_type, SchemaType::Type(Type::Object))
                 || obj.schema_type == SchemaType::AnyValue
             {
+                // 1. Explicit Properties
                 for (field_name, field_schema) in &obj.properties {
                     let is_required = obj.required.contains(field_name);
                     let rust_type = map_schema_to_rust_type(field_schema, is_required)?;
 
-                    let description = match field_schema {
-                        RefOr::T(Schema::Object(o)) => o.description.clone(),
-                        RefOr::T(Schema::AllOf(a)) => a.description.clone(),
-                        _ => None,
+                    // Extract metadata
+                    // Note: utoipa::openapi::Object does not currently expose externalDocs
+                    let (description, deprecated) = match field_schema {
+                        RefOr::T(Schema::Object(o)) => (
+                            o.description.clone(),
+                            matches!(o.deprecated, Some(Deprecated::True)),
+                        ),
+                        RefOr::T(Schema::AllOf(a)) => (a.description.clone(), false),
+                        _ => (None, false),
                     };
 
                     let field = ParsedField {
@@ -66,6 +73,8 @@ fn collect_fields_recursive(
                         description,
                         rename: None,
                         is_skipped: false,
+                        is_deprecated: deprecated,
+                        external_docs: None, // Not available in current Schema Object model
                     };
 
                     // Upsert mechanism to handle overrides
@@ -73,6 +82,38 @@ fn collect_fields_recursive(
                         fields[idx] = field;
                     } else {
                         fields.push(field);
+                    }
+                }
+
+                // 2. Additional Properties (Map)
+                if let Some(add_props) = &obj.additional_properties {
+                    // Dereference the Box to get the enum
+                    let inner_type = match &**add_props {
+                        // additionalProperties: true -> HashMap<String, Value>
+                        utoipa::openapi::schema::AdditionalProperties::FreeForm(true) => {
+                            "serde_json::Value".to_string()
+                        }
+                        // additionalProperties: { schema } -> HashMap<String, SchemaType>
+                        utoipa::openapi::schema::AdditionalProperties::RefOr(schema) => {
+                            map_schema_to_rust_type(schema, true)?
+                        }
+                        _ => "serde_json::Value".to_string(), // default safe fallback
+                    };
+
+                    let map_type = format!("std::collections::HashMap<String, {}>", inner_type);
+
+                    let parsed_field = ParsedField {
+                        name: "additional_properties".to_string(),
+                        ty: map_type,
+                        description: Some("Captured additional properties".to_string()),
+                        rename: None,
+                        is_skipped: false,
+                        is_deprecated: false,
+                        external_docs: None,
+                    };
+
+                    if !fields.iter().any(|f| f.name == "additional_properties") {
+                        fields.push(parsed_field);
                     }
                 }
             }

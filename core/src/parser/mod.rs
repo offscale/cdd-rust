@@ -11,4 +11,6 @@ pub mod models;
 
 // Re-export major types and functions to maintain API compatibility
 pub use extractors::{extract_model, extract_struct, extract_struct_fields, extract_struct_names};
-pub use models::{ParsedEnum, ParsedField, ParsedModel, ParsedStruct, ParsedVariant};
+pub use models::{
+    ParsedEnum, ParsedExternalDocs, ParsedField, ParsedModel, ParsedStruct, ParsedVariant,
+};

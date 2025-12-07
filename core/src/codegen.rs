@@ -7,10 +7,11 @@
 //! This module facilitates the transformation of `ParsedStruct` and `ParsedEnum` definitions
 //! into valid, compilable Rust code. It handles:
 //! - Dependency analysis (auto-injecting imports like `Uuid`, `chrono`, `serde`).
-//! - Attribute injection (`derive`, `serde` options).
-//! - Formatting and comments preservation.
+//! - Attribute injection (`derive`, `serde` options, `deprecated`).
+//! - Formatting and comments preservation including external docs links.
 
 use crate::error::{AppError, AppResult};
+use crate::parser::models::ParsedExternalDocs;
 use crate::parser::{ParsedEnum, ParsedModel, ParsedStruct};
 use ra_ap_edition::Edition;
 use ra_ap_syntax::{ast, AstNode, SourceFile};
@@ -104,15 +105,43 @@ pub fn generate_dto(dto: &ParsedStruct) -> String {
     generate_dtos(&[ParsedModel::Struct(dto.clone())])
 }
 
+/// Helper to generate documentation string with optional external docs link.
+fn generate_doc_comment(
+    description: Option<&String>,
+    external: Option<&ParsedExternalDocs>,
+    indent: &str,
+) -> String {
+    let mut code = String::new();
+    if let Some(desc) = description {
+        for line in desc.lines() {
+            code.push_str(&format!("{}/// {}\n", indent, line));
+        }
+    }
+
+    if let Some(ext) = external {
+        if !code.is_empty() {
+            code.push_str(&format!("{}///\n", indent));
+        }
+        let desc = ext.description.as_deref().unwrap_or("See also");
+        code.push_str(&format!("{}/// {}: <{}>\n", indent, desc, ext.url));
+    }
+    code
+}
+
 /// Helper to generate the body of a single struct (without file-level imports).
 fn generate_dto_body(dto: &ParsedStruct) -> String {
     let mut code = String::new();
 
     // Docs
-    if let Some(desc) = &dto.description {
-        for line in desc.lines() {
-            code.push_str(&format!("/// {}\n", line));
-        }
+    code.push_str(&generate_doc_comment(
+        dto.description.as_ref(),
+        dto.external_docs.as_ref(),
+        "",
+    ));
+
+    // Deprecated
+    if dto.is_deprecated {
+        code.push_str("#[deprecated]\n");
     }
 
     // Derives
@@ -127,19 +156,29 @@ fn generate_dto_body(dto: &ParsedStruct) -> String {
 
     for field in &dto.fields {
         // Field Docs
-        if let Some(field_desc) = &field.description {
-            for line in field_desc.lines() {
-                code.push_str(&format!("    /// {}\n", line));
-            }
+        code.push_str(&generate_doc_comment(
+            field.description.as_ref(),
+            field.external_docs.as_ref(),
+            "    ",
+        ));
+
+        // Field Deprecated
+        if field.is_deprecated {
+            code.push_str("    #[deprecated]\n");
         }
 
-        // Field Attributes (Rename/Skip)
+        // Field Attributes (Rename/Skip/Flatten)
         let mut attrs = Vec::new();
         if let Some(rename) = &field.rename {
             attrs.push(format!("rename = \"{}\"", rename));
         }
         if field.is_skipped {
             attrs.push("skip".to_string());
+        }
+
+        // Handle Map Flattening
+        if field.name == "additional_properties" && field.ty.contains("HashMap") {
+            attrs.push("flatten".to_string());
         }
 
         if !attrs.is_empty() {
@@ -158,10 +197,14 @@ fn generate_dto_body(dto: &ParsedStruct) -> String {
 fn generate_enum_body(en: &ParsedEnum) -> String {
     let mut code = String::new();
 
-    if let Some(desc) = &en.description {
-        for line in desc.lines() {
-            code.push_str(&format!("/// {}\n", line));
-        }
+    code.push_str(&generate_doc_comment(
+        en.description.as_ref(),
+        en.external_docs.as_ref(),
+        "",
+    ));
+
+    if en.is_deprecated {
+        code.push_str("#[deprecated]\n");
     }
 
     code.push_str("#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]\n");
@@ -189,6 +232,10 @@ fn generate_enum_body(en: &ParsedEnum) -> String {
             for line in desc.lines() {
                 code.push_str(&format!("    /// {}\n", line));
             }
+        }
+
+        if variant.is_deprecated {
+            code.push_str("    #[deprecated]\n");
         }
 
         if let Some(r) = &variant.rename {
@@ -230,11 +277,14 @@ fn collect_imports(model: &ParsedModel, imports: &mut BTreeSet<String>) {
         if ty.contains("NaiveDate") && !ty.contains("NaiveDateTime") {
             imports.insert("use chrono::NaiveDate;".to_string());
         }
-        if ty.contains("Value") {
+        if ty.contains("Value") || ty.contains("serde_json") {
             imports.insert("use serde_json::Value;".to_string());
         }
         if ty.contains("Decimal") {
             imports.insert("use rust_decimal::Decimal;".to_string());
+        }
+        if ty.contains("HashMap") {
+            imports.insert("use std::collections::HashMap;".to_string());
         }
     }
 }
@@ -242,7 +292,7 @@ fn collect_imports(model: &ParsedModel, imports: &mut BTreeSet<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::{ParsedField, ParsedVariant};
+    use crate::parser::{ParsedExternalDocs, ParsedField, ParsedVariant};
 
     fn field(name: &str, ty: &str) -> ParsedField {
         ParsedField {
@@ -251,6 +301,8 @@ mod tests {
             description: None,
             rename: None,
             is_skipped: false,
+            is_deprecated: false,
+            external_docs: None,
         }
     }
 
@@ -261,12 +313,48 @@ mod tests {
             description: Some("A simple struct".into()),
             rename: None,
             fields: vec![field("id", "i32")],
+            is_deprecated: false,
+            external_docs: None,
         };
 
         let code = generate_dto(&dto);
         assert!(code.contains("struct Simple"));
         assert!(code.contains("/// A simple struct"));
         assert!(code.contains("#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]"));
+    }
+
+    #[test]
+    fn test_generate_dto_with_metadata() {
+        let docs = ParsedExternalDocs {
+            url: "https://example.com".into(),
+            description: Some("More info".into()),
+        };
+
+        let dto = ParsedStruct {
+            name: "Oldie".into(),
+            description: Some("Desc".into()),
+            rename: None,
+            fields: vec![ParsedField {
+                name: "f".into(),
+                ty: "i32".into(),
+                description: None,
+                rename: None,
+                is_skipped: false,
+                is_deprecated: true,
+                external_docs: None,
+            }],
+            is_deprecated: true,
+            external_docs: Some(docs),
+        };
+
+        let code = generate_dto(&dto);
+        assert!(code.contains("#[deprecated]"));
+        assert!(code.contains("struct Oldie"));
+        assert!(code.contains("/// Desc"));
+        assert!(code.contains("/// More info: <https://example.com>"));
+        // Check field deprecation
+        assert!(code.contains("    #[deprecated]"));
+        assert!(code.contains("    pub f: i32"));
     }
 
     #[test]
@@ -277,6 +365,8 @@ mod tests {
             rename: None,
             tag: Some("type".into()),
             untagged: false,
+            is_deprecated: false,
+            external_docs: None,
             variants: vec![
                 ParsedVariant {
                     name: "Cat".into(),
@@ -284,6 +374,7 @@ mod tests {
                     description: None,
                     rename: Some("cat".into()),
                     aliases: Some(vec!["kitty".into()]),
+                    is_deprecated: false,
                 },
                 ParsedVariant {
                     name: "Dog".into(),
@@ -291,6 +382,7 @@ mod tests {
                     description: None,
                     rename: Some("dog".into()),
                     aliases: None,
+                    is_deprecated: false,
                 },
             ],
         };
@@ -304,6 +396,44 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_enum_primitive_variants() {
+        // Test untagged enum with primitives: [String, i32]
+        let en = ParsedEnum {
+            name: "IntOrString".into(),
+            description: None,
+            rename: None,
+            tag: None,
+            untagged: true,
+            is_deprecated: false,
+            external_docs: None,
+            variants: vec![
+                ParsedVariant {
+                    name: "String".into(),
+                    ty: Some("String".into()),
+                    description: None,
+                    rename: None,
+                    aliases: None,
+                    is_deprecated: false,
+                },
+                ParsedVariant {
+                    name: "Integer".into(),
+                    ty: Some("i32".into()),
+                    description: None,
+                    rename: None,
+                    aliases: None,
+                    is_deprecated: false,
+                },
+            ],
+        };
+
+        let code = generate_dtos(&[ParsedModel::Enum(en)]);
+        assert!(code.contains("pub enum IntOrString"));
+        assert!(code.contains("#[serde(untagged)]"));
+        assert!(code.contains("    String(String),"));
+        assert!(code.contains("    Integer(i32),"));
+    }
+
+    #[test]
     fn test_flattened_imports() {
         // Simulating a struct that resulted from allOf flattening
         // It has a Uuid field (from Base) and a Value field (from Extension)
@@ -311,6 +441,8 @@ mod tests {
             name: "Merged".into(),
             description: None,
             rename: None,
+            is_deprecated: false,
+            external_docs: None,
             fields: vec![field("id", "Uuid"), field("meta", "serde_json::Value")],
         };
 
@@ -320,5 +452,36 @@ mod tests {
         // Ensure struct body is valid
         assert!(code.contains("pub id: Uuid,"));
         assert!(code.contains("pub meta: serde_json::Value,"));
+    }
+
+    #[test]
+    fn test_additional_properties_handling() {
+        // Struct with HashMap field representing additional properties
+        let dto = ParsedStruct {
+            name: "Dict".into(),
+            description: None,
+            rename: None,
+            is_deprecated: false,
+            external_docs: None,
+            fields: vec![
+                field("static_field", "String"),
+                ParsedField {
+                    name: "additional_properties".into(),
+                    ty: "std::collections::HashMap<String, i32>".into(),
+                    description: Some("Props".into()),
+                    rename: None,
+                    is_skipped: false,
+                    is_deprecated: false,
+                    external_docs: None,
+                },
+            ],
+        };
+
+        let code = generate_dto(&dto);
+        // Should inject import
+        assert!(code.contains("use std::collections::HashMap;"));
+        // Should inject flatten attribute
+        assert!(code.contains("#[serde(flatten)]"));
+        assert!(code.contains("pub additional_properties: std::collections::HashMap<String, i32>"));
     }
 }

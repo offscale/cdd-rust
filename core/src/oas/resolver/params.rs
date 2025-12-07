@@ -5,12 +5,14 @@
 //! Logic for resolving OpenAPI Parameters into internal `RouteParam` structs.
 //! Handles styles, explode, and legacy Swagger 2.0 compatibility.
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::oas::models::{ParamSource, ParamStyle, RouteParam};
 use crate::oas::resolver::types::map_schema_to_rust_type;
 use crate::oas::routes::shims::ShimComponents;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fmt;
+use utoipa::openapi::content::Content;
 use utoipa::openapi::{schema::Schema, RefOr};
 
 /// A local shim for Parameter to ensure robust parsing of fields.
@@ -19,7 +21,7 @@ use utoipa::openapi::{schema::Schema, RefOr};
 pub struct ShimParameter {
     /// Name of the parameter.
     pub name: String,
-    /// Location of the parameter (query, path, header, cookie).
+    /// Location of the parameter (query, path, header, cookie, querystring).
     #[serde(rename = "in")]
     pub parameter_in: String,
     /// Whether the parameter is required.
@@ -27,6 +29,9 @@ pub struct ShimParameter {
     pub required: bool,
     /// Schema definition.
     pub schema: Option<RefOr<Schema>>,
+    /// Content map (OAS 3.x complex parameter serialization).
+    /// Mutually exclusive with `schema`.
+    pub content: Option<BTreeMap<String, Content>>,
     /// Serialization style (OAS 3.x).
     pub style: Option<String>,
     /// Explode modifier (OAS 3.x).
@@ -49,7 +54,8 @@ impl fmt::Debug for ShimParameter {
             .field("style", &self.style)
             .field("explode", &self.explode)
             .field("allow_reserved", &self.allow_reserved)
-            .field("schema", &"Schema(..)")
+            .field("schema", &self.schema.as_ref().map(|_| "Some(Schema)"))
+            .field("content", &self.content.as_ref().map(|_| "Some(Content)"))
             .finish()
     }
 }
@@ -99,6 +105,8 @@ fn process_parameter(param: &ShimParameter) -> AppResult<RouteParam> {
     let source = match param.parameter_in.as_str() {
         "path" => ParamSource::Path,
         "query" => ParamSource::Query,
+        // OAS 3.2.0 Support: entire query string
+        "querystring" => ParamSource::QueryString,
         "header" => ParamSource::Header,
         "cookie" => ParamSource::Cookie,
         _ => ParamSource::Query,
@@ -114,8 +122,24 @@ fn process_parameter(param: &ShimParameter) -> AppResult<RouteParam> {
     // Determine explode. Defaults depend on style.
     let explode = resolve_explode(param.explode, &style);
 
+    // Resolve type from `schema` OR `content`
     let ty = if let Some(schema_ref) = &param.schema {
         map_schema_to_rust_type(schema_ref, param.required)?
+    } else if let Some(content) = &param.content {
+        // OAS 3.0 spec: "The map MUST only contain one entry."
+        // We take the first one found.
+        if let Some((_media_type, media_obj)) = content.iter().next() {
+            if let Some(s) = &media_obj.schema {
+                map_schema_to_rust_type(s, param.required)?
+            } else {
+                "serde_json::Value".to_string()
+            }
+        } else {
+            return Err(AppError::General(format!(
+                "Parameter '{}' has empty content map",
+                name
+            )));
+        }
     } else {
         "String".to_string()
     };
@@ -158,7 +182,9 @@ fn resolve_style(
         // Map OAS 2.0 collectionFormat to style
         return match cf {
             "csv" => match source {
-                ParamSource::Query | ParamSource::Cookie => Some(ParamStyle::Form),
+                ParamSource::Query | ParamSource::Cookie | ParamSource::QueryString => {
+                    Some(ParamStyle::Form)
+                }
                 ParamSource::Path | ParamSource::Header => Some(ParamStyle::Simple),
             },
             "ssv" => Some(ParamStyle::SpaceDelimited),
@@ -171,7 +197,8 @@ fn resolve_style(
 
     // OAS 3.2.0 Defaults
     match source {
-        ParamSource::Query => Some(ParamStyle::Form),
+        // `query` and `cookie` (and implicit `querystring`) default to Form
+        ParamSource::Query | ParamSource::QueryString => Some(ParamStyle::Form),
         ParamSource::Path => Some(ParamStyle::Simple),
         ParamSource::Header => Some(ParamStyle::Simple),
         ParamSource::Cookie => Some(ParamStyle::Form),
@@ -201,6 +228,8 @@ fn resolve_explode(explicit: Option<bool>, style: &Option<ParamStyle>) -> bool {
 mod tests {
     use super::*;
     use crate::oas::models::{ParamSource, ParamStyle};
+    use utoipa::openapi::schema::{Schema, Type};
+    use utoipa::openapi::{ContentBuilder, ObjectBuilder};
 
     #[test]
     fn test_resolve_parameters_defaults_query() {
@@ -211,6 +240,7 @@ mod tests {
             parameter_in: "query".to_string(),
             required: false,
             schema: None,
+            content: None,
             style: None,
             explode: None,
             allow_reserved: false,
@@ -224,6 +254,57 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_parameters_complex_content() {
+        // Case: Query param defined with `content` instead of `schema`
+        // e.g. ?filter={"foo":"bar"} (application/json)
+        let schema = ObjectBuilder::new().schema_type(Type::Object).build();
+        let content_item = ContentBuilder::new()
+            .schema(Some(RefOr::T(Schema::Object(schema))))
+            .build();
+
+        let mut content_map = BTreeMap::new();
+        content_map.insert("application/json".into(), content_item);
+
+        let param = ShimParameter {
+            name: "filter".to_string(),
+            parameter_in: "query".to_string(),
+            required: true,
+            schema: None,
+            content: Some(content_map),
+            style: None,
+            explode: None,
+            allow_reserved: false,
+            collection_format: None,
+        };
+
+        let processed = process_parameter(&param).unwrap();
+        // Since schema is Object, map_schema_to_rust_type returns "serde_json::Value" unless typed struct ref
+        assert_eq!(processed.ty, "serde_json::Value");
+        assert_eq!(processed.source, ParamSource::Query);
+    }
+
+    #[test]
+    fn test_resolve_parameters_querystring_oas_3_2() {
+        // Case: OAS 3.2 in: querystring
+        // Expect: Source=QueryString, Style=Form (Default)
+        let param = ShimParameter {
+            name: "filter".to_string(),
+            parameter_in: "querystring".to_string(),
+            required: true,
+            schema: None,
+            content: None,
+            style: None,
+            explode: None,
+            allow_reserved: false,
+            collection_format: None,
+        };
+
+        let processed = process_parameter(&param).unwrap();
+        assert_eq!(processed.source, ParamSource::QueryString);
+        assert_eq!(processed.style, Some(ParamStyle::Form));
+    }
+
+    #[test]
     fn test_resolve_parameters_defaults_path() {
         // Case: Path param.
         // Expect: Style=Simple, Explode=False.
@@ -232,6 +313,7 @@ mod tests {
             parameter_in: "path".to_string(),
             required: true,
             schema: None,
+            content: None,
             style: None,
             explode: None,
             allow_reserved: false,
@@ -253,6 +335,7 @@ mod tests {
             parameter_in: "query".to_string(),
             required: false,
             schema: None,
+            content: None,
             style: None,
             explode: None,
             allow_reserved: false,
@@ -271,6 +354,7 @@ mod tests {
             parameter_in: "header".to_string(),
             required: false,
             schema: None,
+            content: None,
             style: None, // defaults to simple
             explode: Some(true),
             allow_reserved: false,

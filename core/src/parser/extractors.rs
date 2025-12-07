@@ -90,6 +90,8 @@ fn parse_struct_node(struct_def: ast::Struct, name: &str) -> AppResult<ParsedStr
                             description: extract_doc_comment(field.syntax()),
                             rename: attrs.rename,
                             is_skipped: attrs.is_skipped,
+                            is_deprecated: false, // Not parsed from AST yet
+                            external_docs: None,
                         });
                     }
                 }
@@ -100,10 +102,12 @@ fn parse_struct_node(struct_def: ast::Struct, name: &str) -> AppResult<ParsedStr
                         let attrs = extract_attributes(field.syntax());
                         fields.push(ParsedField {
                             name: i.to_string(),
-                            ty: ty.syntax().text().to_string(),
+                            ty: (ty as ra_ap_syntax::ast::Type).syntax().text().to_string(),
                             description: extract_doc_comment(field.syntax()),
                             rename: attrs.rename,
                             is_skipped: attrs.is_skipped,
+                            is_deprecated: false,
+                            external_docs: None,
                         });
                     }
                 }
@@ -116,6 +120,8 @@ fn parse_struct_node(struct_def: ast::Struct, name: &str) -> AppResult<ParsedStr
         description: struct_desc,
         rename: struct_attrs.rename,
         fields,
+        is_deprecated: false, // Not parsed from AST yet
+        external_docs: None,
     })
 }
 
@@ -147,7 +153,8 @@ fn parse_enum_node(enum_def: ast::Enum, name: &str) -> AppResult<ParsedEnum> {
                     ty: vty,
                     description: extract_doc_comment(variant.syntax()),
                     rename: vattrs.rename,
-                    aliases: None, // Aliases parsing not yet implemented in AST reader
+                    aliases: None,
+                    is_deprecated: false,
                 });
             }
         }
@@ -160,6 +167,8 @@ fn parse_enum_node(enum_def: ast::Enum, name: &str) -> AppResult<ParsedEnum> {
         tag: attrs.tag,
         untagged: attrs.untagged,
         variants,
+        is_deprecated: false,
+        external_docs: None,
     })
 }
 

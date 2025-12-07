@@ -7,6 +7,9 @@
 //! These structs are used to transport parsed data from the YAML spec
 //! into the code generation strategies.
 
+use crate::parser::models::ParsedExternalDocs;
+use std::collections::HashMap;
+
 /// Distinguishes between standard paths and event-driven webhooks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RouteKind {
@@ -34,10 +37,45 @@ pub struct ParsedRoute {
     /// The Rust type name of the success response (e.g. `UserResponse`, `Vec<User>`).
     /// Only present if a 200/201 response with application/json content is defined inline.
     pub response_type: Option<String>,
+    /// Response headers defined in the operation.
+    pub response_headers: Vec<ResponseHeader>,
+    /// Response links defined in the operation (HATEOAS).
+    pub response_links: Option<Vec<ParsedLink>>,
     /// The classification of this route.
     pub kind: RouteKind,
     /// Callback definitions attached to this route (OAS 3.0+).
     pub callbacks: Vec<ParsedCallback>,
+    /// Whether this route is deprecated.
+    pub deprecated: bool,
+    /// External documentation link.
+    pub external_docs: Option<ParsedExternalDocs>,
+}
+
+/// Represents a header returned in the response.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResponseHeader {
+    /// Name of the header (e.g., "X-Rate-Limit-Limit").
+    pub name: String,
+    /// Description of the header.
+    pub description: Option<String>,
+    /// Rust type of the header value (e.g., "i32", "String").
+    pub ty: String,
+}
+
+/// Represents a static link relationship defined in the response.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedLink {
+    /// Short name of the link (map key).
+    pub name: String,
+    /// Description of the link.
+    pub description: Option<String>,
+    /// The name of an existing, resolvable OAS operation (operationId).
+    pub operation_id: Option<String>,
+    /// A relative or absolute URI reference to an OAS operation.
+    pub operation_ref: Option<String>,
+    /// Parameters to pass to the linked operation.
+    /// Key: Parameter name, Value: Runtime expression or constant.
+    pub parameters: HashMap<String, String>,
 }
 
 /// Represents a callback definition (outgoing webhook).
@@ -53,6 +91,8 @@ pub struct ParsedCallback {
     pub request_body: Option<RequestBodyDefinition>,
     /// The expected response type from the callback receiver.
     pub response_type: Option<String>,
+    /// Headers expected in the callback receiver's response.
+    pub response_headers: Vec<ResponseHeader>,
 }
 
 /// A single security requirement (AND logic).
@@ -72,9 +112,19 @@ pub struct RequestBodyDefinition {
     /// The format of the body (JSON, Form, etc.).
     pub format: BodyFormat,
     /// Multipart/Form Encoding details.
-    /// Maps property name -> Content-Type (e.g. "profileImage" -> "image/png").
+    /// Maps property name -> Encoding Information.
     /// Only populated if format is Multipart or Form.
-    pub encoding: Option<std::collections::HashMap<String, String>>,
+    pub encoding: Option<HashMap<String, EncodingInfo>>,
+}
+
+/// Encoding details for a specific property in a multipart/form request.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EncodingInfo {
+    /// The Content-Type for encoding a specific property.
+    pub content_type: Option<String>,
+    /// A map allowing additional information to be provided as headers (e.g. Content-Disposition).
+    /// Map: Header Name -> Header Type (e.g. "X-Custom-Header" -> "String").
+    pub headers: HashMap<String, String>,
 }
 
 /// Supported body content types.
@@ -134,6 +184,8 @@ pub enum ParamSource {
     Path,
     /// URL Query parameter (e.g. /users?page=1)
     Query,
+    /// OAS 3.2: Entire URL Query String treated as a specific value.
+    QueryString,
     /// HTTP Header parameter (e.g. X-Request-ID: 123)
     Header,
     /// HTTP Cookie parameter (e.g. SessionId=abc)

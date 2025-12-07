@@ -40,6 +40,10 @@ fn generate_struct_schema(struct_def: &ParsedStruct, dialect: Option<&str>) -> A
         schema.insert("description".to_string(), json!(desc));
     }
 
+    if struct_def.is_deprecated {
+        schema.insert("deprecated".to_string(), json!(true));
+    }
+
     // 2. Properties & Required
     let mut properties = Map::new();
     let mut required = Vec::new();
@@ -49,7 +53,13 @@ fn generate_struct_schema(struct_def: &ParsedStruct, dialect: Option<&str>) -> A
             continue;
         }
 
-        let (json_name, field_schema, is_optional) = process_field(field);
+        let (json_name, mut field_schema, is_optional) = process_field(field);
+
+        if field.is_deprecated {
+            if let Some(obj) = field_schema.as_object_mut() {
+                obj.insert("deprecated".to_string(), json!(true));
+            }
+        }
 
         properties.insert(json_name.clone(), field_schema);
 
@@ -83,6 +93,10 @@ fn generate_enum_schema(enum_def: &ParsedEnum, dialect: Option<&str>) -> AppResu
         schema.insert("description".to_string(), json!(desc));
     }
 
+    if enum_def.is_deprecated {
+        schema.insert("deprecated".to_string(), json!(true));
+    }
+
     let mut one_of = Vec::new();
 
     for variant in &enum_def.variants {
@@ -92,13 +106,18 @@ fn generate_enum_schema(enum_def: &ParsedEnum, dialect: Option<&str>) -> AppResu
             .unwrap_or_else(|| variant.name.clone());
 
         // Determine variant schema
-        // If variant wraps a type: Variant(Type)
-        let sub_schema = if let Some(ty) = &variant.ty {
+        let mut sub_schema = if let Some(ty) = &variant.ty {
             map_type_to_schema(ty)
         } else {
             // Unit variant -> Enum::A -> "A"
             json!({ "type": "string", "const": variant_name })
         };
+
+        if variant.is_deprecated {
+            if let Some(obj) = sub_schema.as_object_mut() {
+                obj.insert("deprecated".to_string(), json!(true));
+            }
+        }
 
         one_of.push(sub_schema);
     }
@@ -203,6 +222,8 @@ mod tests {
             description: Some("Test Struct".into()),
             rename: None,
             fields,
+            is_deprecated: false,
+            external_docs: None,
         }
     }
 
@@ -213,6 +234,8 @@ mod tests {
             description: Some("A field".into()),
             is_skipped: false,
             rename: rename.map(|s| s.into()),
+            is_deprecated: false,
+            external_docs: None,
         }
     }
 
@@ -252,6 +275,8 @@ mod tests {
             rename: None,
             tag: Some("type".into()),
             untagged: false,
+            is_deprecated: false,
+            external_docs: None,
             variants: vec![
                 ParsedVariant {
                     name: "Cat".into(),
@@ -259,6 +284,7 @@ mod tests {
                     description: None,
                     rename: None,
                     aliases: None,
+                    is_deprecated: false,
                 },
                 ParsedVariant {
                     name: "Dog".into(),
@@ -266,6 +292,7 @@ mod tests {
                     description: None,
                     rename: None,
                     aliases: None,
+                    is_deprecated: false,
                 },
             ],
         };
@@ -285,6 +312,8 @@ mod tests {
             rename: None,
             tag: None,
             untagged: false,
+            is_deprecated: false,
+            external_docs: None,
             variants: vec![],
         };
         let dialect = "https://json-schema.org/draft/2020-12/schema";
