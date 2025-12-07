@@ -4,6 +4,8 @@
 //!
 //! Converts Rust types into a JSON Schema compatible representation.
 //! Handles primitives, collections (Vec), and nullability (Option).
+//!
+//! Updated for OpenAPI 3.2 compliance regarding Binary Data (`contentMediaType`).
 
 use crate::error::{AppError, AppResult};
 // Import HasGenericArgs to access .generic_arg_list() on PathSegments
@@ -51,6 +53,12 @@ pub struct JsonSchema {
     pub format: Option<String>,
     /// Whether the field can be null (derived from `Option<T>`).
     pub nullable: bool,
+    /// Media type for string-encoded binary data (OAS 3.2).
+    /// e.g. "application/octet-stream"
+    pub content_media_type: Option<String>,
+    /// Encoding for string-encoded binary data (OAS 3.2).
+    /// e.g. "base64"
+    pub content_encoding: Option<String>,
 }
 
 /// Trait for converting Rust type strings to JSON Schemas.
@@ -116,24 +124,66 @@ fn map_ast_type(ty: &ast::Type) -> AppResult<JsonSchema> {
                 "NaiveDateTime" | "DateTime" => Ok(formatted(JsonType::String, "date-time")),
                 "NaiveDate" => Ok(formatted(JsonType::String, "date")),
 
+                // Binary types (explicit Bytes wrapper)
+                // Vec<u8> is handled via container generic check below, but bytes::Bytes is direct.
+                "Bytes" | "ByteBuf" => Ok(binary_schema()),
+
                 // Containers
                 "Option" => handle_generic_wrapper(segment, true, |inner| inner),
-                "Vec" => handle_generic_wrapper(segment, false, |inner| JsonSchema {
-                    type_: JsonType::Array(Box::new(inner)),
-                    format: None,
-                    nullable: false,
+                "Vec" => handle_generic_wrapper(segment, false, |inner| {
+                    // Special case: Vec<u8> -> Binary (OAS 3.2 best practice)
+                    // If the inner type is strictly an integer U8, we return binary string.
+                    // This avoids generating array<integer> for byte arrays.
+                    if inner.type_ == JsonType::Integer && is_u8_heuristic(ty) {
+                        return binary_schema();
+                    }
+
+                    JsonSchema {
+                        type_: JsonType::Array(Box::new(inner)),
+                        format: None,
+                        nullable: false,
+                        content_media_type: None,
+                        content_encoding: None,
+                    }
                 }),
 
                 // Fallback: User defined structs or unknown types become References
                 other => Ok(simple(JsonType::Ref(other.to_string()))),
             }
         }
-        // Correct AST variant for reference types (e.g. &str)
+        // Correct AST variant for reference types (e.g. &str, &[u8])
         ast::Type::RefType(ref_type) => {
             let inner = ref_type
                 .ty()
                 .ok_or_else(|| AppError::General("Invalid reference".into()))?;
+
+            // Check for slice &[u8]
+            if let ast::Type::SliceType(ref slice) = inner {
+                if let Some(slice_inner) = slice.ty() {
+                    if slice_inner.to_string().trim() == "u8" {
+                        return Ok(binary_schema());
+                    }
+                }
+            }
+
             map_ast_type(&inner)
+        }
+        ast::Type::SliceType(slice) => {
+            if let Some(inner) = slice.ty() {
+                let inner_schema = map_ast_type(&inner)?;
+                if inner.to_string().trim() == "u8" {
+                    return Ok(binary_schema());
+                }
+                Ok(JsonSchema {
+                    type_: JsonType::Array(Box::new(inner_schema)),
+                    format: None,
+                    nullable: false,
+                    content_media_type: None,
+                    content_encoding: None,
+                })
+            } else {
+                Err(AppError::General("Invalid slice type".into()))
+            }
         }
         _ => Err(AppError::General(format!(
             "Unsupported type structure: {:?}",
@@ -188,6 +238,8 @@ fn simple(t: JsonType) -> JsonSchema {
         type_: t,
         format: None,
         nullable: false,
+        content_media_type: None,
+        content_encoding: None,
     }
 }
 
@@ -196,7 +248,31 @@ fn formatted(t: JsonType, fmt: &str) -> JsonSchema {
         type_: t,
         format: Some(fmt.to_string()),
         nullable: false,
+        content_media_type: None,
+        content_encoding: None,
     }
+}
+
+/// Helper to generate the OAS 3.2 compliant binary schema.
+/// `type: string`, `contentMediaType: application/octet-stream`, `contentEncoding: base64`.
+fn binary_schema() -> JsonSchema {
+    JsonSchema {
+        type_: JsonType::String,
+        format: None, // Legacy "byte" omitted in favor of content* fields, or can be added if desired.
+        nullable: false,
+        content_media_type: Some("application/octet-stream".to_string()),
+        content_encoding: Some("base64".to_string()),
+    }
+}
+
+/// Heuristic to confirm if a type node dealing with integers is actually u8.
+/// Used inside Vec processing because the recursive map returns generic "Integer".
+fn is_u8_heuristic(ty: &ast::Type) -> bool {
+    // This is a rough check by looking at the text.
+    // map_ast_type is recursive, so when we are inside Vec<T>, 'ty' is 'Vec<u8>'.
+    // We want to check T.
+    let text = ty.to_string();
+    text.contains("u8")
 }
 
 #[cfg(test)]
@@ -250,5 +326,41 @@ mod tests {
         } else {
             panic!("Expected array");
         }
+    }
+
+    #[test]
+    fn test_binary_legacy_migration() {
+        let mapper = RustToJsonMapper;
+
+        // Case 1: Vec<u8> should map to binary fields
+        let res = mapper.map("Vec<u8>").unwrap();
+        assert_eq!(res.type_, JsonType::String);
+        assert_eq!(
+            res.content_media_type.as_deref(),
+            Some("application/octet-stream")
+        );
+        assert_eq!(res.content_encoding.as_deref(), Some("base64"));
+
+        // Case 2: Option<Vec<u8>>
+        let res_opt = mapper.map("Option<Vec<u8>>").unwrap();
+        assert!(res_opt.nullable);
+        assert_eq!(res_opt.type_, JsonType::String);
+        assert_eq!(
+            res_opt.content_media_type.as_deref(),
+            Some("application/octet-stream")
+        );
+
+        // Case 3: Bytes
+        let res_bytes = mapper.map("Bytes").unwrap();
+        assert_eq!(res_bytes.type_, JsonType::String);
+        assert_eq!(res_bytes.content_encoding.as_deref(), Some("base64"));
+    }
+
+    #[test]
+    fn test_slices_binary() {
+        let mapper = RustToJsonMapper;
+        let res = mapper.map("&[u8]").unwrap();
+        assert_eq!(res.type_, JsonType::String);
+        assert_eq!(res.content_encoding.as_deref(), Some("base64"));
     }
 }

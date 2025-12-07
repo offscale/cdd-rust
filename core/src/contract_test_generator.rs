@@ -123,10 +123,11 @@ fn generate_test_fn(
     code.push_str(&strategy.test_assertion());
     code.push('\n');
 
-    // 5. Schema Validation (Commented out placeholder usually)
+    // 5. Schema Validation
+    // Active validation now enabled via strategy helper
     code.push_str("    // 5. Schema Validation\n");
     code.push_str(&format!(
-        "    // validate_response(resp, \"{}\", \"{}\").await;\n",
+        "    validate_response(resp, \"{}\", \"{}\").await;\n",
         route.method.to_uppercase(),
         route.path
     ));
@@ -195,6 +196,8 @@ mod tests {
         assert!(code.contains("const OPENAPI_PATH: &str = \"tests/openapi.yaml\";"));
         // Check factory call
         assert!(code.contains("crate::create_app(App::new())"));
+        // Check active validation call is present and uncommented
+        assert!(code.contains("validate_response(resp, \"GET\", \"/users/{id}\").await;"));
     }
 
     #[test]
@@ -244,6 +247,7 @@ mod tests {
             request_body: Some(RequestBodyDefinition {
                 ty: "Item".into(),
                 format: BodyFormat::Json,
+                encoding: None,
             }),
             security: vec![],
             response_type: None,

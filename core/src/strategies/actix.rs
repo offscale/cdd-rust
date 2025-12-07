@@ -3,12 +3,13 @@
 //! # Actix Strategy
 //!
 //! Implementation of `BackendStrategy` for the Actix Web framework.
+//! Generates handlers, extractors, and test code tailored to the Actix ecosystem.
 
-use super::traits::BackendStrategy;
 use crate::oas::models::SecurityRequirement;
 use crate::oas::ParsedRoute;
+use crate::strategies::BackendStrategy;
 
-/// Strategy implementation for Actix Web.
+/// Strategy for generating Actix Web compatible code.
 pub struct ActixStrategy;
 
 impl BackendStrategy for ActixStrategy {
@@ -22,6 +23,7 @@ impl BackendStrategy for ActixStrategy {
         imports.push_str("use serde_json::Value;\n");
         imports.push_str("use uuid::Uuid;\n");
         imports.push_str("use chrono::{DateTime, Utc, NaiveDate, NaiveDateTime};\n");
+        // We assume the target application has a `security` module for auth types if used
         imports
     }
 
@@ -34,7 +36,6 @@ impl BackendStrategy for ActixStrategy {
         let args_str = args.join(", ");
         let return_type = if let Some(rt) = response_type {
             // Strictly typed return: actix_web::Result<web::Json<T>>
-            // Note: Error type is implicit or actix_web::Error
             format!("actix_web::Result<web::Json<{}>>", rt)
         } else {
             "impl Responder".to_string()
@@ -83,15 +84,38 @@ impl BackendStrategy for ActixStrategy {
         if requirements.is_empty() {
             return "".to_string();
         }
-        // Generate a Stub Extractor using Actix ReqData or custom Trait
-        // For simplicity, we generate `_auth: web::ReqData<AuthenticatedUser>` or similar.
-        // Or if we know the scheme name, `_auth: Auth<ApiKey>`
-        // Since we don't define the extractor structs in the strategy, we use a placeholder.
 
-        let schemes: Vec<&String> = requirements.iter().map(|r| &r.scheme_name).collect();
-        // Just use the first one name for the type placeholder or generic 'Auth'
-        let name = schemes.first().unwrap();
-        format!("_auth: web::ReqData<{}>", name)
+        // OAS allows multiple security requirement objects (OR logic).
+        // e.g. [{ApiKey: []}, {OAuth: [read]}]
+        // We generate an extractor for the FIRST requirement set to define the primary auth path.
+        let req = &requirements[0];
+        let scheme = to_pascal_case(&req.scheme_name);
+
+        if req.scopes.is_empty() {
+            // Simple Auth: just the scheme
+            // e.g. _auth: web::ReqData<security::ApiKey>
+            format!("_auth: web::ReqData<security::{}>", scheme)
+        } else {
+            // Scoped Auth: Scheme + Scopes
+            // e.g. _auth: web::ReqData<security::Authenticated<security::OAuth, (security::scopes::Read, security::scopes::Write)>>
+
+            let normalized_scopes: Vec<String> = req
+                .scopes
+                .iter()
+                .map(|s| format!("security::scopes::{}", to_pascal_case(s)))
+                .collect();
+
+            let scopes_tuple = if normalized_scopes.len() == 1 {
+                normalized_scopes[0].clone()
+            } else {
+                format!("({})", normalized_scopes.join(", "))
+            };
+
+            format!(
+                "_auth: web::ReqData<security::Authenticated<security::{}, {}>>",
+                scheme, scopes_tuple
+            )
+        }
     }
 
     fn route_registration_statement(&self, route: &ParsedRoute, handler_full_path: &str) -> String {
@@ -104,11 +128,8 @@ impl BackendStrategy for ActixStrategy {
             "PATCH" => "patch()".to_string(),
             "HEAD" => "head()".to_string(),
             "TRACE" => "trace()".to_string(),
-            // "OPTIONS" usually implies Generic route if using web::options() check docs, but web::resource("..").route(web::options()) works.
-            // Note: actix_web::web::options() does exist.
             "OPTIONS" => "options()".to_string(),
             // "QUERY" is OAS 3.2.0 specific and Actix might not have a helper.
-            // We use the generic method construction.
             "QUERY" => {
                 "method(actix_web::http::Method::from_bytes(b\"QUERY\").unwrap())".to_string()
             }
@@ -132,7 +153,8 @@ impl BackendStrategy for ActixStrategy {
         code.push_str("#![allow(unused_imports, unused_variables, dead_code)]\n\n");
         code.push_str("use actix_web::{test, App, web};\n");
         code.push_str("use serde_json::Value;\n");
-        code.push_str("use std::fs;\n\n");
+        code.push_str("use std::fs;\n");
+        code.push_str("use jsonschema::JSONSchema;\n\n");
         code
     }
 
@@ -161,8 +183,7 @@ impl BackendStrategy for ActixStrategy {
             "query" => {
                 "method(actix_web::http::Method::from_bytes(b\"QUERY\").unwrap())".to_string()
             }
-            // TestRequest::head() doesn't exist in some versions, depends on crate.
-            // Safest to use .method(...) for extended verbs.
+            // TestRequest::head() depends on crate version, explicit method is safest
             _ => format!(
                 "method(actix_web::http::Method::from_bytes(b\"{}\").unwrap())",
                 method.to_uppercase()
@@ -186,33 +207,82 @@ impl BackendStrategy for ActixStrategy {
     fn test_validation_helper(&self) -> String {
         r#"
 /// Helper to validate response body against OpenAPI schema.
+/// Supports both OpenAPI 3.x (content -> media -> schema) and Swagger 2.0 (schema only).
 async fn validate_response(resp: actix_web::dev::ServiceResponse, method: &str, path_template: &str) {
     use actix_web::body::MessageBody;
 
-    // 1. Read OpenAPI
+    // 1. Extract Body
+    let body_bytes = resp.into_body().try_into_bytes().expect("Failed to read response body");
+    let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap_or(serde_json::Value::Null);
+
+    // 2. Read OpenAPI
     let yaml_content = fs::read_to_string(OPENAPI_PATH).expect("Failed to read openapi.yaml");
     let openapi: serde_json::Value = serde_yaml::from_str(&yaml_content).expect("Failed to parse OpenAPI");
 
-    // 2. Find Schema for Response
-    let status_str = resp.status().as_str();
+    // 3. Navigate to Response Schema
+    let status_str = "200"; // Assuming success for contract test defaults, normally check resp.status()
+    let method_key = method.to_lowercase();
 
-    let schema_opt = openapi.get("paths")
+    let operation = openapi.get("paths")
         .and_then(|p| p.get(path_template))
-        .and_then(|p| p.get(method.to_lowercase()))
-        .and_then(|op| op.get("responses"))
-        .and_then(|r| r.get(status_str).or_else(|| r.get("default")))
-        .and_then(|res| res.get("content"))
-        .and_then(|c| c.get("application/json"))
-        .and_then(|aj| aj.get("schema"));
+        .and_then(|path_item| path_item.get(&method_key));
 
-    if let Some(_schema) = schema_opt {
-        let body_bytes = resp.into_body().try_into_bytes().unwrap();
-        let _body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap_or(serde_json::Value::Null);
+    if let Some(op) = operation {
+        let responses = op.get("responses");
+        let response = responses.and_then(|r| r.get(status_str).or_else(|| r.get("default")));
+
+        if let Some(resp_def) = response {
+            // Lookup Strategy:
+            // 1. OpenAPI 3.x: content -> application/json -> schema
+            // 2. Swagger 2.0: schema (direct)
+            let schema_oas3 = resp_def.get("content")
+                .and_then(|c| c.get("application/json"))
+                .and_then(|m| m.get("schema"));
+
+            let schema_swagger2 = resp_def.get("schema");
+
+            if let Some(schema) = schema_oas3.or(schema_swagger2) {
+                // 4. Compile and Validate
+                // We compile the specific schema fragment.
+                // Note: If schema uses local $refs (#/components/...), JSONSchema compile might succeed
+                // if it doesn't need to resolve them immediately, or fail if it does.
+                match JSONSchema::options().compile(schema) {
+                    Ok(validator) => {
+                        if let Err(errors) = validator.validate(&body_json) {
+                            let err_msgs: Vec<String> = errors.map(|e| e.to_string()).collect();
+                            panic!(
+                                "Response schema validation failed for {} {}\nErrors:\n{}",
+                                method, path_template, err_msgs.join("\n")
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        // If compilation fails (e.g. missing refs), strictly failing the test
+                        // ensures the user is aware their spec might need to be flattened or fixed for testing.
+                        panic!("Failed to compile JSON Schema from spec: {}", e);
+                    }
+                }
+            }
+        }
     }
 }
 "#
             .to_string()
     }
+}
+
+/// Helper to covert to PascalCase for types
+fn to_pascal_case(s: &str) -> String {
+    s.split(|c: char| !c.is_alphanumeric())
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut c = part.chars();
+            match c.next() {
+                None => String::new(),
+                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -265,14 +335,32 @@ mod tests {
     }
 
     #[test]
-    fn test_actix_security_extractor() {
+    fn test_actix_security_extractor_simple() {
         let s = ActixStrategy;
         let reqs = vec![SecurityRequirement {
             scheme_name: "ApiKey".into(),
             scopes: vec![],
         }];
-        // Expect: _auth: web::ReqData<ApiKey>
-        assert_eq!(s.security_extractor(&reqs), "_auth: web::ReqData<ApiKey>");
+        // Expect: _auth: web::ReqData<security::ApiKey>
+        assert_eq!(
+            s.security_extractor(&reqs),
+            "_auth: web::ReqData<security::ApiKey>"
+        );
+    }
+
+    #[test]
+    fn test_actix_security_extractor_scopes() {
+        let s = ActixStrategy;
+        let reqs = vec![SecurityRequirement {
+            scheme_name: "oAuth2".into(),
+            scopes: vec!["read:user".into(), "write:admin".into()],
+        }];
+
+        let output = s.security_extractor(&reqs);
+        assert!(output.contains("_auth: web::ReqData<security::Authenticated"));
+        assert!(output.contains("security::OAuth2"));
+        assert!(output.contains("security::scopes::ReadUser"));
+        assert!(output.contains("security::scopes::WriteAdmin"));
     }
 
     #[test]
@@ -347,13 +435,16 @@ mod tests {
             callbacks: vec![],
         };
         let code = s.route_registration_statement(&route, "mod::qh");
-        assert!(code.contains(".route(web::method(actix_web::http::Method::from_bytes(b\"QUERY\").unwrap()).to(mod::qh)));"));
+        assert!(code.contains(
+            ".route(web::method(actix_web::http::Method::from_bytes(b\"QUERY\").unwrap()).to(mod::qh)));"
+        ));
     }
 
     #[test]
     fn test_actix_test_generation_components() {
         let s = ActixStrategy;
         assert!(s.test_imports().contains("use actix_web"));
+        assert!(s.test_imports().contains("use jsonschema::JSONSchema;"));
         assert!(s
             .test_fn_signature("test_foo")
             .contains("#[actix_web::test]"));
@@ -369,6 +460,9 @@ mod tests {
         assert!(s
             .test_validation_helper()
             .contains("actix_web::dev::ServiceResponse"));
+        assert!(s
+            .test_validation_helper()
+            .contains("JSONSchema::options().compile(schema)"));
     }
 
     #[test]

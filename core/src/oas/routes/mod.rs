@@ -17,9 +17,33 @@ use crate::oas::routes::shims::ShimOpenApi;
 use utoipa::openapi::RefOr;
 
 /// Parses a raw OpenAPI YAML string and extracts route definitions from `paths` and `webhooks`.
+///
+/// This function verifies the presence of a valid `openapi` (3.x) or `swagger` (2.0) version field
+/// before processing the routes.
 pub fn parse_openapi_routes(yaml_content: &str) -> AppResult<Vec<ParsedRoute>> {
     let openapi: ShimOpenApi = serde_yaml::from_str(yaml_content)
         .map_err(|e| AppError::General(format!("Failed to parse OpenAPI YAML: {}", e)))?;
+
+    // Version Validation
+    if let Some(version) = &openapi.openapi {
+        if !version.starts_with("3.") {
+            return Err(AppError::General(format!(
+                "Unsupported OpenAPI version: {}. Only 3.x is supported by this parser.",
+                version
+            )));
+        }
+    } else if let Some(version) = &openapi.swagger {
+        if !version.starts_with("2.") {
+            return Err(AppError::General(format!(
+                "Unsupported Swagger version: {}. Only 2.0 is supported for legacy compatibility.",
+                version
+            )));
+        }
+    } else {
+        return Err(AppError::General(
+            "Invalid OpenAPI document: missing 'openapi' or 'swagger' version field.".into(),
+        ));
+    }
 
     let mut routes = Vec::new();
     let components = openapi.components.as_ref();
@@ -59,6 +83,7 @@ pub fn parse_openapi_routes(yaml_content: &str) -> AppResult<Vec<ParsedRoute>> {
 mod tests {
     use super::*;
     use crate::oas::models::ParamSource;
+    use crate::oas::routes::shims::ShimOpenApi;
 
     #[test]
     fn test_parse_routes_basic() {
@@ -93,6 +118,109 @@ paths:
         let post_r = routes.iter().find(|r| r.method == "POST").unwrap();
         let body = post_r.request_body.as_ref().unwrap();
         assert_eq!(body.ty, "UpdateUserRequest");
+    }
+
+    #[test]
+    fn test_parse_oas_3_2_0_compliant() {
+        let yaml = r#"
+openapi: 3.2.0
+jsonSchemaDialect: https://spec.openapis.org/oas/3.1/dialect/base
+info:
+  title: OAS 3.2 Test
+  version: 1.0.0
+servers:
+  - url: https://api.example.com/v1
+    description: Production Server
+paths:
+  /ping:
+    get:
+      responses: { '200': {description: Pong} }
+"#;
+        let routes = parse_openapi_routes(yaml).unwrap();
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].path, "/ping");
+    }
+
+    #[test]
+    fn test_parse_legacy_swagger_2_0() {
+        let yaml = r#"
+swagger: "2.0"
+info: {title: Legacy, version: 1.0}
+paths:
+  /legacy:
+    get:
+      responses: { '200': {description: OK} }
+"#;
+        let routes = parse_openapi_routes(yaml).unwrap();
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].path, "/legacy");
+    }
+
+    #[test]
+    fn test_missing_version_fails() {
+        let yaml = r#"
+info: {title: Missing Version, version: 1.0}
+paths: {}
+"#;
+        let res = parse_openapi_routes(yaml);
+        assert!(res.is_err());
+        match res.unwrap_err() {
+            AppError::General(msg) => assert!(msg.contains("missing 'openapi' or 'swagger'")),
+            _ => panic!("Wrong error type"),
+        }
+    }
+
+    #[test]
+    fn test_metadata_deserialization() {
+        // Direct test of ShimOpenApi to verify Metadata Objects Parsing requirement
+        // independent of what `parse_openapi_routes` returns.
+        let yaml = r#"
+openapi: 3.2.0
+info:
+  title: Detailed API
+  description: Markdown *supported*
+  termsOfService: https://example.com/terms
+  contact:
+    name: Support
+    email: support@example.com
+  license:
+    name: MIT
+    identifier: MIT
+  version: 1.2.3
+servers:
+  - url: https://{env}.example.com
+    variables:
+      env:
+        default: dev
+        enum: [dev, prod]
+externalDocs:
+  url: https://docs.example.com
+  description: Context
+paths: {}
+"#;
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
+
+        assert_eq!(openapi.openapi.as_deref(), Some("3.2.0"));
+
+        let info = openapi.info.unwrap();
+        assert_eq!(
+            info.terms_of_service.as_deref(),
+            Some("https://example.com/terms")
+        );
+
+        let contact = info.contact.unwrap();
+        assert_eq!(contact.email.as_deref(), Some("support@example.com"));
+
+        let license = info.license.unwrap();
+        assert_eq!(license.identifier.as_deref(), Some("MIT"));
+
+        let servers = openapi.servers.unwrap();
+        assert_eq!(servers[0].url, "https://{env}.example.com");
+        let vars = servers[0].variables.as_ref().unwrap();
+        assert_eq!(vars.get("env").unwrap().default, "dev");
+
+        let ext = openapi.external_docs.unwrap();
+        assert_eq!(ext.url, "https://docs.example.com");
     }
 
     #[test]

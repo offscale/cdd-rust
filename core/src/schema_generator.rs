@@ -11,16 +11,26 @@ use crate::parser::{ParsedEnum, ParsedField, ParsedModel, ParsedStruct};
 use serde_json::{json, Map, Value};
 
 /// Generates a JSON Schema object from a parsed Rust model (struct or enum).
-pub fn generate_json_schema(model: &ParsedModel) -> AppResult<Value> {
+///
+/// # Arguments
+///
+/// * `model` - The parsed Rust model.
+/// * `dialect` - Optional JSON Schema dialect URI to associate with the schema.
+pub fn generate_json_schema(model: &ParsedModel, dialect: Option<&str>) -> AppResult<Value> {
     match model {
-        ParsedModel::Struct(s) => generate_struct_schema(s),
-        ParsedModel::Enum(e) => generate_enum_schema(e),
+        ParsedModel::Struct(s) => generate_struct_schema(s, dialect),
+        ParsedModel::Enum(e) => generate_enum_schema(e, dialect),
     }
 }
 
 /// Generates schema for a struct.
-fn generate_struct_schema(struct_def: &ParsedStruct) -> AppResult<Value> {
+fn generate_struct_schema(struct_def: &ParsedStruct, dialect: Option<&str>) -> AppResult<Value> {
     let mut schema = Map::new();
+
+    // 0. Dialect (if provided)
+    if let Some(d) = dialect {
+        schema.insert("$schema".to_string(), json!(d));
+    }
 
     // 1. Basic Metadata
     schema.insert("title".to_string(), json!(struct_def.name));
@@ -59,8 +69,14 @@ fn generate_struct_schema(struct_def: &ParsedStruct) -> AppResult<Value> {
 }
 
 /// Generates schema for an enum using `oneOf`.
-fn generate_enum_schema(enum_def: &ParsedEnum) -> AppResult<Value> {
+fn generate_enum_schema(enum_def: &ParsedEnum, dialect: Option<&str>) -> AppResult<Value> {
     let mut schema = Map::new();
+
+    // 0. Dialect
+    if let Some(d) = dialect {
+        schema.insert("$schema".to_string(), json!(d));
+    }
+
     schema.insert("title".to_string(), json!(enum_def.name));
 
     if let Some(desc) = &enum_def.description {
@@ -208,11 +224,24 @@ mod tests {
         ];
 
         let def = ParsedModel::Struct(make_struct("User", fields));
-        let schema = generate_json_schema(&def).unwrap();
+        let schema = generate_json_schema(&def, None).unwrap();
 
         let props = schema["properties"].as_object().unwrap();
         assert_eq!(props["id"]["type"], "integer");
         assert_eq!(props["active"]["type"], "boolean");
+        assert!(!schema.as_object().unwrap().contains_key("$schema"));
+    }
+
+    #[test]
+    fn test_generate_schema_with_dialect() {
+        let fields = vec![make_field("id", "i32", None)];
+        let def = ParsedModel::Struct(make_struct("User", fields));
+        let dialect = "https://spec.openapis.org/oas/3.1/dialect/base";
+
+        let schema = generate_json_schema(&def, Some(dialect)).unwrap();
+
+        assert_eq!(schema["$schema"], dialect);
+        assert_eq!(schema["title"], "User");
     }
 
     #[test]
@@ -241,9 +270,26 @@ mod tests {
             ],
         };
 
-        let schema = generate_json_schema(&ParsedModel::Enum(en)).unwrap();
+        let schema = generate_json_schema(&ParsedModel::Enum(en), None).unwrap();
         assert!(schema["oneOf"].is_array());
         assert!(schema["discriminator"].is_object());
         assert_eq!(schema["discriminator"]["propertyName"], "type");
+        assert!(!schema.as_object().unwrap().contains_key("$schema"));
+    }
+
+    #[test]
+    fn test_generate_enum_schema_with_dialect() {
+        let en = ParsedEnum {
+            name: "Status".into(),
+            description: None,
+            rename: None,
+            tag: None,
+            untagged: false,
+            variants: vec![],
+        };
+        let dialect = "https://json-schema.org/draft/2020-12/schema";
+        let schema = generate_json_schema(&ParsedModel::Enum(en), Some(dialect)).unwrap();
+        assert_eq!(schema["$schema"], dialect);
+        assert_eq!(schema["title"], "Status");
     }
 }
