@@ -169,6 +169,7 @@ fn parse_enum_node(enum_def: ast::Enum, name: &str) -> AppResult<ParsedEnum> {
         variants,
         is_deprecated: false,
         external_docs: None,
+        discriminator_mapping: None,
     })
 }
 

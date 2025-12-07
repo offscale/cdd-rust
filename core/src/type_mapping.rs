@@ -5,7 +5,8 @@
 //! Converts Rust types into a JSON Schema compatible representation.
 //! Handles primitives, collections (Vec), and nullability (Option).
 //!
-//! Updated for OpenAPI 3.2 compliance regarding Binary Data (`contentMediaType`).
+//! Updated for OpenAPI 3.2 compliance regarding Binary Data (`contentMediaType`)
+//! and Format Registry (`password`, `float`, `double`).
 
 use crate::error::{AppError, AppResult};
 // Import HasGenericArgs to access .generic_arg_list() on PathSegments
@@ -49,7 +50,7 @@ impl Display for JsonType {
 pub struct JsonSchema {
     /// The primary JSON type.
     pub type_: JsonType,
-    /// Optional format specifier (e.g., "uuid", "date-time").
+    /// Optional format specifier (e.g., "uuid", "date-time", "password").
     pub format: Option<String>,
     /// Whether the field can be null (derived from `Option<T>`).
     pub nullable: bool,
@@ -117,7 +118,10 @@ fn map_ast_type(ty: &ast::Type) -> AppResult<JsonSchema> {
                 "bool" => Ok(simple(JsonType::Boolean)),
                 "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64"
                 | "u128" | "usize" => Ok(simple(JsonType::Integer)),
-                "f32" | "f64" => Ok(simple(JsonType::Number)),
+
+                // Numbers (Registry support)
+                "f32" => Ok(formatted(JsonType::Number, "float")),
+                "f64" => Ok(formatted(JsonType::Number, "double")),
 
                 // Complex / Formats
                 "Uuid" => Ok(formatted(JsonType::String, "uuid")),
@@ -128,7 +132,7 @@ fn map_ast_type(ty: &ast::Type) -> AppResult<JsonSchema> {
                 // Vec<u8> is handled via container generic check below, but bytes::Bytes is direct.
                 "Bytes" | "ByteBuf" => Ok(binary_schema()),
 
-                // Containers
+                // Containers & Wrappers
                 "Option" => handle_generic_wrapper(segment, true, |inner| inner),
                 "Vec" => handle_generic_wrapper(segment, false, |inner| {
                     // Special case: Vec<u8> -> Binary (OAS 3.2 best practice)
@@ -145,6 +149,14 @@ fn map_ast_type(ty: &ast::Type) -> AppResult<JsonSchema> {
                         content_media_type: None,
                         content_encoding: None,
                     }
+                }),
+                // Secret<T> wrapper (Registry: format: password)
+                "Secret" => handle_generic_wrapper(segment, false, |mut inner| {
+                    // Only apply password format if inner is a String
+                    if inner.type_ == JsonType::String {
+                        inner.format = Some("password".to_string());
+                    }
+                    inner
                 }),
 
                 // Fallback: User defined structs or unknown types become References
@@ -285,7 +297,7 @@ mod tests {
 
         let cases = vec![
             ("i32", JsonType::Integer),
-            ("f32", JsonType::Number),
+            // ("f32", JsonType::Number), // Now formatted
             ("bool", JsonType::Boolean),
             ("String", JsonType::String),
         ];
@@ -294,6 +306,34 @@ mod tests {
             let res = mapper.map(input).expect(input);
             assert_eq!(res.type_, expected);
         }
+    }
+
+    #[test]
+    fn test_float_precision_mapping() {
+        let mapper = RustToJsonMapper;
+
+        let f32_res = mapper.map("f32").unwrap();
+        assert_eq!(f32_res.type_, JsonType::Number);
+        assert_eq!(f32_res.format.as_deref(), Some("float"));
+
+        let f64_res = mapper.map("f64").unwrap();
+        assert_eq!(f64_res.type_, JsonType::Number);
+        assert_eq!(f64_res.format.as_deref(), Some("double"));
+    }
+
+    #[test]
+    fn test_secret_wrapper_mapping() {
+        let mapper = RustToJsonMapper;
+
+        // Secret<String> -> format: password
+        let secret_str = mapper.map("Secret<String>").unwrap();
+        assert_eq!(secret_str.type_, JsonType::String);
+        assert_eq!(secret_str.format.as_deref(), Some("password"));
+
+        // Secret<i32> -> no password format (applies to strings)
+        let secret_int = mapper.map("Secret<i32>").unwrap();
+        assert_eq!(secret_int.type_, JsonType::Integer);
+        assert_eq!(secret_int.format, None);
     }
 
     #[test]

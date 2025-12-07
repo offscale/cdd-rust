@@ -48,6 +48,7 @@ mod tests {
     fn test_scaffold_new_file() {
         let route = ParsedRoute {
             path: "/users".into(),
+            base_path: None,
             method: "GET".into(),
             handler_name: "get_users".into(),
             params: vec![],
@@ -76,6 +77,7 @@ mod tests {
 
         let route = ParsedRoute {
             path: "/new".into(),
+            base_path: None,
             method: "POST".into(),
             handler_name: "new_func".into(),
             params: vec![],

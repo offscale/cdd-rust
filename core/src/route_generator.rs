@@ -92,6 +92,7 @@ mod tests {
     fn test_register_single_route() {
         let parser_route = ParsedRoute {
             path: "/users".into(),
+            base_path: None,
             method: "GET".into(),
             handler_name: "get_users".into(),
             params: vec![],
@@ -124,6 +125,7 @@ pub fn config(cfg: &mut web::ServiceConfig) {
     fn test_append_routes_to_existing() {
         let parser_route = ParsedRoute {
             path: "/new".into(),
+            base_path: None,
             method: "POST".into(),
             handler_name: "new_fn".into(),
             params: vec![],
@@ -154,6 +156,7 @@ pub fn config(cfg: &mut web::ServiceConfig) {
     fn test_skip_existing_route_duplication() {
         let parser_route = ParsedRoute {
             path: "/users".into(),
+            base_path: None,
             method: "POST".into(),
             handler_name: "create_user".into(),
             params: vec![],
@@ -182,6 +185,7 @@ pub fn config(cfg: &mut web::ServiceConfig) {
     fn test_append_multiple_statements() {
         let r1 = ParsedRoute {
             path: "/a".into(),
+            base_path: None,
             method: "GET".into(),
             handler_name: "a".into(),
             params: vec![],
@@ -197,6 +201,7 @@ pub fn config(cfg: &mut web::ServiceConfig) {
         };
         let r2 = ParsedRoute {
             path: "/b".into(),
+            base_path: None,
             method: "POST".into(),
             handler_name: "b".into(),
             params: vec![],

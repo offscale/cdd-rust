@@ -9,6 +9,7 @@
 
 use crate::parser::models::ParsedExternalDocs;
 use std::collections::HashMap;
+use std::fmt;
 
 /// Distinguishes between standard paths and event-driven webhooks.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,11 +20,51 @@ pub enum RouteKind {
     Webhook,
 }
 
+/// Represents a validated Runtime Expression (OAS 3.2 ABNF).
+///
+/// Syntax: `$url` | `$method` | `$statusCode` | `$request.{source}` | `$response.{source}`
+#[derive(Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct RuntimeExpression(String);
+
+impl RuntimeExpression {
+    /// Creates a new RuntimeExpression from a string.
+    /// Note: Does not currently enforce strict ABNF validation on creation,
+    /// but is typed to distinguish from standard strings.
+    pub fn new(s: impl Into<String>) -> Self {
+        Self(s.into())
+    }
+
+    /// Returns the raw expression string.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Heuristic check if the string looks like an expression (starts with `$`).
+    pub fn is_expression(&self) -> bool {
+        self.0.starts_with('$')
+    }
+}
+
+impl fmt::Debug for RuntimeExpression {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "RuntimeExpression({:?})", self.0)
+    }
+}
+
+impl fmt::Display for RuntimeExpression {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Represents a parsed API route.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedRoute {
     /// The URL path (e.g. "/users/{id}") or Webhook Name (e.g. "userCreated").
     pub path: String,
+    /// The base URL path derived from the `servers` block (e.g. "/api/v1").
+    pub base_path: Option<String>,
     /// HTTP Method: "GET", "POST", etc.
     pub method: String,
     /// Rust handler name, typically snake_case of operationId
@@ -74,8 +115,8 @@ pub struct ParsedLink {
     /// A relative or absolute URI reference to an OAS operation.
     pub operation_ref: Option<String>,
     /// Parameters to pass to the linked operation.
-    /// Key: Parameter name, Value: Runtime expression or constant.
-    pub parameters: HashMap<String, String>,
+    /// Key: Parameter name, Value: Runtime expression.
+    pub parameters: HashMap<String, RuntimeExpression>,
 }
 
 /// Represents a callback definition (outgoing webhook).
@@ -84,7 +125,7 @@ pub struct ParsedCallback {
     /// The callback name (key in the callbacks map).
     pub name: String,
     /// The runtime expression URL (e.g. "{$request.query.callbackUrl}").
-    pub expression: String,
+    pub expression: RuntimeExpression,
     /// The HTTP method for the callback request.
     pub method: String,
     /// The expected body sent in the callback (if any).
@@ -95,6 +136,40 @@ pub struct ParsedCallback {
     pub response_headers: Vec<ResponseHeader>,
 }
 
+/// Detailed information about a Security Scheme.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SecuritySchemeInfo {
+    /// The type of scheme (ApiKey, Http, etc.).
+    pub kind: SecuritySchemeKind,
+    /// The description provided in the spec.
+    pub description: Option<String>,
+}
+
+/// Classification of the security scheme logic.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SecuritySchemeKind {
+    /// API Key (Header, Query, Cookie).
+    ApiKey {
+        /// Parameter name.
+        name: String,
+        /// Location.
+        in_loc: ParamSource,
+    },
+    /// HTTP Authentication (Basic, Bearer, etc.).
+    Http {
+        /// Scheme (basic, bearer).
+        scheme: String,
+        /// Format (e.g. JWT).
+        bearer_format: Option<String>,
+    },
+    /// OAuth2 Flows.
+    OAuth2,
+    /// OpenID Connect.
+    OpenIdConnect,
+    /// Mutual TLS.
+    MutualTls,
+}
+
 /// A single security requirement (AND logic).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SecurityRequirement {
@@ -102,6 +177,8 @@ pub struct SecurityRequirement {
     pub scheme_name: String,
     /// Required scopes (for OAuth2/OIDC).
     pub scopes: Vec<String>,
+    /// Resolved scheme details (if available).
+    pub scheme: Option<SecuritySchemeInfo>,
 }
 
 /// Definition of a request body type and format.
@@ -112,18 +189,15 @@ pub struct RequestBodyDefinition {
     /// The format of the body (JSON, Form, etc.).
     pub format: BodyFormat,
     /// Multipart/Form Encoding details.
-    /// Maps property name -> Encoding Information.
-    /// Only populated if format is Multipart or Form.
     pub encoding: Option<HashMap<String, EncodingInfo>>,
 }
 
-/// Encoding details for a specific property in a multipart/form request.
+/// Encoding details for a specific property.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EncodingInfo {
-    /// The Content-Type for encoding a specific property.
+    /// Content-Type.
     pub content_type: Option<String>,
-    /// A map allowing additional information to be provided as headers (e.g. Content-Disposition).
-    /// Map: Header Name -> Header Type (e.g. "X-Custom-Header" -> "String").
+    /// Headers map.
     pub headers: HashMap<String, String>,
 }
 
@@ -138,56 +212,54 @@ pub enum BodyFormat {
     Multipart,
 }
 
-/// Parameter serialization style as defined in RFC 6570 and OpenAPI 3.x.
+/// Parameter serialization style.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ParamStyle {
-    /// Path-style parameters defined by RFC6570 (matrix).
+    /// `matrix`
     Matrix,
-    /// Label style parameters defined by RFC6570 (label).
+    /// `label`
     Label,
-    /// Form style parameters defined by RFC6570 (form).
-    /// Standard for query (e.g. `id=5&name=foo`) and cookie.
+    /// `form`
     Form,
-    /// Simple style parameters defined by RFC6570 (simple).
-    /// Standard for path (e.g. `/users/5,6,7`) and header.
+    /// `simple`
     #[default]
     Simple,
-    /// Space separated array values (e.g. `key=a b c`).
+    /// `spaceDelimited`
     SpaceDelimited,
-    /// Pipe separated array values (e.g. `key=a|b|c`).
+    /// `pipeDelimited`
     PipeDelimited,
-    /// Deep object serialization (e.g. `key[prop]=val`).
+    /// `deepObject`
     DeepObject,
 }
 
-/// Represents a parameter in a route (Path, Query, Header, Cookie).
+/// Represents a parameter in a route.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RouteParam {
-    /// Parameter name in the source (e.g. "id")
+    /// Parameter name in the source.
     pub name: String,
-    /// Whether it's from Path, Query, Header, or Cookie.
+    /// Location.
     pub source: ParamSource,
-    /// Rust type (e.g. `Uuid`, `i32`, `Option<String>`)
+    /// Rust type.
     pub ty: String,
-    /// Serialization style (e.g. Form, Simple).
+    /// Serialization style.
     pub style: Option<ParamStyle>,
-    /// Whether arrays/objects generate separate parameters.
+    /// Explode modifier.
     pub explode: bool,
-    /// Whether reserved characters (RFC3986) are allowed.
+    /// Allow reserved characters.
     pub allow_reserved: bool,
 }
 
 /// The source location of a parameter.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ParamSource {
-    /// URL Path parameter (e.g. /users/{id})
+    /// Path.
     Path,
-    /// URL Query parameter (e.g. /users?page=1)
+    /// Query.
     Query,
-    /// OAS 3.2: Entire URL Query String treated as a specific value.
+    /// Query String (OAS 3.2).
     QueryString,
-    /// HTTP Header parameter (e.g. X-Request-ID: 123)
+    /// Header.
     Header,
-    /// HTTP Cookie parameter (e.g. SessionId=abc)
+    /// Cookie.
     Cookie,
 }

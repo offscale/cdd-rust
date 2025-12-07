@@ -34,7 +34,6 @@ fn generate_struct_schema(struct_def: &ParsedStruct, dialect: Option<&str>) -> A
 
     // 1. Basic Metadata
     schema.insert("title".to_string(), json!(struct_def.name));
-    schema.insert("type".to_string(), json!("object"));
 
     if let Some(desc) = &struct_def.description {
         schema.insert("description".to_string(), json!(desc));
@@ -44,35 +43,66 @@ fn generate_struct_schema(struct_def: &ParsedStruct, dialect: Option<&str>) -> A
         schema.insert("deprecated".to_string(), json!(true));
     }
 
-    // 2. Properties & Required
-    let mut properties = Map::new();
-    let mut required = Vec::new();
+    // 2. Check if it is a Tuple Struct vs Named Struct
+    // A Tuple struct in Rust is parsed with fields named "0", "1", "2"...
+    // We detect if ALL fields are numeric.
+    let is_tuple = !struct_def.fields.is_empty()
+        && struct_def
+            .fields
+            .iter()
+            .all(|f| f.name.chars().all(char::is_numeric));
 
-    for field in &struct_def.fields {
-        if field.is_skipped {
-            continue;
+    if is_tuple {
+        schema.insert("type".to_string(), json!("array"));
+        let mut prefix_items = Vec::new();
+
+        // Sort fields by index to ensure correct order
+        let mut sorted_fields = struct_def.fields.clone();
+        sorted_fields.sort_by_key(|f| f.name.parse::<usize>().unwrap_or(0));
+
+        for field in sorted_fields {
+            if field.is_skipped {
+                continue;
+            }
+            let (_, field_schema, _) = process_field(&field);
+            prefix_items.push(field_schema);
         }
 
-        let (json_name, mut field_schema, is_optional) = process_field(field);
+        schema.insert("prefixItems".to_string(), Value::Array(prefix_items));
+        // Tuple structs are fixed length in Rust
+        schema.insert("items".to_string(), json!(false));
+    } else {
+        schema.insert("type".to_string(), json!("object"));
 
-        if field.is_deprecated {
-            if let Some(obj) = field_schema.as_object_mut() {
-                obj.insert("deprecated".to_string(), json!(true));
+        let mut properties = Map::new();
+        let mut required = Vec::new();
+
+        for field in &struct_def.fields {
+            if field.is_skipped {
+                continue;
+            }
+
+            let (json_name, mut field_schema, is_optional) = process_field(field);
+
+            if field.is_deprecated {
+                if let Some(obj) = field_schema.as_object_mut() {
+                    obj.insert("deprecated".to_string(), json!(true));
+                }
+            }
+
+            properties.insert(json_name.clone(), field_schema);
+
+            if !is_optional {
+                required.push(json_name);
             }
         }
 
-        properties.insert(json_name.clone(), field_schema);
+        schema.insert("properties".to_string(), Value::Object(properties));
 
-        if !is_optional {
-            required.push(json_name);
+        if !required.is_empty() {
+            let required_json: Vec<Value> = required.into_iter().map(Value::String).collect();
+            schema.insert("required".to_string(), Value::Array(required_json));
         }
-    }
-
-    schema.insert("properties".to_string(), Value::Object(properties));
-
-    if !required.is_empty() {
-        let required_json: Vec<Value> = required.into_iter().map(Value::String).collect();
-        schema.insert("required".to_string(), Value::Array(required_json));
     }
 
     Ok(Value::Object(schema))
@@ -256,6 +286,24 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_tuple_schema() {
+        let fields = vec![
+            make_field("0", "i32", None),
+            make_field("1", "String", None),
+        ];
+
+        let def = ParsedModel::Struct(make_struct("Point", fields));
+        let schema = generate_json_schema(&def, None).unwrap();
+
+        assert_eq!(schema["type"], "array");
+        assert_eq!(schema["items"], false);
+        let prefix_items = schema["prefixItems"].as_array().unwrap();
+        assert_eq!(prefix_items.len(), 2);
+        assert_eq!(prefix_items[0]["type"], "integer");
+        assert_eq!(prefix_items[1]["type"], "string");
+    }
+
+    #[test]
     fn test_generate_schema_with_dialect() {
         let fields = vec![make_field("id", "i32", None)];
         let def = ParsedModel::Struct(make_struct("User", fields));
@@ -295,6 +343,7 @@ mod tests {
                     is_deprecated: false,
                 },
             ],
+            discriminator_mapping: None,
         };
 
         let schema = generate_json_schema(&ParsedModel::Enum(en), None).unwrap();
@@ -315,6 +364,7 @@ mod tests {
             is_deprecated: false,
             external_docs: None,
             variants: vec![],
+            discriminator_mapping: None,
         };
         let dialect = "https://json-schema.org/draft/2020-12/schema";
         let schema = generate_json_schema(&ParsedModel::Enum(en), Some(dialect)).unwrap();

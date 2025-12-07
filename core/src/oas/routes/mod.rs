@@ -45,6 +45,7 @@ pub fn parse_openapi_routes(yaml_content: &str) -> AppResult<Vec<ParsedRoute>> {
         ));
     }
 
+    let base_path = resolve_base_path(&openapi);
     let mut routes = Vec::new();
     let components = openapi.components.as_ref();
 
@@ -56,6 +57,7 @@ pub fn parse_openapi_routes(yaml_content: &str) -> AppResult<Vec<ParsedRoute>> {
             path_item,
             RouteKind::Path,
             components,
+            base_path.clone(),
         )?;
     }
 
@@ -71,6 +73,7 @@ pub fn parse_openapi_routes(yaml_content: &str) -> AppResult<Vec<ParsedRoute>> {
                     path_item,
                     RouteKind::Webhook,
                     components,
+                    None, // Webhooks generally don't use server prefix logic like paths
                 )?;
             }
         }
@@ -79,10 +82,66 @@ pub fn parse_openapi_routes(yaml_content: &str) -> AppResult<Vec<ParsedRoute>> {
     Ok(routes)
 }
 
+/// Resolves the base URL path from `servers` (OAS 3) or `basePath` (Swagger 2).
+///
+/// For servers:
+/// - Takes the first server.
+/// - Resolves variables with `default` values.
+/// - Extracts the path component.
+fn resolve_base_path(openapi: &ShimOpenApi) -> Option<String> {
+    // 1. Swagger 2.0 basePath
+    if let Some(bp) = &openapi.base_path {
+        let trimmed = bp.trim_end_matches('/');
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    // 2. OpenAPI 3.x servers
+    if let Some(servers) = &openapi.servers {
+        if let Some(server) = servers.first() {
+            let mut url = server.url.clone();
+
+            // OAS 3.2: Resolve server variables with their default values
+            if let Some(vars) = &server.variables {
+                for (key, var_shim) in vars {
+                    let placeholder = format!("{{{}}}", key);
+                    url = url.replace(&placeholder, &var_shim.default);
+                }
+            }
+
+            // Strip host if present, keep path (Basic implementation)
+            // "https://api.com/v1" -> "/v1"
+            if let Some(idx) = url.find("://") {
+                let after_scheme = &url[idx + 3..];
+                if let Some(slash_idx) = after_scheme.find('/') {
+                    let path = &after_scheme[slash_idx..];
+                    let trimmed = path.trim_end_matches('/');
+                    return if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed.to_string())
+                    };
+                }
+                return None; // Root path
+            } else if url.starts_with('/') {
+                let trimmed = url.trim_end_matches('/');
+                return if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                };
+            }
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::oas::models::ParamSource;
+    use crate::oas::models::{ParamSource, RuntimeExpression};
     use crate::oas::routes::shims::ShimOpenApi;
 
     #[test]
@@ -139,6 +198,7 @@ paths:
         let routes = parse_openapi_routes(yaml).unwrap();
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].path, "/ping");
+        assert_eq!(routes[0].base_path.as_deref(), Some("/v1"));
     }
 
     #[test]
@@ -154,6 +214,41 @@ paths:
         let routes = parse_openapi_routes(yaml).unwrap();
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].path, "/legacy");
+    }
+
+    #[test]
+    fn test_server_variable_resolution() {
+        let yaml = r#"
+openapi: 3.2.0
+info: {title: S, version: 1}
+servers:
+  - url: https://{env}.api.com/v1
+    variables:
+      env:
+        default: staging
+        enum: [staging, production]
+paths:
+  /users: # Should resolve to /v1/users in test-gen
+    get:
+      responses: {}
+"#;
+        let routes = parse_openapi_routes(yaml).unwrap();
+        assert_eq!(routes[0].base_path.as_deref(), Some("/v1"));
+    }
+
+    #[test]
+    fn test_swagger_2_base_path() {
+        let yaml = r#"
+swagger: "2.0"
+info: {title: Legacy, version: 1.0}
+basePath: /api/legacy
+paths:
+  /old:
+    get:
+      responses: {}
+"#;
+        let routes = parse_openapi_routes(yaml).unwrap();
+        assert_eq!(routes[0].base_path.as_deref(), Some("/api/legacy"));
     }
 
     #[test]
@@ -320,7 +415,10 @@ paths:
         assert_eq!(route.callbacks.len(), 1);
         let cb = &route.callbacks[0];
         assert_eq!(cb.name, "onData");
-        assert_eq!(cb.expression, "{$request.body#/url}");
+        assert_eq!(
+            cb.expression,
+            RuntimeExpression::new("{$request.body#/url}".to_string())
+        );
         assert_eq!(cb.method, "POST");
         assert!(cb.request_body.is_some());
     }
@@ -350,7 +448,10 @@ paths:
         assert_eq!(route.callbacks.len(), 1);
         let cb = &route.callbacks[0];
         assert_eq!(cb.name, "myHook");
-        assert_eq!(cb.expression, "{$request.query.url}");
+        assert_eq!(
+            cb.expression,
+            RuntimeExpression::new("{$request.query.url}")
+        );
         assert_eq!(cb.method, "PUT");
     }
 }

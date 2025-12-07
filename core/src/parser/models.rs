@@ -2,6 +2,8 @@
 //!
 //! definition of Intermediate Representation (IR) structures for parsed Rust code.
 
+use std::collections::BTreeMap;
+
 /// Represents a link to external documentation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedExternalDocs {
@@ -57,9 +59,9 @@ pub struct ParsedVariant {
     pub ty: Option<String>,
     /// Doc comments.
     pub description: Option<String>,
-    /// Serde rename (primary identifier).
+    /// Serde rename (primary identifier from mapping).
     pub rename: Option<String>,
-    /// Serde aliases (alternative identifiers).
+    /// Serde aliases (alternative identifiers from mapping).
     pub aliases: Option<Vec<String>>,
     /// Whether the variant is marked as deprecated.
     pub is_deprecated: bool,
@@ -84,6 +86,9 @@ pub struct ParsedEnum {
     pub is_deprecated: bool,
     /// External documentation associated with this enum.
     pub external_docs: Option<ParsedExternalDocs>,
+    /// Raw discriminator mapping dictionary (Value -> Ref).
+    /// Useful for documentation purposes.
+    pub discriminator_mapping: Option<BTreeMap<String, String>>,
 }
 
 /// Enum wrapper for either a Struct or an Enum model.
