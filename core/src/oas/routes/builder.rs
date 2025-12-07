@@ -17,7 +17,6 @@ use crate::oas::routes::shims::{ShimComponents, ShimOperation, ShimPathItem, Shi
 use crate::parser::ParsedExternalDocs;
 use std::collections::HashMap;
 use utoipa::openapi::RefOr;
-// ... (Rest of file logic remains largely identical, included for completeness)
 
 /// Helper to iterate methods in a ShimPathItem and extract all operations as Routes.
 pub fn parse_path_item(
@@ -155,6 +154,9 @@ fn build_route(
         description: d.description,
     });
 
+    // 8. Tags (Used for module grouping)
+    let tags = op.tags.unwrap_or_default();
+
     Ok(ParsedRoute {
         path: path.to_string(),
         base_path,
@@ -167,6 +169,7 @@ fn build_route(
         response_headers,
         response_links: Some(response_links),
         kind,
+        tags,
         callbacks: parsed_callbacks,
         deprecated: op.deprecated,
         external_docs,
@@ -228,20 +231,20 @@ mod tests {
 
     #[test]
     fn test_parse_callback_inline() {
-        let yaml = r#"
+        let yaml = r#" 
 openapi: 3.1.0
-info: {title: Callback Test, version: 1.0}
-paths:
-  /subscribe:
-    post:
-      responses: { '200': {description: OK} }
-      callbacks:
-        onData:
-          '{$request.body#/url}':
-            post:
-              requestBody:
-                content: { application/json: { schema: {type: object} } }
-              responses: { '200': {description: OK} }
+info: {title: Callback Test, version: 1.0} 
+paths: 
+  /subscribe: 
+    post: 
+      responses: { '200': {description: OK} } 
+      callbacks: 
+        onData: 
+          '{$request.body#/url}': 
+            post: 
+              requestBody: 
+                content: { application/json: { schema: {type: object} } } 
+              responses: { '200': {description: OK} } 
 "#;
         let routes = super::super::parse_openapi_routes(yaml).unwrap();
         assert_eq!(routes.len(), 1);

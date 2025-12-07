@@ -75,6 +75,10 @@ pub struct ParsedRoute {
     pub request_body: Option<RequestBodyDefinition>,
     /// Security requirements.
     pub security: Vec<SecurityRequirement>,
+    /// The classification of this route.
+    pub kind: RouteKind,
+    /// Tags associated with the operation (used for grouping/module organization).
+    pub tags: Vec<String>,
     /// The Rust type name of the success response (e.g. `UserResponse`, `Vec<User>`).
     /// Only present if a 200/201 response with application/json content is defined inline.
     pub response_type: Option<String>,
@@ -82,8 +86,6 @@ pub struct ParsedRoute {
     pub response_headers: Vec<ResponseHeader>,
     /// Response links defined in the operation (HATEOAS).
     pub response_links: Option<Vec<ParsedLink>>,
-    /// The classification of this route.
-    pub kind: RouteKind,
     /// Callback definitions attached to this route (OAS 3.0+).
     pub callbacks: Vec<ParsedCallback>,
     /// Whether this route is deprecated.

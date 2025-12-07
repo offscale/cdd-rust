@@ -155,6 +155,7 @@ mod tests {
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
+            tags: vec!["Users".into()],
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
@@ -209,6 +210,7 @@ mod tests {
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            tags: vec![],
         }];
 
         let strategy = ActixStrategy;
@@ -237,6 +239,7 @@ mod tests {
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            tags: vec![],
         }];
 
         let strategy = ActixStrategy;
@@ -261,6 +264,7 @@ mod tests {
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            tags: vec![],
         }];
 
         let strategy = ActixStrategy;
