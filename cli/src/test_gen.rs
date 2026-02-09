@@ -69,3 +69,59 @@ pub fn execute(args: &TestGenArgs, strategy: &impl BackendStrategy) -> AppResult
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cdd_core::strategies::ActixStrategy;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_execute_generates_file() {
+        let dir = tempdir().unwrap();
+        let openapi_path = dir.path().join("openapi.yaml");
+        let output_dir = dir.path().join("tests");
+        let output_path = output_dir.join("api_contracts.rs");
+
+        let yaml = r#"
+openapi: 3.1.0
+info: {title: T, version: 1.0}
+paths:
+  /health:
+    get:
+      responses:
+        '200': { description: OK }
+"#;
+        fs::write(&openapi_path, yaml).unwrap();
+
+        let args = TestGenArgs {
+            openapi_path: openapi_path.clone(),
+            output_path: output_path.clone(),
+            app_factory: "crate::create_app".to_string(),
+        };
+
+        execute(&args, &ActixStrategy).unwrap();
+
+        assert!(output_path.exists());
+        let contents = fs::read_to_string(output_path).unwrap();
+        assert!(contents.contains("validate_response"));
+        assert!(contents.contains("TestRequest"));
+    }
+
+    #[test]
+    fn test_execute_missing_openapi() {
+        let dir = tempdir().unwrap();
+        let openapi_path = dir.path().join("missing.yaml");
+        let output_path = dir.path().join("tests/api_contracts.rs");
+
+        let args = TestGenArgs {
+            openapi_path,
+            output_path,
+            app_factory: "crate::create_app".to_string(),
+        };
+
+        let err = execute(&args, &ActixStrategy).unwrap_err();
+        assert!(format!("{}", err).contains("OpenAPI file not found"));
+    }
+}

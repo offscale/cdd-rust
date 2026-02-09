@@ -146,3 +146,79 @@ fn collect_fields_recursive(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::oas::schemas::refs::ResolutionContext;
+    use utoipa::openapi::{OpenApi, RefOr};
+
+    #[test]
+    fn test_flatten_object_with_additional_properties() {
+        let yaml = r#"
+openapi: 3.1.0
+info: {title: T, version: 1.0}
+paths: {}
+components:
+  schemas:
+    MapHolder:
+      type: object
+      additionalProperties: true
+"#;
+        let openapi: OpenApi = serde_yaml::from_str(yaml).unwrap();
+        let components = openapi.components.as_ref().unwrap();
+        let ctx = ResolutionContext::new(None, components);
+
+        let schema = match components.schemas.get("MapHolder").unwrap() {
+            RefOr::T(s) => s,
+            RefOr::Ref(_) => panic!("Expected inline schema"),
+        };
+
+        let fields = flatten_schema_fields(schema, &ctx).unwrap();
+        let addl = fields
+            .iter()
+            .find(|f| f.name == "additional_properties")
+            .expect("missing additional_properties");
+        assert!(addl.ty.contains("HashMap"));
+    }
+
+    #[test]
+    fn test_flatten_all_of_with_override() {
+        let yaml = r#"
+openapi: 3.1.0
+info: {title: T, version: 1.0}
+paths: {}
+components:
+  schemas:
+    Base:
+      type: object
+      properties:
+        id: { type: string }
+    Extra:
+      type: object
+      properties:
+        note: { type: string }
+    Combined:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - $ref: '#/components/schemas/Extra'
+        - type: object
+          properties:
+            id: { type: integer }
+"#;
+        let openapi: OpenApi = serde_yaml::from_str(yaml).unwrap();
+        let components = openapi.components.as_ref().unwrap();
+        let ctx = ResolutionContext::new(None, components);
+
+        let schema = match components.schemas.get("Combined").unwrap() {
+            RefOr::T(s) => s,
+            RefOr::Ref(_) => panic!("Expected inline schema"),
+        };
+
+        let fields = flatten_schema_fields(schema, &ctx).unwrap();
+        let id = fields.iter().find(|f| f.name == "id").unwrap();
+        let note = fields.iter().find(|f| f.name == "note").unwrap();
+        assert_eq!(id.ty, "i32");
+        assert_eq!(note.ty, "String");
+    }
+}

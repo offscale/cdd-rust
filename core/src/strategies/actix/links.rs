@@ -60,3 +60,81 @@ pub fn generate_link_construction(link: &ParsedLink) -> (String, String) {
 
     (code, var_name)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::oas::models::RuntimeExpression;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_generate_static_link() {
+        let link = ParsedLink {
+            name: "Self".to_string(),
+            description: None,
+            operation_id: None,
+            operation_ref: Some("/users/1".to_string()),
+            parameters: HashMap::new(),
+        };
+
+        let (code, var_name) = generate_link_construction(&link);
+        assert_eq!(var_name, "link_self");
+        assert!(code.contains("let link_self = \"/users/1\";"));
+    }
+
+    #[test]
+    fn test_generate_dynamic_link_with_template() {
+        let mut params = HashMap::new();
+        params.insert(
+            "id".to_string(),
+            RuntimeExpression::new("$response.body#/id"),
+        );
+        let link = ParsedLink {
+            name: "User".to_string(),
+            description: None,
+            operation_id: None,
+            operation_ref: Some("/users/{id}".to_string()),
+            parameters: params,
+        };
+
+        let (code, var_name) = generate_link_construction(&link);
+        assert_eq!(var_name, "link_user");
+        assert!(code.contains("format!(\"/users/{id}\""));
+        assert!(code.contains("id = response_body.id"));
+    }
+
+    #[test]
+    fn test_generate_dynamic_link_fallback_unused_params() {
+        let mut params = HashMap::new();
+        params.insert(
+            "id".to_string(),
+            RuntimeExpression::new("$request.path.id"),
+        );
+        let link = ParsedLink {
+            name: "Lookup".to_string(),
+            description: None,
+            operation_id: None,
+            operation_ref: Some("/users".to_string()),
+            parameters: params,
+        };
+
+        let (code, _var_name) = generate_link_construction(&link);
+        assert!(code.contains("Unused Params"));
+        assert!(code.contains("/users"));
+    }
+
+    #[test]
+    fn test_generate_link_default_path() {
+        let link = ParsedLink {
+            name: "Missing".to_string(),
+            description: None,
+            operation_id: None,
+            operation_ref: None,
+            parameters: HashMap::new(),
+        };
+
+        let (code, var_name) = generate_link_construction(&link);
+        assert_eq!(var_name, "link_missing");
+        assert!(code.contains("/TODO/unknown-path"));
+    }
+}

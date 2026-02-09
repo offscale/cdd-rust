@@ -251,6 +251,32 @@ pub struct RouteParam {
     pub allow_reserved: bool,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::RuntimeExpression;
+
+    #[test]
+    fn test_runtime_expression_helpers() {
+        let expr = RuntimeExpression::new("$request.body#/id");
+        assert_eq!(expr.as_str(), "$request.body#/id");
+        assert!(expr.is_expression());
+
+        let plain = RuntimeExpression::new("id");
+        assert!(!plain.is_expression());
+    }
+
+    #[test]
+    fn test_runtime_expression_display_and_debug() {
+        let expr = RuntimeExpression::new("$response.body#/name");
+        let display = format!("{}", expr);
+        assert_eq!(display, "$response.body#/name");
+
+        let debug = format!("{:?}", expr);
+        assert!(debug.contains("RuntimeExpression"));
+        assert!(debug.contains("$response.body#/name"));
+    }
+}
+
 /// The source location of a parameter.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ParamSource {

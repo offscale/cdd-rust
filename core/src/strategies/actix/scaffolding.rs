@@ -86,3 +86,66 @@ pub fn handler_signature(
         func_name, args_str, return_type, body
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::oas::models::{ParsedLink, ResponseHeader, RuntimeExpression};
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_handler_imports_contains_expected_use() {
+        let imports = handler_imports();
+        assert!(imports.contains("actix_web::{web, HttpResponse, Responder}"));
+        assert!(imports.contains("chrono::{DateTime, Utc, NaiveDate, NaiveDateTime}"));
+    }
+
+    #[test]
+    fn test_handler_signature_with_response_type() {
+        let args = vec!["id: web::Path<Uuid>".to_string()];
+        let sig = handler_signature("get_user", &args, Some("User"), &[], None);
+        assert!(sig.contains("pub async fn get_user"));
+        assert!(sig.contains("-> actix_web::Result<web::Json<User>>"));
+        assert!(sig.contains("todo!()"));
+    }
+
+    #[test]
+    fn test_handler_signature_with_headers_and_links() {
+        let headers = vec![ResponseHeader {
+            name: "X-Rate-Limit".to_string(),
+            description: Some("limit".to_string()),
+            ty: "i32".to_string(),
+        }];
+
+        let mut params = HashMap::new();
+        params.insert(
+            "id".to_string(),
+            RuntimeExpression::new("$response.body#/id"),
+        );
+        let links = vec![ParsedLink {
+            name: "User".to_string(),
+            description: None,
+            operation_id: None,
+            operation_ref: Some("/users/{id}".to_string()),
+            parameters: params,
+        }];
+
+        let sig = handler_signature(
+            "get_user",
+            &[],
+            Some("User"),
+            &headers,
+            Some(&links),
+        );
+        assert!(sig.contains("-> actix_web::Result<HttpResponse>"));
+        assert!(sig.contains("Required Response Headers"));
+        assert!(sig.contains("Generated Links"));
+        assert!(sig.contains("todo!()"));
+    }
+
+    #[test]
+    fn test_handler_signature_without_response_type_or_headers() {
+        let sig = handler_signature("ping", &[], None, &[], None);
+        assert!(sig.contains("-> impl Responder"));
+    }
+}
