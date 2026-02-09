@@ -27,3 +27,18 @@ impl std::error::Error for CliError {}
 
 /// Result type alias.
 pub type CliResult<T> = Result<T, CliError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cli_error_display_and_from() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "boom");
+        let err: CliError = io_err.into();
+        assert!(format!("{}", err).contains("IO Error: boom"));
+
+        let err: CliError = "failed".to_string().into();
+        assert!(format!("{}", err).contains("Operation failed: failed"));
+    }
+}

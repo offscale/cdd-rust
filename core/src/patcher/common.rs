@@ -44,3 +44,73 @@ pub(crate) fn check_needs_comma(r_curly: &SyntaxToken) -> bool {
     }
     false
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ra_ap_edition::Edition;
+    use ra_ap_syntax::{ast, AstNode, SourceFile};
+
+    fn parse_struct(code: &str) -> ast::Struct {
+        let parse = SourceFile::parse(code, Edition::Edition2021);
+        let file = parse.tree();
+        file.syntax()
+            .descendants()
+            .find_map(ast::Struct::cast)
+            .expect("struct missing")
+    }
+
+    #[test]
+    fn test_find_struct_success_and_error() {
+        let code = "struct User { id: i32 }";
+        let parse = SourceFile::parse(code, Edition::Edition2021);
+        let file = parse.tree();
+        let found = find_struct(&file, "User").unwrap();
+        assert_eq!(found.name().unwrap().text(), "User");
+
+        let err = find_struct(&file, "Missing").unwrap_err();
+        assert!(format!("{}", err).contains("Struct 'Missing' not found"));
+    }
+
+    #[test]
+    fn test_detect_indent() {
+        let code = "struct User {\n    id: i32,\n    name: String,\n}";
+        let s = parse_struct(code);
+        let list = s
+            .field_list()
+            .and_then(|list| match list {
+                ast::FieldList::RecordFieldList(list) => Some(list),
+                _ => None,
+            })
+            .expect("record field list missing");
+        let indent = detect_indent(&list).expect("indent missing");
+        assert_eq!(indent, "    ");
+    }
+
+    #[test]
+    fn test_check_needs_comma() {
+        let code_no_comma = "struct User { id: i32 }";
+        let s = parse_struct(code_no_comma);
+        let list = s
+            .field_list()
+            .and_then(|list| match list {
+                ast::FieldList::RecordFieldList(list) => Some(list),
+                _ => None,
+            })
+            .unwrap();
+        let r_curly = list.syntax().last_token().unwrap();
+        assert!(check_needs_comma(&r_curly));
+
+        let code_with_comma = "struct User { id: i32, }";
+        let s = parse_struct(code_with_comma);
+        let list = s
+            .field_list()
+            .and_then(|list| match list {
+                ast::FieldList::RecordFieldList(list) => Some(list),
+                _ => None,
+            })
+            .unwrap();
+        let r_curly = list.syntax().last_token().unwrap();
+        assert!(!check_needs_comma(&r_curly));
+    }
+}

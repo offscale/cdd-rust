@@ -105,3 +105,45 @@ fn derive_name_from_type(ty: &str) -> Option<String> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use utoipa::openapi::schema::{ObjectBuilder, Type};
+    use utoipa::openapi::{Ref, RefOr};
+
+    #[test]
+    fn test_parse_variants_with_mapping() {
+        let items = vec![RefOr::Ref(Ref::new("#/components/schemas/Cat"))];
+        let mut mapping = BTreeMap::new();
+        mapping.insert("cat".to_string(), "#/components/schemas/Cat".to_string());
+        mapping.insert("kitty".to_string(), "#/components/schemas/Cat".to_string());
+
+        let variants = parse_variants(&items, Some(&mapping));
+        assert_eq!(variants.len(), 1);
+        let v = &variants[0];
+        assert_eq!(v.name, "Cat");
+        assert_eq!(v.rename.as_deref(), Some("cat"));
+        assert_eq!(v.aliases.as_ref().unwrap(), &vec!["kitty".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_variants_inline_schema() {
+        let schema = Schema::Object(ObjectBuilder::new().schema_type(Type::String).build());
+        let items = vec![RefOr::T(schema)];
+        let variants = parse_variants(&items, None);
+        assert_eq!(variants.len(), 1);
+        let v = &variants[0];
+        assert_eq!(v.name, "String");
+        assert_eq!(v.ty.as_deref(), Some("String"));
+        assert!(v.rename.is_none());
+    }
+
+    #[test]
+    fn test_derive_name_from_type() {
+        assert_eq!(derive_name_from_type("String"), Some("String".to_string()));
+        assert_eq!(derive_name_from_type("i32"), Some("Integer".to_string()));
+        assert_eq!(derive_name_from_type("Vec<User>"), Some("Array".to_string()));
+        assert_eq!(derive_name_from_type("Unknown"), None);
+    }
+}

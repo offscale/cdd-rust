@@ -84,3 +84,96 @@ fn parse_attribute_content(content: &str, info: &mut AttrInfo) {
         info.untagged = true;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ra_ap_edition::Edition;
+    use ra_ap_syntax::{ast, AstNode, SourceFile};
+
+    fn parse_first_struct(code: &str) -> ast::Struct {
+        let parse = SourceFile::parse(code, Edition::Edition2021);
+        let file = parse.tree();
+        file.syntax()
+            .descendants()
+            .find_map(ast::Struct::cast)
+            .expect("struct missing")
+    }
+
+    fn parse_first_enum(code: &str) -> ast::Enum {
+        let parse = SourceFile::parse(code, Edition::Edition2021);
+        let file = parse.tree();
+        file.syntax()
+            .descendants()
+            .find_map(ast::Enum::cast)
+            .expect("enum missing")
+    }
+
+    #[test]
+    fn test_extract_struct_rename() {
+        let code = r#"
+            #[serde(rename = "UserModel")]
+            struct User {
+                id: i32,
+            }
+        "#;
+        let s = parse_first_struct(code);
+        let info = extract_attributes(s.syntax());
+        assert_eq!(info.rename.as_deref(), Some("UserModel"));
+        assert!(!info.is_skipped);
+        assert!(info.tag.is_none());
+        assert!(!info.untagged);
+    }
+
+    #[test]
+    fn test_extract_enum_tag_and_untagged() {
+        let code = r#"
+            #[serde(tag = "kind", untagged)]
+            enum Pet {
+                Cat,
+                Dog,
+            }
+        "#;
+        let e = parse_first_enum(code);
+        let info = extract_attributes(e.syntax());
+        assert_eq!(info.tag.as_deref(), Some("kind"));
+        assert!(info.untagged);
+    }
+
+    #[test]
+    fn test_extract_field_skip() {
+        let code = r#"
+            struct Secret {
+                #[serde(skip)]
+                token: String,
+            }
+        "#;
+        let s = parse_first_struct(code);
+        let field = s
+            .field_list()
+            .and_then(|list| match list {
+                ast::FieldList::RecordFieldList(list) => list.fields().next(),
+                _ => None,
+            })
+            .expect("field missing");
+        let info = extract_attributes(field.syntax());
+        assert!(info.is_skipped);
+    }
+
+    #[test]
+    fn test_ignores_non_target_attributes() {
+        let code = r#"
+            #[derive(Debug)]
+            struct Ignored {
+                #[doc = "not serde"]
+                value: String,
+            }
+        "#;
+        let s = parse_first_struct(code);
+        let info = extract_attributes(s.syntax());
+        assert!(info.rename.is_none());
+        assert!(!info.is_skipped);
+        assert!(info.tag.is_none());
+        assert!(!info.untagged);
+    }
+}

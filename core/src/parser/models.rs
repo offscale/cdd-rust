@@ -109,3 +109,37 @@ impl ParsedModel {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parsed_model_name() {
+        let s = ParsedStruct {
+            name: "User".to_string(),
+            description: None,
+            rename: None,
+            fields: Vec::new(),
+            is_deprecated: false,
+            external_docs: None,
+        };
+        let e = ParsedEnum {
+            name: "Pet".to_string(),
+            description: None,
+            rename: None,
+            tag: None,
+            untagged: false,
+            variants: Vec::new(),
+            is_deprecated: false,
+            external_docs: None,
+            discriminator_mapping: None,
+        };
+
+        let model_struct = ParsedModel::Struct(s);
+        let model_enum = ParsedModel::Enum(e);
+
+        assert_eq!(model_struct.name(), "User");
+        assert_eq!(model_enum.name(), "Pet");
+    }
+}

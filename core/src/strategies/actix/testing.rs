@@ -105,3 +105,59 @@ async fn validate_response(resp: actix_web::dev::ServiceResponse, method: &str, 
 "#
         .to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_imports_and_signature() {
+        let imports = test_imports();
+        assert!(imports.contains("use actix_web::{test, App, web};"));
+        assert!(imports.contains("use jsonschema::JSONSchema;"));
+
+        let sig = test_fn_signature("test_ping");
+        assert!(sig.contains("#[actix_web::test]"));
+        assert!(sig.contains("async fn test_ping() {"));
+    }
+
+    #[test]
+    fn test_app_init_and_body_setup() {
+        let init = test_app_init("crate::create_app");
+        assert!(init.contains("test::init_service"));
+        assert!(init.contains("crate::create_app"));
+
+        let body = test_body_setup_code();
+        assert!(body.contains("set_json"));
+    }
+
+    #[test]
+    fn test_request_builder_variants() {
+        let body = "        .set_json(serde_json::json!({}))\n";
+
+        let get_req = test_request_builder("GET", "/users", body);
+        assert!(get_req.contains("TestRequest::get()"));
+
+        let query_req = test_request_builder("QUERY", "/search", body);
+        assert!(query_req.contains("method(actix_web::http::Method::from_bytes(b\"QUERY\").unwrap())"));
+
+        let custom_req = test_request_builder("PROPFIND", "/files", body);
+        assert!(custom_req.contains("from_bytes(b\"PROPFIND\")"));
+    }
+
+    #[test]
+    fn test_api_call_and_assertion() {
+        let call = test_api_call();
+        assert!(call.contains("call_service"));
+
+        let assertion = test_assertion();
+        assert!(assertion.contains("StatusCode::NOT_FOUND"));
+    }
+
+    #[test]
+    fn test_validation_helper_snippet() {
+        let helper = test_validation_helper();
+        assert!(helper.contains("validate_response"));
+        assert!(helper.contains("JSONSchema::options().compile"));
+    }
+}
