@@ -90,6 +90,9 @@ pub struct ShimComponents {
     /// Security Schemes.
     #[serde(rename = "securitySchemes")]
     pub security_schemes: Option<BTreeMap<String, RefOr<ShimSecurityScheme>>>,
+    /// Reusable Path Item Objects.
+    #[serde(rename = "pathItems")]
+    pub path_items: Option<BTreeMap<String, RefOr<ShimPathItem>>>,
 
     /// Capture other loosely typed component maps (schemas, parameters, etc.)
     /// to maintain compatibility with existing resolvers that expect generic Value lookups.
@@ -354,6 +357,15 @@ pub struct ShimTag {
 /// A Path Item containing operations for a specific URL/Webhook.
 #[derive(Deserialize, Serialize, Clone)]
 pub struct ShimPathItem {
+    /// Allows for a referenced definition of this path item.
+    #[serde(rename = "$ref")]
+    pub ref_path: Option<String>,
+    /// Optional summary for all operations in this path.
+    pub summary: Option<String>,
+    /// Optional description for all operations in this path.
+    pub description: Option<String>,
+    /// Alternative server array for this path item.
+    pub servers: Option<Vec<ShimServer>>,
     /// Parameters common to all operations in this path.
     #[serde(default)]
     pub parameters: Option<Vec<RefOr<ShimParameter>>>,
@@ -375,6 +387,9 @@ pub struct ShimPathItem {
     pub trace: Option<ShimOperation>,
     /// QUERY operation (OAS 3.2+).
     pub query: Option<ShimOperation>,
+    /// Map of additional operations keyed by custom HTTP methods.
+    #[serde(rename = "additionalOperations")]
+    pub additional_operations: Option<BTreeMap<String, ShimOperation>>,
     /// Extensions.
     #[serde(flatten)]
     pub extensions: BTreeMap<String, Value>,
@@ -410,6 +425,9 @@ pub struct ShimOperation {
     /// External documentation definition.
     #[serde(rename = "externalDocs")]
     pub external_docs: Option<ShimExternalDocs>,
+    /// Alternative server array for this operation.
+    #[serde(default)]
+    pub servers: Option<Vec<ShimServer>>,
     /// Extensions.
     #[serde(flatten)]
     pub extensions: BTreeMap<String, Value>,

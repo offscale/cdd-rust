@@ -4,7 +4,7 @@
 //!
 //! Logic that transforms `Shim` structs into `ParsedRoute` IR models.
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::oas::models::{
     ParamSource, ParsedRoute, RouteKind, RouteParam, SecurityRequirement, SecuritySchemeInfo,
     SecuritySchemeKind,
@@ -22,11 +22,21 @@ use utoipa::openapi::RefOr;
 pub fn parse_path_item(
     routes: &mut Vec<ParsedRoute>,
     path_or_name: &str,
-    path_item: ShimPathItem,
+    path_item: &ShimPathItem,
     kind: RouteKind,
     components: Option<&ShimComponents>,
     base_path: Option<String>,
+    global_security: Option<&Vec<serde_json::Value>>,
+    all_paths: &std::collections::BTreeMap<String, ShimPathItem>,
 ) -> AppResult<()> {
+    let mut path_item = path_item.clone();
+    if let Some(ref_path) = path_item.ref_path.clone() {
+        path_item = super::resolve_path_item_ref(&ref_path, components, all_paths)?;
+    }
+
+    let path_base_path =
+        super::resolve_base_path_from_servers(path_item.servers.as_ref()).or(base_path.clone());
+
     // Handle common parameters defined at PathItem level.
     let common_params_list = path_item.parameters.as_deref().unwrap_or(&[]);
     let common_params = resolve_parameters(common_params_list, components)?;
@@ -40,7 +50,8 @@ pub fn parse_path_item(
                 &common_params,
                 kind.clone(),
                 components,
-                base_path.clone(),
+                path_base_path.clone(),
+                global_security,
             )?);
         }
         Ok(())
@@ -56,6 +67,15 @@ pub fn parse_path_item(
     add_op("TRACE", path_item.trace)?;
     add_op("QUERY", path_item.query)?;
 
+    if let Some(additional) = &path_item.additional_operations {
+        for (method, op) in additional {
+            if is_reserved_method(method) {
+                continue;
+            }
+            add_op(&method.to_ascii_uppercase(), Some(op.clone()))?;
+        }
+    }
+
     Ok(())
 }
 
@@ -66,8 +86,11 @@ fn build_route(
     common_params: &[RouteParam],
     kind: RouteKind,
     components: Option<&ShimComponents>,
-    base_path: Option<String>,
+    path_base_path: Option<String>,
+    global_security: Option<&Vec<serde_json::Value>>,
 ) -> AppResult<ParsedRoute> {
+    let base_path =
+        super::resolve_base_path_from_servers(op.servers.as_ref()).or(path_base_path);
     // 1. Handler Name
     let handler_name = if let Some(op_id) = &op.operation_id {
         to_snake_case(op_id)
@@ -93,6 +116,23 @@ fn build_route(
         }
     }
 
+    let querystring_count = params
+        .iter()
+        .filter(|p| p.source == ParamSource::QueryString)
+        .count();
+    if querystring_count > 1 {
+        return Err(AppError::General(format!(
+            "Operation '{}' defines multiple querystring parameters",
+            handler_name
+        )));
+    }
+    if querystring_count == 1 && params.iter().any(|p| p.source == ParamSource::Query) {
+        return Err(AppError::General(format!(
+            "Operation '{}' mixes 'querystring' and 'query' parameters",
+            handler_name
+        )));
+    }
+
     // 3. Request Body
     let mut request_body = None;
     if let Some(req_body_ref) = &op.request_body {
@@ -102,23 +142,18 @@ fn build_route(
     }
 
     // 4. Security
-    let mut security = Vec::new();
-    if let Some(requirements) = &op.security {
-        for req in requirements {
-            if let Ok(map) = serde_json::from_value::<HashMap<String, Vec<String>>>(req.clone()) {
-                for (scheme_name, scopes) in map {
-                    // Resolve Scheme Details
-                    let scheme = resolve_security_scheme(&scheme_name, components);
-
-                    security.push(SecurityRequirement {
-                        scheme_name,
-                        scopes,
-                        scheme,
-                    });
-                }
-            }
+    // Operation-level security overrides global security. An explicit empty array clears security.
+    let security = if let Some(requirements) = &op.security {
+        if requirements.is_empty() {
+            Vec::new()
+        } else {
+            parse_security_requirements(requirements, components)
         }
-    }
+    } else if let Some(global) = global_security {
+        parse_security_requirements(global, components)
+    } else {
+        Vec::new()
+    };
 
     // 5. Response Type, Headers, and Links
     let (response_type, response_headers, response_links) =
@@ -174,6 +209,49 @@ fn build_route(
         deprecated: op.deprecated,
         external_docs,
     })
+}
+
+fn is_reserved_method(method: &str) -> bool {
+    matches!(
+        method.to_ascii_lowercase().as_str(),
+        "get"
+            | "post"
+            | "put"
+            | "delete"
+            | "patch"
+            | "options"
+            | "head"
+            | "trace"
+            | "query"
+    )
+}
+
+/// Parses a list of Security Requirement Objects into internal requirements.
+///
+/// Empty requirement objects (`{}`) are treated as "no security required" and skipped.
+fn parse_security_requirements(
+    requirements: &[serde_json::Value],
+    components: Option<&ShimComponents>,
+) -> Vec<SecurityRequirement> {
+    let mut security = Vec::new();
+    for req in requirements {
+        if let Ok(map) = serde_json::from_value::<HashMap<String, Vec<String>>>(req.clone()) {
+            if map.is_empty() {
+                continue;
+            }
+            for (scheme_name, scopes) in map {
+                // Resolve Scheme Details
+                let scheme = resolve_security_scheme(&scheme_name, components);
+
+                security.push(SecurityRequirement {
+                    scheme_name,
+                    scopes,
+                    scheme,
+                });
+            }
+        }
+    }
+    security
 }
 
 fn resolve_security_scheme(

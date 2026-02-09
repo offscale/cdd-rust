@@ -5,10 +5,11 @@
 //! Logic for resolving OpenAPI Responses into Rust types.
 
 use crate::error::AppResult;
+use indexmap::IndexMap;
 use crate::oas::models::{ParsedLink, ResponseHeader, RuntimeExpression};
 use crate::oas::resolver::types::map_schema_to_rust_type;
 use crate::oas::routes::shims::ShimComponents;
-use utoipa::openapi::{RefOr, Responses};
+use utoipa::openapi::{Content, RefOr, Responses};
 
 // Re-export specific structs if needed for external visibility
 pub use crate::oas::models::ParsedLink as LinkModel;
@@ -57,15 +58,10 @@ pub fn extract_response_details(
 
         if let Some(r) = response {
             // 1. Resolve Body Type
-            let body_type = if let Some(media) = r.content.get("application/json") {
-                if let Some(schema) = &media.schema {
-                    Some(map_schema_to_rust_type(schema, true)?)
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
+            let body_type = select_response_schema(&r.content)
+                .and_then(|media| media.schema.as_ref())
+                .map(|schema| map_schema_to_rust_type(schema, true))
+                .transpose()?;
 
             // 2. Resolve Headers
             let mut headers = Vec::new();
@@ -118,6 +114,37 @@ pub fn extract_response_details(
     }
 
     Ok(None)
+}
+
+/// Selects the most appropriate response content for JSON-like payloads.
+///
+/// Preference order:
+/// 1. `application/json`
+/// 2. Any `+json` media type (e.g. `application/vnd.api+json`)
+/// 3. `application/*`
+/// 4. `*/*`
+/// 5. First available entry
+fn select_response_schema<'a>(content: &'a IndexMap<String, Content>) -> Option<&'a Content> {
+    if let Some(media) = content.get("application/json") {
+        return Some(media);
+    }
+
+    if let Some((_, media)) = content
+        .iter()
+        .find(|(k, _)| k.ends_with("+json") || k.as_str() == "application/*+json")
+    {
+        return Some(media);
+    }
+
+    if let Some(media) = content.get("application/*") {
+        return Some(media);
+    }
+
+    if let Some(media) = content.get("*/*") {
+        return Some(media);
+    }
+
+    content.iter().next().map(|(_, media)| media)
 }
 
 fn resolve_response_from_components(
@@ -199,5 +226,43 @@ mod tests {
 
         assert_eq!(expr.as_str(), "$request.path.id");
         assert!(expr.is_expression());
+    }
+
+    #[test]
+    fn test_extract_vendor_json_media_type() {
+        let response = ResponseBuilder::new()
+            .description("Vendor JSON")
+            .content(
+                "application/vnd.api+json",
+                Content::new(Some(RefOr::Ref(utoipa::openapi::Ref::new(
+                    "#/components/schemas/User",
+                )))),
+            )
+            .build();
+
+        let mut responses = Responses::new();
+        responses.responses.insert("200".into(), RefOr::T(response));
+
+        let details = extract_response_details(&responses, None).unwrap().unwrap();
+        assert_eq!(details.body_type.unwrap(), "User");
+    }
+
+    #[test]
+    fn test_extract_wildcard_media_type() {
+        let response = ResponseBuilder::new()
+            .description("Wildcard")
+            .content(
+                "*/*",
+                Content::new(Some(RefOr::Ref(utoipa::openapi::Ref::new(
+                    "#/components/schemas/Anything",
+                )))),
+            )
+            .build();
+
+        let mut responses = Responses::new();
+        responses.responses.insert("200".into(), RefOr::T(response));
+
+        let details = extract_response_details(&responses, None).unwrap().unwrap();
+        assert_eq!(details.body_type.unwrap(), "Anything");
     }
 }
