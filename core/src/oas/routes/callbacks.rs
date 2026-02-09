@@ -56,7 +56,13 @@ pub fn extract_callback_operations(
     path_item: &ShimPathItem,
     components: Option<&ShimComponents>,
 ) -> AppResult<()> {
-    let mut add_cb_op = |method: &str, op: &Option<ShimOperation>| -> AppResult<()> {
+    let mut path_item = path_item.clone();
+    if let Some(ref_path) = path_item.ref_path.as_deref() {
+        let empty_paths = BTreeMap::new();
+        path_item = super::resolve_path_item_ref(ref_path, components, &empty_paths)?;
+    }
+
+    let mut add_cb_op = |method: &str, op: Option<&ShimOperation>| -> AppResult<()> {
         if let Some(o) = op {
             let mut req_body = None;
             if let Some(rb) = &o.request_body {
@@ -84,14 +90,21 @@ pub fn extract_callback_operations(
         Ok(())
     };
 
-    add_cb_op("GET", &path_item.get)?;
-    add_cb_op("POST", &path_item.post)?;
-    add_cb_op("PUT", &path_item.put)?;
-    add_cb_op("DELETE", &path_item.delete)?;
-    add_cb_op("PATCH", &path_item.patch)?;
-    add_cb_op("OPTIONS", &path_item.options)?;
-    add_cb_op("HEAD", &path_item.head)?;
-    add_cb_op("TRACE", &path_item.trace)?;
+    add_cb_op("GET", path_item.get.as_ref())?;
+    add_cb_op("POST", path_item.post.as_ref())?;
+    add_cb_op("PUT", path_item.put.as_ref())?;
+    add_cb_op("DELETE", path_item.delete.as_ref())?;
+    add_cb_op("PATCH", path_item.patch.as_ref())?;
+    add_cb_op("OPTIONS", path_item.options.as_ref())?;
+    add_cb_op("HEAD", path_item.head.as_ref())?;
+    add_cb_op("TRACE", path_item.trace.as_ref())?;
+    add_cb_op("QUERY", path_item.query.as_ref())?;
+
+    if let Some(additional) = &path_item.additional_operations {
+        for (method, op) in additional {
+            add_cb_op(method, Some(op))?;
+        }
+    }
 
     Ok(())
 }
@@ -118,12 +131,17 @@ mod tests {
             tags: None,
             deprecated: false,
             external_docs: None,
+            servers: None,
             extensions: BTreeMap::new(),
         }
     }
 
     fn empty_path_item() -> ShimPathItem {
         ShimPathItem {
+            ref_path: None,
+            summary: None,
+            description: None,
+            servers: None,
             parameters: None,
             get: None,
             post: None,
@@ -134,6 +152,7 @@ mod tests {
             head: None,
             trace: None,
             query: None,
+            additional_operations: None,
             extensions: BTreeMap::new(),
         }
     }
@@ -151,6 +170,7 @@ mod tests {
     fn test_resolve_callback_object_ref_from_components() {
         let mut components = ShimComponents {
             security_schemes: None,
+            path_items: None,
             extra: BTreeMap::new(),
         };
         components.extra.insert(
@@ -174,7 +194,9 @@ mod tests {
     #[test]
     fn test_resolve_callback_object_missing_ref() {
         let cb_ref = RefOr::Ref(Ref::new("#/components/callbacks/Missing"));
-        let err = resolve_callback_object(&cb_ref, None).unwrap_err();
+        let err = resolve_callback_object(&cb_ref, None)
+            .err()
+            .expect("expected missing callback error");
         assert!(format!("{}", err).contains("Callback reference not found"));
     }
 
@@ -229,5 +251,65 @@ mod tests {
         assert_eq!(cb.request_body.as_ref().unwrap().format, BodyFormat::Json);
         assert_eq!(cb.response_type.as_deref(), Some("Ack"));
         assert!(cb.response_headers.is_empty());
+    }
+
+    #[test]
+    fn test_extract_callback_query_and_additional() {
+        let mut path_item = empty_path_item();
+
+        let mut op = empty_operation();
+        op.responses = Responses::new();
+
+        path_item.query = Some(op.clone());
+        let mut additional = BTreeMap::new();
+        additional.insert("CUSTOM".to_string(), op);
+        path_item.additional_operations = Some(additional);
+
+        let mut callbacks = Vec::new();
+        extract_callback_operations(
+            &mut callbacks,
+            "OnExtra",
+            "$request.body#/url",
+            &path_item,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(callbacks.len(), 2);
+        let methods: Vec<_> = callbacks.iter().map(|c| c.method.as_str()).collect();
+        assert!(methods.contains(&"QUERY"));
+        assert!(methods.contains(&"CUSTOM"));
+    }
+
+    #[test]
+    fn test_callback_path_item_ref_resolution() {
+        let mut components = ShimComponents {
+            security_schemes: None,
+            path_items: None,
+            extra: BTreeMap::new(),
+        };
+
+        let mut referenced = empty_path_item();
+        referenced.get = Some(empty_operation());
+
+        let mut path_items = BTreeMap::new();
+        path_items.insert("RefItem".to_string(), RefOr::T(referenced));
+        components.path_items = Some(path_items);
+
+        let mut path_item = empty_path_item();
+        path_item.ref_path = Some("#/components/pathItems/RefItem".to_string());
+
+        let mut callbacks = Vec::new();
+        extract_callback_operations(
+            &mut callbacks,
+            "OnRef",
+            "$request.body#/url",
+            &path_item,
+            Some(&components),
+        )
+        .unwrap();
+
+        assert_eq!(callbacks.len(), 1);
+        assert_eq!(callbacks[0].method, "GET");
     }
 }

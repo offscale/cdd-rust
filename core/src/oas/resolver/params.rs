@@ -102,6 +102,12 @@ fn resolve_parameter_ref(
 /// Implements default resolution logic for style/explode based on the OAS 3.2.0 spec.
 fn process_parameter(param: &ShimParameter) -> AppResult<RouteParam> {
     let name = param.name.clone();
+    if param.schema.is_some() && param.content.is_some() {
+        return Err(AppError::General(format!(
+            "Parameter '{}' cannot specify both 'schema' and 'content'",
+            name
+        )));
+    }
     let source = match param.parameter_in.as_str() {
         "path" => ParamSource::Path,
         "query" => ParamSource::Query,
@@ -111,6 +117,29 @@ fn process_parameter(param: &ShimParameter) -> AppResult<RouteParam> {
         "cookie" => ParamSource::Cookie,
         _ => ParamSource::Query,
     };
+
+    if source == ParamSource::QueryString {
+        if param.schema.is_some() {
+            return Err(AppError::General(format!(
+                "Querystring parameter '{}' must use 'content' instead of 'schema'",
+                name
+            )));
+        }
+        let content_len = param.content.as_ref().map(|m| m.len()).unwrap_or(0);
+        if content_len != 1 {
+            return Err(AppError::General(format!(
+                "Querystring parameter '{}' must define exactly one media type in 'content'",
+                name
+            )));
+        }
+    } else if let Some(content) = &param.content {
+        if content.len() != 1 {
+            return Err(AppError::General(format!(
+                "Parameter '{}' must define exactly one media type in 'content'",
+                name
+            )));
+        }
+    }
 
     // Determine style based on OAS3 fields, defaulting to OAS2 logic if missing
     let style = resolve_style(
@@ -126,8 +155,8 @@ fn process_parameter(param: &ShimParameter) -> AppResult<RouteParam> {
     let ty = if let Some(schema_ref) = &param.schema {
         map_schema_to_rust_type(schema_ref, param.required)?
     } else if let Some(content) = &param.content {
-        // OAS 3.0 spec: "The map MUST only contain one entry."
-        // We take the first one found.
+        // OAS 3.0+ spec: "The map MUST only contain one entry."
+        // We take the first one found after validation.
         if let Some((_media_type, media_obj)) = content.iter().next() {
             if let Some(s) = &media_obj.schema {
                 map_schema_to_rust_type(s, param.required)?
@@ -285,14 +314,22 @@ mod tests {
 
     #[test]
     fn test_resolve_parameters_querystring_oas_3_2() {
-        // Case: OAS 3.2 in: querystring
+        // Case: OAS 3.2 in: querystring requires content with exactly one media type.
         // Expect: Source=QueryString, Style=Form (Default)
+        let schema = ObjectBuilder::new().schema_type(Type::Object).build();
+        let content_item = ContentBuilder::new()
+            .schema(Some(RefOr::T(Schema::Object(schema))))
+            .build();
+
+        let mut content_map = BTreeMap::new();
+        content_map.insert("application/x-www-form-urlencoded".into(), content_item);
+
         let param = ShimParameter {
             name: "filter".to_string(),
             parameter_in: "querystring".to_string(),
             required: true,
             schema: None,
-            content: None,
+            content: Some(content_map),
             style: None,
             explode: None,
             allow_reserved: false,
@@ -394,5 +431,81 @@ mod tests {
         assert_eq!(resolved[0].name, "limit");
         assert_eq!(resolved[0].style, Some(ParamStyle::Form));
         assert_eq!(resolved[0].explode, false);
+    }
+
+    #[test]
+    fn test_querystring_requires_content() {
+        let param = ShimParameter {
+            name: "raw".to_string(),
+            parameter_in: "querystring".to_string(),
+            required: true,
+            schema: Some(RefOr::T(Schema::Object(
+                ObjectBuilder::new().schema_type(Type::Object).build(),
+            ))),
+            content: None,
+            style: None,
+            explode: None,
+            allow_reserved: false,
+            collection_format: None,
+        };
+
+        let err = process_parameter(&param).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("Querystring parameter 'raw' must use 'content'"));
+    }
+
+    #[test]
+    fn test_parameter_content_single_entry_enforced() {
+        let schema = ObjectBuilder::new().schema_type(Type::Object).build();
+        let content_item = ContentBuilder::new()
+            .schema(Some(RefOr::T(Schema::Object(schema))))
+            .build();
+        let mut content_map = BTreeMap::new();
+        content_map.insert("application/json".into(), content_item.clone());
+        content_map.insert("application/xml".into(), content_item);
+
+        let param = ShimParameter {
+            name: "filter".to_string(),
+            parameter_in: "query".to_string(),
+            required: true,
+            schema: None,
+            content: Some(content_map),
+            style: None,
+            explode: None,
+            allow_reserved: false,
+            collection_format: None,
+        };
+
+        let err = process_parameter(&param).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("must define exactly one media type"));
+    }
+
+    #[test]
+    fn test_schema_and_content_mutual_exclusive() {
+        let schema = ObjectBuilder::new().schema_type(Type::String).build();
+        let content_item = ContentBuilder::new()
+            .schema(Some(RefOr::T(Schema::Object(schema))))
+            .build();
+        let mut content_map = BTreeMap::new();
+        content_map.insert("text/plain".into(), content_item);
+
+        let param = ShimParameter {
+            name: "mix".to_string(),
+            parameter_in: "query".to_string(),
+            required: false,
+            schema: Some(RefOr::T(Schema::Object(
+                ObjectBuilder::new().schema_type(Type::String).build(),
+            ))),
+            content: Some(content_map),
+            style: None,
+            explode: None,
+            allow_reserved: false,
+            collection_format: None,
+        };
+
+        let err = process_parameter(&param).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("cannot specify both 'schema' and 'content'"));
     }
 }

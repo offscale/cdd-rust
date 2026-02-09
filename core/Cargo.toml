@@ -21,6 +21,7 @@ serde_yaml = "^0.9"
 
 # OpenAPI definition types
 utoipa = { version = "^5.4", features = ["preserve_order", "indexmap", "uuid"] }
+indexmap = "^2.12"
 
 # Strict RFC 3986 URI resolution
 url = "2.5"
