@@ -188,6 +188,9 @@ pub struct ShimOAuth2 {
     pub description: Option<String>,
     /// Supported flows.
     pub flows: Option<ShimOAuthFlows>,
+    /// URL to OAuth2 authorization server metadata (RFC8414).
+    #[serde(rename = "oauth2MetadataUrl")]
+    pub oauth2_metadata_url: Option<String>,
     // OAS 2.0 Compatibility Fields (flattened here conceptually, handled via specific fields if needed)
     /// Flow (OAS 2.0 specific: implicit, password, application, accessCode).
     /// If present (legacy), it maps loosely to one of the flows below.
@@ -219,6 +222,9 @@ pub struct ShimOAuthFlows {
     /// Authorization Code Flow.
     #[serde(rename = "authorizationCode")]
     pub authorization_code: Option<ShimOAuthFlow>,
+    /// Device Authorization Flow.
+    #[serde(rename = "deviceAuthorization")]
+    pub device_authorization: Option<ShimOAuthFlow>,
     /// Extensions.
     #[serde(flatten)]
     pub extensions: BTreeMap<String, Value>,
@@ -230,6 +236,9 @@ pub struct ShimOAuthFlow {
     /// Authorization URL.
     #[serde(rename = "authorizationUrl")]
     pub authorization_url: Option<String>,
+    /// Device Authorization URL (RFC8628).
+    #[serde(rename = "deviceAuthorizationUrl")]
+    pub device_authorization_url: Option<String>,
     /// Token URL.
     #[serde(rename = "tokenUrl")]
     pub token_url: Option<String>,
@@ -302,6 +311,8 @@ pub struct ShimServer {
     pub url: String,
     /// An optional string describing the host.
     pub description: Option<String>,
+    /// An optional unique string to refer to the host.
+    pub name: Option<String>,
     /// A map between a variable name and its value.
     #[serde(default)]
     pub variables: Option<BTreeMap<String, ShimServerVariable>>,
@@ -349,6 +360,10 @@ pub struct ShimTag {
     /// Additional external documentation for this tag.
     #[serde(rename = "externalDocs")]
     pub external_docs: Option<ShimExternalDocs>,
+    /// The parent tag name for nesting.
+    pub parent: Option<String>,
+    /// The tag kind (e.g., nav, badge, audience).
+    pub kind: Option<String>,
     /// Extensions.
     #[serde(flatten)]
     pub extensions: BTreeMap<String, Value>,
@@ -401,6 +416,10 @@ pub struct ShimOperation {
     /// Unique identifier for the operation.
     #[serde(rename = "operationId")]
     pub operation_id: Option<String>,
+    /// A short summary of what the operation does.
+    pub summary: Option<String>,
+    /// A verbose explanation of the operation behavior.
+    pub description: Option<String>,
     /// Operation-specific parameters.
     #[serde(default)]
     pub parameters: Option<Vec<RefOr<ShimParameter>>>,
@@ -491,6 +510,8 @@ query:
     fn test_shim_operation_metadata() {
         let yaml = r#"
 operationId: testOp
+summary: Summary line
+description: Detailed description
 deprecated: true
 externalDocs:
   url: https://example.com
@@ -499,8 +520,88 @@ responses: {}
 "#;
         let op: ShimOperation = serde_yaml::from_str(yaml).unwrap();
         assert!(op.deprecated);
+        assert_eq!(op.summary.as_deref(), Some("Summary line"));
+        assert_eq!(op.description.as_deref(), Some("Detailed description"));
         assert!(op.external_docs.is_some());
         assert_eq!(op.external_docs.unwrap().url, "https://example.com");
+    }
+
+    #[test]
+    fn test_shim_server_name_and_tag_hierarchy() {
+        let yaml = r#"
+openapi: 3.2.0
+info:
+  title: Meta
+  version: 1.0
+servers:
+  - url: https://api.example.com
+    name: prod
+tags:
+  - name: external
+    summary: External
+    kind: audience
+  - name: partner
+    parent: external
+    kind: audience
+paths: {}
+"#;
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
+        let servers = openapi.servers.unwrap();
+        assert_eq!(servers[0].name.as_deref(), Some("prod"));
+
+        let tags = openapi.tags.unwrap();
+        assert_eq!(tags[0].name, "external");
+        assert_eq!(tags[0].kind.as_deref(), Some("audience"));
+        assert_eq!(tags[1].parent.as_deref(), Some("external"));
+    }
+
+    #[test]
+    fn test_shim_oauth2_device_flow_and_metadata() {
+        let yaml = r#"
+openapi: 3.2.0
+info:
+  title: OAuth
+  version: 1.0
+components:
+  securitySchemes:
+    oauth:
+      type: oauth2
+      oauth2MetadataUrl: https://auth.example.com/.well-known/oauth-authorization-server
+      flows:
+        deviceAuthorization:
+          deviceAuthorizationUrl: https://auth.example.com/device
+          tokenUrl: https://auth.example.com/token
+          scopes:
+            read: read stuff
+paths: {}
+"#;
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
+        let comps = openapi.components.unwrap();
+        let schemes = comps.security_schemes.unwrap();
+        let oauth = match schemes.get("oauth").unwrap() {
+            RefOr::T(ShimSecurityScheme::OAuth2(o)) => o,
+            _ => panic!("Expected OAuth2"),
+        };
+        assert_eq!(
+            oauth.oauth2_metadata_url.as_deref(),
+            Some("https://auth.example.com/.well-known/oauth-authorization-server")
+        );
+        let flow = oauth
+            .flows
+            .as_ref()
+            .unwrap()
+            .device_authorization
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            flow.device_authorization_url.as_deref(),
+            Some("https://auth.example.com/device")
+        );
+        assert_eq!(
+            flow.token_url.as_deref(),
+            Some("https://auth.example.com/token")
+        );
+        assert!(flow.scopes.contains_key("read"));
     }
 
     #[test]

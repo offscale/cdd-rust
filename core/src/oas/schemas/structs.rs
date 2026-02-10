@@ -205,6 +205,7 @@ components:
         - type: object
           properties:
             id: { type: integer }
+          required: [id]
 "#;
         let openapi: OpenApi = serde_yaml::from_str(yaml).unwrap();
         let components = openapi.components.as_ref().unwrap();
@@ -219,6 +220,6 @@ components:
         let id = fields.iter().find(|f| f.name == "id").unwrap();
         let note = fields.iter().find(|f| f.name == "note").unwrap();
         assert_eq!(id.ty, "i32");
-        assert_eq!(note.ty, "String");
+        assert_eq!(note.ty, "Option<String>");
     }
 }

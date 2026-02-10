@@ -9,13 +9,15 @@ use crate::oas::models::{
     ParamSource, ParsedRoute, RouteKind, RouteParam, SecurityRequirement, SecuritySchemeInfo,
     SecuritySchemeKind,
 };
+use crate::oas::ref_utils::extract_component_name;
 use crate::oas::resolver::responses::extract_response_details;
 use crate::oas::resolver::{extract_request_body_type, resolve_parameters};
 use crate::oas::routes::callbacks::{extract_callback_operations, resolve_callback_object};
 use crate::oas::routes::naming::{derive_handler_name, to_snake_case};
 use crate::oas::routes::shims::{ShimComponents, ShimOperation, ShimPathItem, ShimSecurityScheme};
 use crate::parser::ParsedExternalDocs;
-use std::collections::HashMap;
+use regex::Regex;
+use std::collections::{HashMap, HashSet};
 use utoipa::openapi::RefOr;
 
 /// Helper to iterate methods in a ShimPathItem and extract all operations as Routes.
@@ -27,6 +29,7 @@ pub fn parse_path_item(
     components: Option<&ShimComponents>,
     base_path: Option<String>,
     global_security: Option<&Vec<serde_json::Value>>,
+    operation_ids: &mut HashSet<String>,
     all_paths: &std::collections::BTreeMap<String, ShimPathItem>,
 ) -> AppResult<()> {
     let mut path_item = path_item.clone();
@@ -43,6 +46,14 @@ pub fn parse_path_item(
 
     let mut add_op = |method: &str, op: Option<ShimOperation>| -> AppResult<()> {
         if let Some(o) = op {
+            if let Some(op_id) = &o.operation_id {
+                if !operation_ids.insert(op_id.clone()) {
+                    return Err(AppError::General(format!(
+                        "Duplicate operationId '{}' detected",
+                        op_id
+                    )));
+                }
+            }
             routes.push(build_route(
                 path_or_name,
                 method,
@@ -68,6 +79,14 @@ pub fn parse_path_item(
     add_op("QUERY", path_item.query)?;
 
     if let Some(additional) = &path_item.additional_operations {
+        for method in additional.keys() {
+            if is_reserved_method(method) {
+                return Err(AppError::General(format!(
+                    "additionalOperations contains reserved HTTP method '{}'",
+                    method
+                )));
+            }
+        }
         for (method, op) in additional {
             if is_reserved_method(method) {
                 continue;
@@ -133,10 +152,14 @@ fn build_route(
         )));
     }
 
+    if matches!(kind, RouteKind::Path) {
+        validate_path_parameters(path, &params)?;
+    }
+
     // 3. Request Body
     let mut request_body = None;
     if let Some(req_body_ref) = &op.request_body {
-        if let Some(def) = extract_request_body_type(req_body_ref)? {
+        if let Some(def) = extract_request_body_type(req_body_ref, components)? {
             request_body = Some(def);
         }
     }
@@ -211,6 +234,48 @@ fn build_route(
     })
 }
 
+fn validate_path_parameters(path: &str, params: &[RouteParam]) -> AppResult<()> {
+    let re = Regex::new(r"\{([^}]+)}").expect("Invalid regex constant");
+    let mut path_vars = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for cap in re.captures_iter(path) {
+        let name = cap[1].to_string();
+        if !seen.insert(name.clone()) {
+            return Err(AppError::General(format!(
+                "Path template '{}' contains duplicate path parameter '{}'",
+                path, name
+            )));
+        }
+        path_vars.push(name);
+    }
+
+    let path_set: std::collections::HashSet<_> = path_vars.iter().cloned().collect();
+
+    for name in &path_vars {
+        if !params
+            .iter()
+            .any(|p| p.source == ParamSource::Path && p.name == *name)
+        {
+            return Err(AppError::General(format!(
+                "Path template '{}' is missing path parameter definition for '{}'",
+                path, name
+            )));
+        }
+    }
+
+    for param in params.iter().filter(|p| p.source == ParamSource::Path) {
+        if !path_set.contains(&param.name) {
+            return Err(AppError::General(format!(
+                "Path parameter '{}' is not present in path template '{}'",
+                param.name, path
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 fn is_reserved_method(method: &str) -> bool {
     matches!(
         method.to_ascii_lowercase().as_str(),
@@ -262,50 +327,62 @@ fn resolve_security_scheme(
     let schemes = comps.security_schemes.as_ref()?;
 
     if let Some(RefOr::T(shim)) = schemes.get(name) {
-        let kind = match shim {
-            ShimSecurityScheme::ApiKey(k) => {
-                let source = match k.in_loc.as_str() {
-                    "header" => ParamSource::Header,
-                    "query" => ParamSource::Query,
-                    "cookie" => ParamSource::Cookie,
-                    _ => ParamSource::Query,
-                };
-                SecuritySchemeKind::ApiKey {
-                    name: k.name.clone(),
-                    in_loc: source,
-                }
-            }
-            ShimSecurityScheme::Http(h) => SecuritySchemeKind::Http {
-                scheme: h.scheme.clone(),
-                bearer_format: h.bearer_format.clone(),
-            },
-            ShimSecurityScheme::OAuth2(_) => SecuritySchemeKind::OAuth2,
-            ShimSecurityScheme::OpenIdConnect(_) => SecuritySchemeKind::OpenIdConnect,
-            ShimSecurityScheme::MutualTls(_) => SecuritySchemeKind::MutualTls,
-            ShimSecurityScheme::Basic => SecuritySchemeKind::Http {
-                scheme: "basic".into(),
-                bearer_format: None,
-            },
-        };
-
-        let description = match shim {
-            ShimSecurityScheme::ApiKey(k) => k.description.clone(),
-            ShimSecurityScheme::Http(h) => h.description.clone(),
-            ShimSecurityScheme::OAuth2(o) => o.description.clone(),
-            ShimSecurityScheme::OpenIdConnect(o) => o.description.clone(),
-            ShimSecurityScheme::MutualTls(m) => m.description.clone(),
-            ShimSecurityScheme::Basic => None,
-        };
-
-        Some(SecuritySchemeInfo { kind, description })
-    } else {
-        None
+        return Some(build_security_scheme_info(shim));
     }
+
+    // URI-form security scheme reference (OAS 3.2).
+    let self_uri = comps.extra.get("__self").and_then(|v| v.as_str());
+    let ref_name = extract_component_name(name, self_uri, "securitySchemes")?;
+    if let Some(RefOr::T(shim)) = schemes.get(&ref_name) {
+        return Some(build_security_scheme_info(shim));
+    }
+
+    None
+}
+
+fn build_security_scheme_info(shim: &ShimSecurityScheme) -> SecuritySchemeInfo {
+    let kind = match shim {
+        ShimSecurityScheme::ApiKey(k) => {
+            let source = match k.in_loc.as_str() {
+                "header" => ParamSource::Header,
+                "query" => ParamSource::Query,
+                "cookie" => ParamSource::Cookie,
+                _ => ParamSource::Query,
+            };
+            SecuritySchemeKind::ApiKey {
+                name: k.name.clone(),
+                in_loc: source,
+            }
+        }
+        ShimSecurityScheme::Http(h) => SecuritySchemeKind::Http {
+            scheme: h.scheme.clone(),
+            bearer_format: h.bearer_format.clone(),
+        },
+        ShimSecurityScheme::OAuth2(_) => SecuritySchemeKind::OAuth2,
+        ShimSecurityScheme::OpenIdConnect(_) => SecuritySchemeKind::OpenIdConnect,
+        ShimSecurityScheme::MutualTls(_) => SecuritySchemeKind::MutualTls,
+        ShimSecurityScheme::Basic => SecuritySchemeKind::Http {
+            scheme: "basic".into(),
+            bearer_format: None,
+        },
+    };
+
+    let description = match shim {
+        ShimSecurityScheme::ApiKey(k) => k.description.clone(),
+        ShimSecurityScheme::Http(h) => h.description.clone(),
+        ShimSecurityScheme::OAuth2(o) => o.description.clone(),
+        ShimSecurityScheme::OpenIdConnect(o) => o.description.clone(),
+        ShimSecurityScheme::MutualTls(m) => m.description.clone(),
+        ShimSecurityScheme::Basic => None,
+    };
+
+    SecuritySchemeInfo { kind, description }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::oas::models::RuntimeExpression;
+    use crate::oas::models::SecuritySchemeKind;
 
     #[test]
     fn test_parse_callback_inline() {
@@ -338,5 +415,34 @@ paths:
         );
         assert_eq!(cb.method, "POST");
         assert!(cb.request_body.is_some());
+    }
+
+    #[test]
+    fn test_security_scheme_uri_reference_resolution() {
+        let yaml = r#"
+openapi: 3.2.0
+info: {title: Security, version: 1.0}
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      name: api-key
+      in: header
+paths:
+  /secure:
+    get:
+      security:
+        - '#/components/securitySchemes/ApiKeyAuth': []
+      responses:
+        '200': {description: ok}
+"#;
+        let routes = super::super::parse_openapi_routes(yaml).unwrap();
+        let scheme = routes[0]
+            .security
+            .first()
+            .and_then(|s| s.scheme.clone())
+            .expect("expected resolved scheme");
+
+        assert!(matches!(scheme.kind, SecuritySchemeKind::ApiKey { .. }));
     }
 }

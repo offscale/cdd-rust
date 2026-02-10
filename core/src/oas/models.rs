@@ -223,6 +223,8 @@ pub enum ParamStyle {
     Label,
     /// `form`
     Form,
+    /// `cookie`
+    Cookie,
     /// `simple`
     #[default]
     Simple,

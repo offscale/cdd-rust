@@ -6,6 +6,7 @@
 
 use crate::error::{AppError, AppResult};
 use crate::oas::models::{ParsedCallback, RuntimeExpression};
+use crate::oas::ref_utils::extract_component_name;
 use crate::oas::resolver::extract_request_body_type;
 use crate::oas::resolver::responses::extract_response_details;
 use crate::oas::routes::shims::{ShimComponents, ShimOperation, ShimPathItem};
@@ -20,25 +21,28 @@ pub fn resolve_callback_object(
     match cb_ref {
         RefOr::T(map) => Ok(map.clone()),
         RefOr::Ref(r) => {
-            let ref_name = r
-                .ref_location
-                .split('/')
-                .next_back()
-                .unwrap_or("Unknown")
-                .to_string();
+            let (comps, self_uri) = components
+                .map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))
+                .ok_or_else(|| {
+                    AppError::General(format!(
+                        "Callback reference not found: {}",
+                        r.ref_location
+                    ))
+                })?;
 
-            if let Some(comps) = components {
-                if let Some(cb_json) = comps.extra.get("callbacks").and_then(|c| c.get(&ref_name)) {
-                    let map =
-                        serde_json::from_value::<BTreeMap<String, ShimPathItem>>(cb_json.clone())
-                            .map_err(|e| {
-                            AppError::General(format!(
-                                "Failed to parse resolved callback '{}': {}",
-                                ref_name, e
-                            ))
-                        })?;
-                    return Ok(map);
-                }
+            let ref_name = extract_component_name(&r.ref_location, self_uri, "callbacks")
+                .unwrap_or_else(|| "Unknown".to_string());
+
+            if let Some(cb_json) = comps.extra.get("callbacks").and_then(|c| c.get(&ref_name)) {
+                let map =
+                    serde_json::from_value::<BTreeMap<String, ShimPathItem>>(cb_json.clone())
+                        .map_err(|e| {
+                        AppError::General(format!(
+                            "Failed to parse resolved callback '{}': {}",
+                            ref_name, e
+                        ))
+                    })?;
+                return Ok(map);
             }
             Err(AppError::General(format!(
                 "Callback reference not found: {}",
@@ -66,7 +70,7 @@ pub fn extract_callback_operations(
         if let Some(o) = op {
             let mut req_body = None;
             if let Some(rb) = &o.request_body {
-                if let Some(def) = extract_request_body_type(rb)? {
+                if let Some(def) = extract_request_body_type(rb, components)? {
                     req_body = Some(def);
                 }
             }
@@ -123,6 +127,8 @@ mod tests {
     fn empty_operation() -> ShimOperation {
         ShimOperation {
             operation_id: None,
+            summary: None,
+            description: None,
             parameters: None,
             request_body: None,
             responses: Responses::new(),

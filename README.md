@@ -211,6 +211,8 @@ This generates a test file that:
 * **Versions:** Supports OpenAPI 3.0 and 3.1 directly.
 * **Compatibility:** Implements shims for **OpenAPI 3.2**, specifically handling the `$self` keyword for Base URI
   determination (Appendix F) and downgrading version strings for library compatibility.
+* **Validation:** Enforces required `info`, leading-slash `paths`, unique `operationId` values, templated path
+  conflicts, component key naming rules, and rejects `additionalOperations` that reuse reserved HTTP methods.
 * **Resolution:** Full support for local, relative, and remote `$ref` resolution.
 * **Polymorphism:** handles `oneOf`, `anyOf`, and `allOf` (flattening) into Rust Enums and Structs.
 * **Extractors:** Maps OAS parameters to backend-specific extractors (e.g., `web::Query`, `web::Path`, `web::Json`,
