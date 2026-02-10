@@ -14,6 +14,8 @@ use crate::error::{AppError, AppResult};
 use crate::oas::models::{ParsedRoute, RouteKind};
 use crate::oas::routes::builder::parse_path_item;
 use crate::oas::routes::shims::{ShimComponents, ShimOpenApi, ShimPathItem, ShimServer};
+use crate::oas::validation::{validate_component_keys, validate_openapi_root, validate_paths};
+use crate::oas::ref_utils::normalize_ref_to_local;
 use utoipa::openapi::RefOr;
 use std::collections::{BTreeMap, HashSet};
 
@@ -46,10 +48,24 @@ pub fn parse_openapi_routes(yaml_content: &str) -> AppResult<Vec<ParsedRoute>> {
         ));
     }
 
+    validate_openapi_root(&openapi)?;
+    if let Some(components) = openapi.components.as_ref() {
+        validate_component_keys(components)?;
+    }
+    validate_paths(&openapi.paths)?;
+
     let base_path = resolve_base_path(&openapi);
     let mut routes = Vec::new();
-    let components = openapi.components.as_ref();
+    let mut owned_components = openapi.components.clone();
+    if let (Some(self_uri), Some(comps)) = (openapi.self_uri.as_deref(), owned_components.as_mut())
+    {
+        comps
+            .extra
+            .insert("__self".to_string(), serde_json::Value::String(self_uri.to_string()));
+    }
+    let components = owned_components.as_ref();
     let global_security = openapi.security.as_ref();
+    let mut operation_ids = HashSet::new();
 
     // 1. Parse standard Paths
     for (path_str, path_item) in &openapi.paths {
@@ -61,6 +77,7 @@ pub fn parse_openapi_routes(yaml_content: &str) -> AppResult<Vec<ParsedRoute>> {
             components,
             base_path.clone(),
             global_security,
+            &mut operation_ids,
             &openapi.paths,
         )?;
     }
@@ -81,6 +98,7 @@ pub fn parse_openapi_routes(yaml_content: &str) -> AppResult<Vec<ParsedRoute>> {
                 components,
                 None, // Webhooks generally don't use server prefix logic like paths
                 global_security,
+                &mut operation_ids,
                 &openapi.paths,
             )?;
         }
@@ -164,14 +182,23 @@ fn resolve_path_item_ref_inner(
     paths: &BTreeMap<String, ShimPathItem>,
     visited: &mut HashSet<String>,
 ) -> AppResult<ShimPathItem> {
-    if !visited.insert(ref_str.to_string()) {
+    let mut normalized = ref_str.to_string();
+    if let Some(comps) = components {
+        if let Some(self_uri) = comps.extra.get("__self").and_then(|v| v.as_str()) {
+            if let Some(local) = normalize_ref_to_local(ref_str, Some(self_uri)) {
+                normalized = local;
+            }
+        }
+    }
+
+    if !visited.insert(normalized.to_string()) {
         return Err(AppError::General(format!(
             "PathItem reference cycle detected at {}",
-            ref_str
+            normalized
         )));
     }
 
-    if let Some(pointer) = ref_str.strip_prefix("#/") {
+    if let Some(pointer) = normalized.strip_prefix("#/") {
         let segments: Vec<&str> = pointer.split('/').collect();
         if segments.get(0) == Some(&"components") && segments.get(1) == Some(&"pathItems") {
             let name_seg = segments.get(2).ok_or_else(|| {
@@ -275,13 +302,13 @@ openapi: 3.1.0
 info: {title: T, version: 1.0}
 paths:
   /users/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
     get:
       operationId: getUserById
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: {type: string, format: uuid}
       responses: { '200': {description: OK} }
     post:
       operationId: UpdateUser
@@ -621,6 +648,58 @@ paths:
     }
 
     #[test]
+    fn test_path_param_missing_definition() {
+        let yaml = r#"
+openapi: 3.2.0
+info: {title: PathParam, version: 1.0}
+paths:
+  /users/{id}:
+    get:
+      responses: { '200': {description: OK} }
+"#;
+        let err = parse_openapi_routes(yaml).unwrap_err();
+        assert!(format!("{err}").contains("missing path parameter definition for 'id'"));
+    }
+
+    #[test]
+    fn test_path_param_unused_definition() {
+        let yaml = r#"
+openapi: 3.2.0
+info: {title: PathParam, version: 1.0}
+paths:
+  /users:
+    get:
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses: { '200': {description: OK} }
+"#;
+        let err = parse_openapi_routes(yaml).unwrap_err();
+        assert!(format!("{err}").contains("is not present in path template"));
+    }
+
+    #[test]
+    fn test_path_param_duplicate_in_template() {
+        let yaml = r#"
+openapi: 3.2.0
+info: {title: PathParam, version: 1.0}
+paths:
+  /users/{id}/orders/{id}:
+    get:
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses: { '200': {description: OK} }
+"#;
+        let err = parse_openapi_routes(yaml).unwrap_err();
+        assert!(format!("{err}").contains("contains duplicate path parameter 'id'"));
+    }
+
+    #[test]
     fn test_parse_routes_with_reusable_response() {
         let yaml = r#"
 openapi: 3.1.0
@@ -666,6 +745,27 @@ paths:
     }
 
     #[test]
+    fn test_path_item_ref_resolution_with_self() {
+        let yaml = r#"
+openapi: 3.2.0
+$self: https://example.com/openapi.yaml
+info: {title: Ref, version: 1.0}
+components:
+  pathItems:
+    UserPath:
+      get:
+        responses: { '200': {description: OK} }
+paths:
+  /users:
+    $ref: 'https://example.com/openapi.yaml#/components/pathItems/UserPath'
+"#;
+        let routes = parse_openapi_routes(yaml).unwrap();
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].path, "/users");
+        assert_eq!(routes[0].method, "GET");
+    }
+
+    #[test]
     fn test_additional_operations_parsing() {
         let yaml = r#"
 openapi: 3.2.0
@@ -673,9 +773,6 @@ info: {title: ExtraOps, version: 1.0}
 paths:
   /copy:
     additionalOperations:
-      GET:
-        operationId: ignoredGet
-        responses: { '200': {description: OK} }
       COPY:
         operationId: copyThing
         responses: { '200': {description: OK} }
@@ -685,6 +782,22 @@ paths:
         let r = &routes[0];
         assert_eq!(r.method, "COPY");
         assert_eq!(r.handler_name, "copy_thing");
+    }
+
+    #[test]
+    fn test_additional_operations_reserved_method_rejected() {
+        let yaml = r#"
+openapi: 3.2.0
+info: {title: ExtraOps, version: 1.0}
+paths:
+  /copy:
+    additionalOperations:
+      GET:
+        operationId: badGet
+        responses: { '200': {description: OK} }
+"#;
+        let err = parse_openapi_routes(yaml).unwrap_err();
+        assert!(format!("{err}").contains("additionalOperations contains reserved HTTP method"));
     }
 
     #[test]
@@ -745,6 +858,84 @@ paths:
         assert_eq!(routes.len(), 2);
         let alias_route = routes.iter().find(|r| r.path == "/alias").unwrap();
         assert_eq!(alias_route.method, "GET");
+    }
+
+    #[test]
+    fn test_paths_must_start_with_slash() {
+        let yaml = r#"
+openapi: 3.2.0
+info: {title: BadPath, version: 1.0}
+paths:
+  users:
+    get:
+      responses: { '200': {description: OK} }
+"#;
+        let err = parse_openapi_routes(yaml).unwrap_err();
+        assert!(format!("{err}").contains("must start with '/'"));
+    }
+
+    #[test]
+    fn test_templated_path_conflict_rejected() {
+        let yaml = r#"
+openapi: 3.2.0
+info: {title: PathConflict, version: 1.0}
+paths:
+  /pets/{petId}:
+    get:
+      responses: { '200': {description: OK} }
+  /pets/{name}:
+    get:
+      responses: { '200': {description: OK} }
+"#;
+        let err = parse_openapi_routes(yaml).unwrap_err();
+        assert!(format!("{err}").contains("conflicts with"));
+    }
+
+    #[test]
+    fn test_duplicate_operation_id_rejected() {
+        let yaml = r#"
+openapi: 3.2.0
+info: {title: DupOp, version: 1.0}
+paths:
+  /a:
+    get:
+      operationId: sameOp
+      responses: { '200': {description: OK} }
+  /b:
+    post:
+      operationId: sameOp
+      responses: { '200': {description: OK} }
+"#;
+        let err = parse_openapi_routes(yaml).unwrap_err();
+        assert!(format!("{err}").contains("Duplicate operationId"));
+    }
+
+    #[test]
+    fn test_components_key_regex_enforced() {
+        let yaml = r#"
+openapi: 3.2.0
+info: {title: BadComponentKey, version: 1.0}
+components:
+  schemas:
+    Bad Key!:
+      type: object
+paths:
+  /ok:
+    get:
+      responses: { '200': {description: OK} }
+"#;
+        let err = parse_openapi_routes(yaml).unwrap_err();
+        assert!(format!("{err}").contains("Component key"));
+    }
+
+    #[test]
+    fn test_openapi_requires_paths_components_or_webhooks() {
+        let yaml = r#"
+openapi: 3.2.0
+info: {title: MissingEverything, version: 1.0}
+"#;
+        let err = parse_openapi_routes(yaml).unwrap_err();
+        assert!(format!("{err}").contains("must define at least one"));
     }
 
     #[test]

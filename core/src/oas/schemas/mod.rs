@@ -20,6 +20,7 @@ use crate::oas::routes::shims::ShimOpenApi;
 use crate::oas::schemas::enums::parse_variants;
 use crate::oas::schemas::refs::{resolve_ref_local, ResolutionContext};
 use crate::oas::schemas::structs::flatten_schema_fields;
+use crate::oas::validation::validate_component_keys;
 use crate::parser::{ParsedEnum, ParsedModel, ParsedStruct};
 use utoipa::openapi::{schema::Schema, Deprecated, OpenApi};
 
@@ -34,6 +35,9 @@ pub fn parse_openapi_spec(yaml_content: &str) -> AppResult<Vec<ParsedModel>> {
     // 1. Pre-parse to get standard fields like $self (Shim)
     let shim: ShimOpenApi = serde_yaml::from_str(yaml_content)
         .map_err(|e| AppError::General(format!("Failed to parse OpenAPI Shim: {}", e)))?;
+    if let Some(components) = shim.components.as_ref() {
+        validate_component_keys(components)?;
+    }
 
     // 2. Parse using full AST (Utoipa) for schema traversal.
     // Compatibility Hack: Utoipa 5.x tightly validates the "openapi" version string.

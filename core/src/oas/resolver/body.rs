@@ -7,19 +7,33 @@
 
 use crate::error::AppResult;
 use crate::oas::models::{BodyFormat, EncodingInfo, RequestBodyDefinition};
+use crate::oas::ref_utils::extract_component_name;
 use crate::oas::resolver::types::map_schema_to_rust_type;
+use crate::oas::routes::shims::ShimComponents;
 use std::collections::HashMap;
 use utoipa::openapi::encoding::Encoding;
 use utoipa::openapi::request_body::RequestBody;
 use utoipa::openapi::RefOr;
 
 /// Extracts the request body type and format from the OpenAPI definition.
+///
+/// Resolves `$ref` values against `components.requestBodies` when available, including
+/// OAS 3.2 `$self`-qualified absolute references.
 pub fn extract_request_body_type(
     body: &RefOr<RequestBody>,
+    components: Option<&ShimComponents>,
 ) -> AppResult<Option<RequestBodyDefinition>> {
+    let owned_body;
     let content = match body {
         RefOr::T(b) => &b.content,
-        RefOr::Ref(_) => return Ok(None),
+        RefOr::Ref(r) => {
+            if let Some(resolved) = resolve_request_body_from_components(r, components) {
+                owned_body = resolved;
+                &owned_body.content
+            } else {
+                return Ok(None);
+            }
+        }
     };
 
     // 1. JSON
@@ -70,6 +84,25 @@ pub fn extract_request_body_type(
     Ok(None)
 }
 
+fn resolve_request_body_from_components(
+    r: &utoipa::openapi::Ref,
+    components: Option<&ShimComponents>,
+) -> Option<RequestBody> {
+    let (comps, self_uri) =
+        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))?;
+    let ref_name = extract_component_name(&r.ref_location, self_uri, "requestBodies")?;
+    if let Some(body_json) = comps
+        .extra
+        .get("requestBodies")
+        .and_then(|m| m.get(&ref_name))
+    {
+        if let Ok(body) = serde_json::from_value::<RequestBody>(body_json.clone()) {
+            return Some(body);
+        }
+    }
+    None
+}
+
 /// Helper to extract encoding map (property -> EncodingInfo).
 fn extract_encoding_map(
     encoding: &std::collections::BTreeMap<String, Encoding>,
@@ -106,6 +139,9 @@ fn extract_encoding_map(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::oas::routes::shims::ShimComponents;
+    use serde_json::json;
+    use std::collections::BTreeMap;
     use utoipa::openapi::encoding::EncodingBuilder;
     use utoipa::openapi::header::HeaderBuilder;
     use utoipa::openapi::request_body::RequestBodyBuilder;
@@ -122,7 +158,7 @@ mod tests {
             )
             .build();
 
-        let def = extract_request_body_type(&RefOr::T(body)).unwrap().unwrap();
+        let def = extract_request_body_type(&RefOr::T(body), None).unwrap().unwrap();
         assert_eq!(def.ty, "User");
         assert_eq!(def.format, BodyFormat::Json);
         assert!(def.encoding.is_none());
@@ -160,7 +196,7 @@ mod tests {
             .content("multipart/form-data", media)
             .build();
 
-        let def = extract_request_body_type(&RefOr::T(body)).unwrap().unwrap();
+        let def = extract_request_body_type(&RefOr::T(body), None).unwrap().unwrap();
 
         assert_eq!(def.ty, "Upload");
         assert_eq!(def.format, BodyFormat::Multipart);
@@ -189,11 +225,45 @@ mod tests {
             )
             .build();
 
-        let def = extract_request_body_type(&RefOr::T(request_body))
+        let def = extract_request_body_type(&RefOr::T(request_body), None)
             .unwrap()
             .unwrap();
         assert_eq!(def.ty, "Login");
         assert_eq!(def.format, BodyFormat::Form);
         assert!(def.encoding.is_none());
+    }
+
+    #[test]
+    fn test_extract_request_body_ref_with_self() {
+        let mut components = ShimComponents {
+            security_schemes: None,
+            path_items: None,
+            extra: BTreeMap::new(),
+        };
+        components.extra.insert(
+            "__self".to_string(),
+            json!("https://example.com/openapi.yaml"),
+        );
+        components.extra.insert(
+            "requestBodies".to_string(),
+            json!({
+                "CreateThing": {
+                    "content": {
+                        "application/json": {
+                            "schema": { "$ref": "#/components/schemas/Thing" }
+                        }
+                    }
+                }
+            }),
+        );
+
+        let body_ref = RefOr::Ref(utoipa::openapi::Ref::new(
+            "https://example.com/openapi.yaml#/components/requestBodies/CreateThing",
+        ));
+        let def = extract_request_body_type(&body_ref, Some(&components))
+            .unwrap()
+            .unwrap();
+        assert_eq!(def.ty, "Thing");
+        assert_eq!(def.format, BodyFormat::Json);
     }
 }

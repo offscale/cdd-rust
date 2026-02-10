@@ -63,16 +63,28 @@ fn generate_test_fn(
         }
     }
 
-    let query_params: Vec<String> = route
+    if let Some(qs_param) = route
         .params
         .iter()
-        .filter(|p| p.source == ParamSource::Query)
-        .map(|p| format!("{}={}", p.name, get_dummy_value(&p.ty)))
-        .collect();
+        .find(|p| p.source == ParamSource::QueryString)
+    {
+        let raw_query = build_querystring_value(qs_param);
+        if !raw_query.is_empty() {
+            uri.push('?');
+            uri.push_str(&raw_query);
+        }
+    } else {
+        let query_params: Vec<String> = route
+            .params
+            .iter()
+            .filter(|p| p.source == ParamSource::Query)
+            .map(|p| format!("{}={}", p.name, get_dummy_value(&p.ty)))
+            .collect();
 
-    if !query_params.is_empty() {
-        uri.push('?');
-        uri.push_str(&query_params.join("&"));
+        if !query_params.is_empty() {
+            uri.push('?');
+            uri.push_str(&query_params.join("&"));
+        }
     }
 
     let body_setup = if route.request_body.is_some() {
@@ -125,6 +137,11 @@ fn get_dummy_value(ty: &str) -> String {
     } else {
         "test_val".to_string()
     }
+}
+
+fn build_querystring_value(param: &crate::oas::RouteParam) -> String {
+    let value = get_dummy_value(&param.ty);
+    format!("{}={}", param.name, value)
 }
 
 #[cfg(test)]
@@ -216,6 +233,38 @@ mod tests {
         let strategy = ActixStrategy;
         let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy).unwrap();
         assert!(code.contains("?q=test_val&page=1"));
+    }
+
+    #[test]
+    fn test_generate_with_querystring_param() {
+        let routes = vec![ParsedRoute {
+            path: "/search".into(),
+            base_path: None,
+            method: "GET".into(),
+            handler_name: "search_raw".into(),
+            params: vec![crate::oas::RouteParam {
+                name: "raw".into(),
+                source: ParamSource::QueryString,
+                ty: "String".into(),
+                style: None,
+                explode: false,
+                allow_reserved: false,
+            }],
+            request_body: None,
+            security: vec![],
+            response_type: None,
+            response_headers: vec![],
+            response_links: None,
+            kind: RouteKind::Path,
+            callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
+            tags: vec![],
+        }];
+
+        let strategy = ActixStrategy;
+        let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy).unwrap();
+        assert!(code.contains("?raw=test_val"));
     }
 
     #[test]

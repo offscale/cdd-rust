@@ -7,6 +7,7 @@
 
 use crate::error::{AppError, AppResult};
 use crate::oas::models::{ParamSource, ParamStyle, RouteParam};
+use crate::oas::ref_utils::extract_component_name;
 use crate::oas::resolver::types::map_schema_to_rust_type;
 use crate::oas::routes::shims::ShimComponents;
 use serde::{Deserialize, Serialize};
@@ -85,14 +86,13 @@ fn resolve_parameter_ref(
     r: &utoipa::openapi::Ref,
     components: Option<&ShimComponents>,
 ) -> Option<ShimParameter> {
-    let ref_name = r.ref_location.split('/').next_back()?;
-
-    if let Some(comps) = components {
-        // Note: Generic components are now in `extra`.
-        if let Some(param_json) = comps.extra.get("parameters").and_then(|p| p.get(ref_name)) {
-            if let Ok(param) = serde_json::from_value::<ShimParameter>(param_json.clone()) {
-                return Some(param);
-            }
+    let (comps, self_uri) =
+        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))?;
+    let ref_name = extract_component_name(&r.ref_location, self_uri, "parameters")?;
+    // Note: Generic components are now in `extra`.
+    if let Some(param_json) = comps.extra.get("parameters").and_then(|p| p.get(&ref_name)) {
+        if let Ok(param) = serde_json::from_value::<ShimParameter>(param_json.clone()) {
+            return Some(param);
         }
     }
     None
@@ -116,6 +116,12 @@ fn process_parameter(param: &ShimParameter) -> AppResult<RouteParam> {
         "header" => ParamSource::Header,
         "cookie" => ParamSource::Cookie,
         _ => ParamSource::Query,
+    };
+
+    let required = if source == ParamSource::Path {
+        true
+    } else {
+        param.required
     };
 
     if source == ParamSource::QueryString {
@@ -148,18 +154,20 @@ fn process_parameter(param: &ShimParameter) -> AppResult<RouteParam> {
         &source,
     );
 
+    validate_style_for_location(&name, &source, &style)?;
+
     // Determine explode. Defaults depend on style.
     let explode = resolve_explode(param.explode, &style);
 
     // Resolve type from `schema` OR `content`
     let ty = if let Some(schema_ref) = &param.schema {
-        map_schema_to_rust_type(schema_ref, param.required)?
+        map_schema_to_rust_type(schema_ref, required)?
     } else if let Some(content) = &param.content {
         // OAS 3.0+ spec: "The map MUST only contain one entry."
         // We take the first one found after validation.
         if let Some((_media_type, media_obj)) = content.iter().next() {
             if let Some(s) = &media_obj.schema {
-                map_schema_to_rust_type(s, param.required)?
+                map_schema_to_rust_type(s, required)?
             } else {
                 "serde_json::Value".to_string()
             }
@@ -199,6 +207,7 @@ fn resolve_style(
             "matrix" => Some(ParamStyle::Matrix),
             "label" => Some(ParamStyle::Label),
             "form" => Some(ParamStyle::Form),
+            "cookie" => Some(ParamStyle::Cookie),
             "simple" => Some(ParamStyle::Simple),
             "spaceDelimited" => Some(ParamStyle::SpaceDelimited),
             "pipeDelimited" => Some(ParamStyle::PipeDelimited),
@@ -247,10 +256,45 @@ fn resolve_explode(explicit: Option<bool>, style: &Option<ParamStyle>) -> bool {
 
     match style {
         Some(ParamStyle::Form) => true,
-        // ParamStyle doesn't have explicit Cookie variant, Cookie uses Form style usually.
-        // If user explicitly set style="form" (default for cookie), it returns true.
+        Some(ParamStyle::Cookie) => true,
         _ => false,
     }
+}
+
+fn validate_style_for_location(
+    name: &str,
+    source: &ParamSource,
+    style: &Option<ParamStyle>,
+) -> AppResult<()> {
+    if let Some(style) = style {
+        match source {
+            ParamSource::Header => {
+                if !matches!(style, ParamStyle::Simple) {
+                    return Err(AppError::General(format!(
+                        "Header parameter '{}' must use style 'simple'",
+                        name
+                    )));
+                }
+            }
+            ParamSource::Cookie => {
+                if !matches!(style, ParamStyle::Form | ParamStyle::Cookie) {
+                    return Err(AppError::General(format!(
+                        "Cookie parameter '{}' must use style 'form' or 'cookie'",
+                        name
+                    )));
+                }
+            }
+            _ => {
+                if matches!(style, ParamStyle::Cookie) {
+                    return Err(AppError::General(format!(
+                        "Parameter '{}' uses style 'cookie' but is not in 'cookie'",
+                        name
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -364,6 +408,102 @@ mod tests {
     }
 
     #[test]
+    fn test_cookie_style_explicit() {
+        let param = ShimParameter {
+            name: "session".to_string(),
+            parameter_in: "cookie".to_string(),
+            required: false,
+            schema: None,
+            content: None,
+            style: Some("cookie".to_string()),
+            explode: None,
+            allow_reserved: false,
+            collection_format: None,
+        };
+
+        let processed = process_parameter(&param).unwrap();
+        assert_eq!(processed.source, ParamSource::Cookie);
+        assert_eq!(processed.style, Some(ParamStyle::Cookie));
+        assert_eq!(processed.explode, true);
+    }
+
+    #[test]
+    fn test_cookie_style_rejects_invalid() {
+        let param = ShimParameter {
+            name: "session".to_string(),
+            parameter_in: "cookie".to_string(),
+            required: false,
+            schema: None,
+            content: None,
+            style: Some("simple".to_string()),
+            explode: None,
+            allow_reserved: false,
+            collection_format: None,
+        };
+
+        let err = process_parameter(&param).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("Cookie parameter 'session' must use style 'form' or 'cookie'"));
+    }
+
+    #[test]
+    fn test_header_style_rejects_non_simple() {
+        let param = ShimParameter {
+            name: "X-Thing".to_string(),
+            parameter_in: "header".to_string(),
+            required: false,
+            schema: None,
+            content: None,
+            style: Some("form".to_string()),
+            explode: None,
+            allow_reserved: false,
+            collection_format: None,
+        };
+
+        let err = process_parameter(&param).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("Header parameter 'X-Thing' must use style 'simple'"));
+    }
+
+    #[test]
+    fn test_cookie_style_rejects_non_cookie_location() {
+        let param = ShimParameter {
+            name: "session".to_string(),
+            parameter_in: "query".to_string(),
+            required: false,
+            schema: None,
+            content: None,
+            style: Some("cookie".to_string()),
+            explode: None,
+            allow_reserved: false,
+            collection_format: None,
+        };
+
+        let err = process_parameter(&param).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("uses style 'cookie' but is not in 'cookie'"));
+    }
+
+    #[test]
+    fn test_path_parameter_forces_required() {
+        let schema = ObjectBuilder::new().schema_type(Type::String).build();
+        let param = ShimParameter {
+            name: "id".to_string(),
+            parameter_in: "path".to_string(),
+            required: false,
+            schema: Some(RefOr::T(Schema::Object(schema))),
+            content: None,
+            style: None,
+            explode: None,
+            allow_reserved: false,
+            collection_format: None,
+        };
+
+        let processed = process_parameter(&param).unwrap();
+        assert_eq!(processed.ty, "String");
+    }
+
+    #[test]
     fn test_resolve_swagger2_collection_format() {
         // Case: Query param with collectionFormat="ssv"
         // Expect: Style=SpaceDelimited
@@ -431,6 +571,31 @@ mod tests {
         assert_eq!(resolved[0].name, "limit");
         assert_eq!(resolved[0].style, Some(ParamStyle::Form));
         assert_eq!(resolved[0].explode, false);
+    }
+
+    #[test]
+    fn test_resolve_parameter_ref_with_self() {
+        let components_json = serde_json::json!({
+            "__self": "https://example.com/openapi.yaml",
+            "parameters": {
+                "limitParam": {
+                    "name": "limit",
+                    "in": "query",
+                    "schema": { "type": "integer" }
+                }
+            }
+        });
+
+        let components: ShimComponents = serde_json::from_value(components_json).unwrap();
+
+        let op_params = vec![RefOr::Ref(utoipa::openapi::Ref::new(
+            "https://example.com/openapi.yaml#/components/parameters/limitParam",
+        ))];
+
+        let resolved = resolve_parameters(&op_params, Some(&components)).unwrap();
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].name, "limit");
+        assert_eq!(resolved[0].source, ParamSource::Query);
     }
 
     #[test]

@@ -26,32 +26,48 @@ pub fn map_schema_to_rust_type(schema: &RefOr<Schema>, is_required: bool) -> App
             path.split('/').next_back().unwrap_or("Unknown").to_string()
         }
         RefOr::T(s) => match s {
-            Schema::Object(obj) => match obj.schema_type {
-                SchemaType::Type(Type::Integer) => match &obj.format {
-                    Some(SchemaFormat::KnownFormat(KnownFormat::Int64)) => "i64".to_string(),
-                    _ => "i32".to_string(),
-                },
-                SchemaType::Type(Type::Number) => match &obj.format {
-                    Some(SchemaFormat::KnownFormat(KnownFormat::Float)) => "f32".to_string(),
-                    Some(SchemaFormat::KnownFormat(KnownFormat::Double)) => "f64".to_string(),
-                    // Default for number without format is f64 in Rust
-                    _ => "f64".to_string(),
-                },
-                SchemaType::Type(Type::Boolean) => "bool".to_string(),
-                SchemaType::Type(Type::String) => match &obj.format {
-                    Some(SchemaFormat::KnownFormat(KnownFormat::Uuid)) => "Uuid".to_string(),
-                    Some(SchemaFormat::KnownFormat(KnownFormat::DateTime)) => {
-                        "DateTime".to_string()
+            Schema::Object(obj) => {
+                if is_binary_schema(obj) {
+                    "Vec<u8>".to_string()
+                } else {
+                    match obj.schema_type {
+                        SchemaType::Type(Type::Integer) => match &obj.format {
+                            Some(SchemaFormat::KnownFormat(KnownFormat::Int64)) => {
+                                "i64".to_string()
+                            }
+                            _ => "i32".to_string(),
+                        },
+                        SchemaType::Type(Type::Number) => match &obj.format {
+                            Some(SchemaFormat::KnownFormat(KnownFormat::Float)) => {
+                                "f32".to_string()
+                            }
+                            Some(SchemaFormat::KnownFormat(KnownFormat::Double)) => {
+                                "f64".to_string()
+                            }
+                            // Default for number without format is f64 in Rust
+                            _ => "f64".to_string(),
+                        },
+                        SchemaType::Type(Type::Boolean) => "bool".to_string(),
+                        SchemaType::Type(Type::String) => match &obj.format {
+                            Some(SchemaFormat::KnownFormat(KnownFormat::Uuid)) => {
+                                "Uuid".to_string()
+                            }
+                            Some(SchemaFormat::KnownFormat(KnownFormat::DateTime)) => {
+                                "DateTime".to_string()
+                            }
+                            Some(SchemaFormat::KnownFormat(KnownFormat::Date)) => {
+                                "NaiveDate".to_string()
+                            }
+                            Some(SchemaFormat::KnownFormat(KnownFormat::Password)) => {
+                                "Secret<String>".to_string()
+                            }
+                            _ => "String".to_string(),
+                        },
+                        SchemaType::Type(Type::Array) => "Vec<serde_json::Value>".to_string(),
+                        _ => "serde_json::Value".to_string(),
                     }
-                    Some(SchemaFormat::KnownFormat(KnownFormat::Date)) => "NaiveDate".to_string(),
-                    Some(SchemaFormat::KnownFormat(KnownFormat::Password)) => {
-                        "Secret<String>".to_string()
-                    }
-                    _ => "String".to_string(),
-                },
-                SchemaType::Type(Type::Array) => "Vec<serde_json::Value>".to_string(),
-                _ => "serde_json::Value".to_string(),
-            },
+                }
+            }
             Schema::Array(arr) => match &arr.items {
                 ArrayItems::RefOrSchema(boxed_schema) => {
                     let inner_type = map_schema_to_rust_type(boxed_schema, true)?;
@@ -72,6 +88,23 @@ pub fn map_schema_to_rust_type(schema: &RefOr<Schema>, is_required: bool) -> App
     } else {
         Ok(format!("Option<{}>", type_str))
     }
+}
+
+fn is_binary_schema(obj: &utoipa::openapi::schema::Object) -> bool {
+    if !obj.content_encoding.is_empty() {
+        return matches!(obj.content_encoding.as_str(), "base64" | "base64url");
+    }
+
+    if obj.content_media_type.is_empty() {
+        return false;
+    }
+
+    let media = obj.content_media_type.as_str();
+    media == "application/octet-stream"
+        || media == "application/pdf"
+        || media.starts_with("image/")
+        || media.starts_with("audio/")
+        || media.starts_with("video/")
 }
 
 #[cfg(test)]
@@ -163,6 +196,49 @@ mod tests {
         assert_eq!(
             map_schema_to_rust_type(&RefOr::T(password), true).unwrap(),
             "Secret<String>"
+        );
+    }
+
+    #[test]
+    fn test_map_binary_content_encoding() {
+        let bin = Schema::Object(
+            ObjectBuilder::new()
+                .schema_type(Type::String)
+                .content_encoding("base64")
+                .content_media_type("application/octet-stream")
+                .build(),
+        );
+        assert_eq!(
+            map_schema_to_rust_type(&RefOr::T(bin), true).unwrap(),
+            "Vec<u8>"
+        );
+    }
+
+    #[test]
+    fn test_map_binary_media_type_without_encoding() {
+        let bin = Schema::Object(
+            ObjectBuilder::new()
+                .schema_type(Type::String)
+                .content_media_type("image/png")
+                .build(),
+        );
+        assert_eq!(
+            map_schema_to_rust_type(&RefOr::T(bin), true).unwrap(),
+            "Vec<u8>"
+        );
+    }
+
+    #[test]
+    fn test_map_text_media_type_stays_string() {
+        let text = Schema::Object(
+            ObjectBuilder::new()
+                .schema_type(Type::String)
+                .content_media_type("text/plain")
+                .build(),
+        );
+        assert_eq!(
+            map_schema_to_rust_type(&RefOr::T(text), true).unwrap(),
+            "String"
         );
     }
 

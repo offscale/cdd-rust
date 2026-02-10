@@ -171,19 +171,22 @@ fn process_field(field: &ParsedField) -> (String, Value, bool) {
     // 1. Determine Name
     let name = field.rename.clone().unwrap_or_else(|| field.name.clone());
 
-    // 2. Parse Type
-    let (inner_type, is_optional, is_array) = parse_rust_type(&field.ty);
+    // 2. Parse Type (special-case binary payloads)
+    let (mut schema, is_optional) = if is_binary_type(&field.ty) {
+        (binary_schema_value(), is_optional_type(&field.ty))
+    } else {
+        let (inner_type, is_optional, is_array) = parse_rust_type(&field.ty);
+        let mut schema = map_type_to_schema(&inner_type);
 
-    // 3. Map to JSON Schema Type
-    let mut schema = map_type_to_schema(&inner_type);
-
-    // 4. Wrap in Array if Vector
-    if is_array {
-        schema = json!({
-            "type": "array",
-            "items": schema
-        });
-    }
+        // Wrap in Array if Vector
+        if is_array {
+            schema = json!({
+                "type": "array",
+                "items": schema
+            });
+        }
+        (schema, is_optional)
+    };
 
     // 5. Add Description
     if let Some(desc) = &field.description {
@@ -193,6 +196,41 @@ fn process_field(field: &ParsedField) -> (String, Value, bool) {
     }
 
     (name, schema, is_optional)
+}
+
+fn binary_schema_value() -> Value {
+    json!({
+        "type": "string",
+        "contentEncoding": "base64",
+        "contentMediaType": "application/octet-stream"
+    })
+}
+
+fn is_optional_type(ty: &str) -> bool {
+    let ty = ty.trim();
+    ty.starts_with("Option<") && ty.ends_with('>')
+}
+
+fn is_binary_type(ty: &str) -> bool {
+    let ty = ty.trim();
+    if is_optional_type(ty) {
+        let inner = &ty[7..ty.len() - 1];
+        return is_binary_type(inner);
+    }
+
+    if ty.starts_with("Vec<") && ty.ends_with('>') {
+        let inner = ty[4..ty.len() - 1].trim();
+        return inner == "u8";
+    }
+
+    if ty == "&[u8]" || ty == "[u8]" {
+        return true;
+    }
+
+    ty == "Bytes"
+        || ty == "ByteBuf"
+        || ty.ends_with("::Bytes")
+        || ty.ends_with("::ByteBuf")
 }
 
 /// Parses the Rust type string to identify wrappers like `Option<...>` and `Vec<...>`.
@@ -370,5 +408,37 @@ mod tests {
         let schema = generate_json_schema(&ParsedModel::Enum(en), Some(dialect)).unwrap();
         assert_eq!(schema["$schema"], dialect);
         assert_eq!(schema["title"], "Status");
+    }
+
+    #[test]
+    fn test_generate_binary_vec_u8_schema() {
+        let fields = vec![make_field("payload", "Vec<u8>", None)];
+        let def = ParsedModel::Struct(make_struct("Upload", fields));
+        let schema = generate_json_schema(&def, None).unwrap();
+
+        let payload = &schema["properties"]["payload"];
+        assert_eq!(payload["type"], "string");
+        assert_eq!(payload["contentEncoding"], "base64");
+        assert_eq!(payload["contentMediaType"], "application/octet-stream");
+    }
+
+    #[test]
+    fn test_generate_binary_bytes_schema() {
+        let fields = vec![make_field("data", "bytes::Bytes", None)];
+        let def = ParsedModel::Struct(make_struct("Blob", fields));
+        let schema = generate_json_schema(&def, None).unwrap();
+
+        let data = &schema["properties"]["data"];
+        assert_eq!(data["type"], "string");
+        assert_eq!(data["contentEncoding"], "base64");
+    }
+
+    #[test]
+    fn test_generate_binary_optional_not_required() {
+        let fields = vec![make_field("payload", "Option<Vec<u8>>", None)];
+        let def = ParsedModel::Struct(make_struct("Upload", fields));
+        let schema = generate_json_schema(&def, None).unwrap();
+
+        assert!(schema.get("required").is_none());
     }
 }
