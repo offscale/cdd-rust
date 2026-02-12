@@ -4,7 +4,8 @@
 //!
 //! Logic for generating handler signatures, imports, and function bodies.
 
-use crate::oas::models::{ParsedLink, ResponseHeader};
+use crate::oas::models::ParsedLink;
+use crate::oas::models::ResponseHeader;
 use crate::strategies::actix::links::generate_link_construction;
 
 /// Returns standard imports for Actix handlers.
@@ -12,6 +13,7 @@ pub fn handler_imports() -> String {
     let mut imports = String::new();
     imports.push_str("use actix_web::{web, HttpResponse, Responder};\n");
     imports.push_str("use actix_multipart::Multipart;\n");
+    imports.push_str("use serde::Deserialize;\n");
     imports.push_str("use serde_json::Value;\n");
     imports.push_str("use uuid::Uuid;\n");
     imports.push_str("use chrono::{DateTime, Utc, NaiveDate, NaiveDateTime};\n");
@@ -53,6 +55,12 @@ pub fn handler_signature(
                     "    // .append_header((\"Link\", format!(\"<{{}}>; rel=\\\"{}\\\"\", {})))\n",
                     link.name, var_name
                 ));
+                if let Some(request_body) = &link.request_body {
+                    body.push_str(&format!("    // Link requestBody: {:?}\n", request_body));
+                }
+                if let Some(server_url) = &link.server_url {
+                    body.push_str(&format!("    // Link server override: {}\n", server_url));
+                }
             }
             body.push_str("    // ---------------------\n\n");
         }
@@ -90,13 +98,16 @@ pub fn handler_signature(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::oas::models::{ParsedLink, ResponseHeader, RuntimeExpression};
+    use crate::oas::models::{
+        LinkParamValue, LinkRequestBody, ParsedLink, ResponseHeader, RuntimeExpression,
+    };
     use std::collections::HashMap;
 
     #[test]
     fn test_handler_imports_contains_expected_use() {
         let imports = handler_imports();
         assert!(imports.contains("actix_web::{web, HttpResponse, Responder}"));
+        assert!(imports.contains("use serde::Deserialize;"));
         assert!(imports.contains("chrono::{DateTime, Utc, NaiveDate, NaiveDateTime}"));
     }
 
@@ -120,7 +131,7 @@ mod tests {
         let mut params = HashMap::new();
         params.insert(
             "id".to_string(),
-            RuntimeExpression::new("$response.body#/id"),
+            LinkParamValue::Expression(RuntimeExpression::new("$response.body#/id")),
         );
         let links = vec![ParsedLink {
             name: "User".to_string(),
@@ -128,15 +139,11 @@ mod tests {
             operation_id: None,
             operation_ref: Some("/users/{id}".to_string()),
             parameters: params,
+            request_body: Some(LinkRequestBody::Literal(serde_json::json!("payload"))),
+            server_url: Some("https://api.example.com".to_string()),
         }];
 
-        let sig = handler_signature(
-            "get_user",
-            &[],
-            Some("User"),
-            &headers,
-            Some(&links),
-        );
+        let sig = handler_signature("get_user", &[], Some("User"), &headers, Some(&links));
         assert!(sig.contains("-> actix_web::Result<HttpResponse>"));
         assert!(sig.contains("Required Response Headers"));
         assert!(sig.contains("Generated Links"));

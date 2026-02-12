@@ -16,6 +16,8 @@ pub mod schemas;
 pub(crate) mod validation;
 
 // Re-export public API to maintain compatibility
-pub use models::{BodyFormat, ParamSource, ParsedRoute, RequestBodyDefinition, RouteParam};
+pub use models::{
+    BodyFormat, ContentMediaType, ParamSource, ParsedRoute, RequestBodyDefinition, RouteParam,
+};
 pub use routes::parse_openapi_routes;
 pub use schemas::parse_openapi_spec;

@@ -23,6 +23,11 @@ pub fn query_extractor() -> String {
     "web::Query<Value>".to_string()
 }
 
+/// Generates the type string for strongly typed query extraction.
+pub fn typed_query_extractor(inner_type: &str) -> String {
+    format!("web::Query<{}>", inner_type)
+}
+
 /// Generates the type string for strict Query String extraction (OAS 3.2).
 pub fn query_string_extractor(inner_type: &str) -> String {
     format!("web::Query<{}>", inner_type)
@@ -58,6 +63,16 @@ pub fn multipart_extractor(body_type: &str) -> String {
     } else {
         format!("actix_multipart::form::MultipartForm<{}>", body_type)
     }
+}
+
+/// Generates the type string for Text body extraction.
+pub fn text_extractor(_body_type: &str) -> String {
+    "String".to_string()
+}
+
+/// Generates the type string for Binary body extraction.
+pub fn bytes_extractor(_body_type: &str) -> String {
+    "web::Bytes".to_string()
 }
 
 /// Generates the type string for Security extraction (Guard/ReqData).
@@ -161,7 +176,13 @@ mod tests {
     fn test_extractors() {
         assert_eq!(path_extractor(&["Uuid".into()]), "web::Path<Uuid>");
         assert_eq!(query_string_extractor("Filter"), "web::Query<Filter>");
+        assert_eq!(
+            typed_query_extractor("SearchQuery"),
+            "web::Query<SearchQuery>"
+        );
         assert_eq!(body_extractor("Dto"), "web::Json<Dto>");
+        assert_eq!(text_extractor("String"), "String");
+        assert_eq!(bytes_extractor("Vec<u8>"), "web::Bytes");
     }
 
     #[test]

@@ -165,8 +165,10 @@ mod tests {
             name: "User".into(),
             description: None,
             rename: None,
+            rename_all: None,
             fields: vec![field("id", "i32")],
             is_deprecated: false,
+            deny_unknown_fields: false,
             external_docs: None,
         };
 
@@ -181,8 +183,10 @@ mod tests {
             name: "User".into(),
             description: None,
             rename: None,
+            rename_all: None,
             fields: vec![field("id", "i32"), field("email", "String")],
             is_deprecated: false,
+            deny_unknown_fields: false,
             external_docs: None,
         };
 
@@ -203,8 +207,10 @@ mod tests {
             name: "User".into(),
             description: None,
             rename: None,
+            rename_all: None,
             fields: vec![field("id", "i32")],
             is_deprecated: false,
+            deny_unknown_fields: false,
             external_docs: None,
         };
 
@@ -225,8 +231,10 @@ mod tests {
             name: "User".into(),
             description: None,
             rename: None,
+            rename_all: None,
             fields: vec![field_renamed("user_id", "i32", "id")],
             is_deprecated: false,
+            deny_unknown_fields: false,
             external_docs: None,
         };
 
@@ -241,8 +249,10 @@ mod tests {
             name: "A".into(),
             description: None,
             rename: None,
+            rename_all: None,
             fields: vec![field("x", "Option<String>")],
             is_deprecated: false,
+            deny_unknown_fields: false,
             external_docs: None,
         };
 

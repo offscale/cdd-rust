@@ -22,6 +22,8 @@ use std::path::Path;
 use url::Url;
 use utoipa::openapi::{Components, RefOr, Schema};
 
+const DUMMY_BASE: &str = "http://example.invalid";
+
 /// Context passed down during parsing to handle Base URI resolution.
 #[derive(Clone)]
 pub struct ResolutionContext<'a> {
@@ -34,7 +36,15 @@ pub struct ResolutionContext<'a> {
 impl<'a> ResolutionContext<'a> {
     /// Creates a new context.
     pub fn new(base_uri_str: Option<String>, components: &'a Components) -> Self {
-        let base_uri = base_uri_str.and_then(|s| Url::parse(&s).ok());
+        let base_uri = base_uri_str.and_then(|s| {
+            if let Ok(url) = Url::parse(&s) {
+                return Some(url);
+            }
+            if s.starts_with('/') {
+                return Url::parse(&format!("{}{}", DUMMY_BASE, s)).ok();
+            }
+            None
+        });
         Self {
             base_uri,
             components,
@@ -227,11 +237,7 @@ pub fn resolve_ref_name<'a>(
                 if let Ok(ref_url) = Url::parse(parsed.document) {
                     // Compare scheme, host, path, port
                     // If they match, we treat this as a local resolution utilizing the fragment.
-                    if ref_url.scheme() == base.scheme()
-                        && ref_url.host() == base.host()
-                        && ref_url.path() == base.path()
-                        && ref_url.port() == base.port()
-                    {
+                    if same_document(base, &ref_url) {
                         return resolve_local_fragment(parsed.fragment, components);
                     }
                 }
@@ -239,8 +245,13 @@ pub fn resolve_ref_name<'a>(
             None
         }
         ReferenceKind::Relative => {
-            // Relative references are generally external in this context,
-            // unless we strictly implement "self" matching relative path logic (uncommon for schemas in single file).
+            if let Some(base) = &context.base_uri {
+                if let Ok(resolved_doc) = base.join(parsed.document) {
+                    if same_document(base, &resolved_doc) {
+                        return resolve_local_fragment(parsed.fragment, components);
+                    }
+                }
+            }
             None
         }
     }
@@ -255,7 +266,8 @@ fn resolve_local_fragment<'a>(
         // Frag: /components/schemas/User
         // We only support digging into schemas for code generation purposes.
         if let Some(name) = frag.split('/').next_back() {
-            if let Some(found) = components.schemas.get(name) {
+            let decoded = crate::oas::ref_utils::decode_pointer_segment(name);
+            if let Some(found) = components.schemas.get(&decoded) {
                 return match found {
                     RefOr::T(s) => Some(s),
                     RefOr::Ref(_) => None, // Avoid infinite recursion in simple resolver
@@ -264,6 +276,13 @@ fn resolve_local_fragment<'a>(
         }
     }
     None
+}
+
+fn same_document(left: &Url, right: &Url) -> bool {
+    left.scheme() == right.scheme()
+        && left.host() == right.host()
+        && left.port() == right.port()
+        && left.path() == right.path()
 }
 
 /// Determines the effective Base URI for a document.
@@ -370,6 +389,45 @@ mod tests {
         assert!(
             resolved.is_some(),
             "Should resolve absolute URI matching Base URI"
+        );
+    }
+
+    #[test]
+    fn test_resolve_ref_relative_to_base_uri() {
+        let mut components = Components::new();
+        components.schemas.insert(
+            "User".to_string(),
+            RefOr::T(Schema::Object(utoipa::openapi::schema::Object::default())),
+        );
+
+        let ctx = ResolutionContext::new(
+            Some("https://api.example.com/v1/openapi.yaml".to_string()),
+            &components,
+        );
+
+        let ref_uri = "openapi.yaml#/components/schemas/User";
+        let resolved = resolve_ref_name(ref_uri, &ctx);
+        assert!(
+            resolved.is_some(),
+            "Should resolve relative ref against Base URI"
+        );
+    }
+
+    #[test]
+    fn test_resolve_ref_relative_to_absolute_path_self() {
+        let mut components = Components::new();
+        components.schemas.insert(
+            "User".to_string(),
+            RefOr::T(Schema::Object(utoipa::openapi::schema::Object::default())),
+        );
+
+        let ctx = ResolutionContext::new(Some("/api/openapi.yaml".to_string()), &components);
+
+        let ref_uri = "openapi.yaml#/components/schemas/User";
+        let resolved = resolve_ref_name(ref_uri, &ctx);
+        assert!(
+            resolved.is_some(),
+            "Should resolve relative ref against absolute-path $self"
         );
     }
 

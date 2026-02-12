@@ -25,7 +25,11 @@ async fn main() -> std::io::Result<()> {
     let server = build_server(listener)?;
 
     if std::env::var("CDD_WEB_ONESHOT").is_ok() {
-        server.handle().stop(true).await;
+        let handle = server.handle();
+        let server_task = actix_web::rt::spawn(server);
+        handle.stop(true).await;
+        let _ = server_task.await;
+        return Ok(());
     }
 
     server.await

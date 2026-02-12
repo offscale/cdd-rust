@@ -212,6 +212,13 @@ fn generate_enum_body(en: &ParsedEnum) -> String {
             }
         }
     }
+    if let Some(default_mapping) = &en.discriminator_default_mapping {
+        if !default_mapping.is_empty() {
+            code.push_str("///\n/// **Discriminator Default Mapping:** ");
+            code.push_str(default_mapping);
+            code.push('\n');
+        }
+    }
 
     if en.is_deprecated {
         code.push_str("#[deprecated]\n");
@@ -323,8 +330,10 @@ mod tests {
             name: "Simple".into(),
             description: Some("A simple struct".into()),
             rename: None,
+            rename_all: None,
             fields: vec![field("id", "i32")],
             is_deprecated: false,
+            deny_unknown_fields: false,
             external_docs: None,
         };
 
@@ -345,6 +354,7 @@ mod tests {
             name: "Oldie".into(),
             description: Some("Desc".into()),
             rename: None,
+            rename_all: None,
             fields: vec![ParsedField {
                 name: "f".into(),
                 ty: "i32".into(),
@@ -355,6 +365,7 @@ mod tests {
                 external_docs: None,
             }],
             is_deprecated: true,
+            deny_unknown_fields: false,
             external_docs: Some(docs),
         };
 
@@ -374,6 +385,7 @@ mod tests {
             name: "Pet".into(),
             description: Some("Polymorphic pet".into()),
             rename: None,
+            rename_all: None,
             tag: Some("type".into()),
             untagged: false,
             is_deprecated: false,
@@ -387,6 +399,7 @@ mod tests {
                 is_deprecated: false,
             }],
             discriminator_mapping: None,
+            discriminator_default_mapping: None,
         };
 
         let code = generate_dtos(&[ParsedModel::Enum(en)]);
@@ -409,17 +422,20 @@ mod tests {
             name: "MappedEnum".into(),
             description: None,
             rename: None,
+            rename_all: None,
             tag: Some("kind".into()),
             untagged: false,
             is_deprecated: false,
             external_docs: None,
             variants: vec![],
             discriminator_mapping: Some(mapping),
+            discriminator_default_mapping: Some("Other".to_string()),
         };
 
         let code = generate_dtos(&[ParsedModel::Enum(en)]);
         assert!(code.contains("/// **Discriminator Mapping:**"));
         assert!(code.contains("/// * `mapped_val` -> `#/components/schemas/Mapped`"));
+        assert!(code.contains("/// **Discriminator Default Mapping:** Other"));
     }
 
     #[test]
@@ -429,6 +445,7 @@ mod tests {
             name: "IntOrString".into(),
             description: None,
             rename: None,
+            rename_all: None,
             tag: None,
             untagged: true,
             is_deprecated: false,
@@ -452,6 +469,7 @@ mod tests {
                 },
             ],
             discriminator_mapping: None,
+            discriminator_default_mapping: None,
         };
 
         let code = generate_dtos(&[ParsedModel::Enum(en)]);
@@ -469,7 +487,9 @@ mod tests {
             name: "Merged".into(),
             description: None,
             rename: None,
+            rename_all: None,
             is_deprecated: false,
+            deny_unknown_fields: false,
             external_docs: None,
             fields: vec![field("id", "Uuid"), field("meta", "serde_json::Value")],
         };
@@ -489,7 +509,9 @@ mod tests {
             name: "Dict".into(),
             description: None,
             rename: None,
+            rename_all: None,
             is_deprecated: false,
+            deny_unknown_fields: false,
             external_docs: None,
             fields: vec![
                 field("static_field", "String"),

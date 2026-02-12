@@ -87,33 +87,47 @@ fn collect_fields_recursive(
 
                 // 2. Additional Properties (Map)
                 if let Some(add_props) = &obj.additional_properties {
-                    // Dereference the Box to get the enum
-                    let inner_type = match &**add_props {
+                    match &**add_props {
+                        // additionalProperties: false -> no extra field (deny unknowns)
+                        utoipa::openapi::schema::AdditionalProperties::FreeForm(false) => {}
                         // additionalProperties: true -> HashMap<String, Value>
                         utoipa::openapi::schema::AdditionalProperties::FreeForm(true) => {
-                            "serde_json::Value".to_string()
+                            let map_type =
+                                "std::collections::HashMap<String, serde_json::Value>".to_string();
+                            let parsed_field = ParsedField {
+                                name: "additional_properties".to_string(),
+                                ty: map_type,
+                                description: Some("Captured additional properties".to_string()),
+                                rename: None,
+                                is_skipped: false,
+                                is_deprecated: false,
+                                external_docs: None,
+                            };
+
+                            if !fields.iter().any(|f| f.name == "additional_properties") {
+                                fields.push(parsed_field);
+                            }
                         }
                         // additionalProperties: { schema } -> HashMap<String, SchemaType>
                         utoipa::openapi::schema::AdditionalProperties::RefOr(schema) => {
-                            map_schema_to_rust_type(schema, true)?
+                            let inner_type = map_schema_to_rust_type(schema, true)?;
+                            let map_type =
+                                format!("std::collections::HashMap<String, {}>", inner_type);
+
+                            let parsed_field = ParsedField {
+                                name: "additional_properties".to_string(),
+                                ty: map_type,
+                                description: Some("Captured additional properties".to_string()),
+                                rename: None,
+                                is_skipped: false,
+                                is_deprecated: false,
+                                external_docs: None,
+                            };
+
+                            if !fields.iter().any(|f| f.name == "additional_properties") {
+                                fields.push(parsed_field);
+                            }
                         }
-                        _ => "serde_json::Value".to_string(), // default safe fallback
-                    };
-
-                    let map_type = format!("std::collections::HashMap<String, {}>", inner_type);
-
-                    let parsed_field = ParsedField {
-                        name: "additional_properties".to_string(),
-                        ty: map_type,
-                        description: Some("Captured additional properties".to_string()),
-                        rename: None,
-                        is_skipped: false,
-                        is_deprecated: false,
-                        external_docs: None,
-                    };
-
-                    if !fields.iter().any(|f| f.name == "additional_properties") {
-                        fields.push(parsed_field);
                     }
                 }
             }

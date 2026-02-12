@@ -16,7 +16,7 @@ regex = "^1.12"
 
 # JSON/YAML Output & Parsing
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "^1.0"
+serde_json = { version = "^1.0", features = ["preserve_order"] }
 serde_yaml = "^0.9"
 
 # OpenAPI definition types
@@ -25,3 +25,4 @@ indexmap = "^2.12"
 
 # Strict RFC 3986 URI resolution
 url = "2.5"
+percent-encoding = "2.3"

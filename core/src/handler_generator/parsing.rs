@@ -24,6 +24,18 @@ pub(crate) fn extract_fn_names(source: &str) -> HashSet<String> {
         .collect()
 }
 
+/// Parses the source using rust-analyzer syntax tree to find all struct names.
+pub(crate) fn extract_struct_names(source: &str) -> HashSet<String> {
+    let parse = SourceFile::parse(source, Edition::Edition2021);
+    parse
+        .tree()
+        .syntax()
+        .descendants()
+        .filter_map(ast::Struct::cast)
+        .filter_map(|s| s.name().map(|n| n.text().to_string()))
+        .collect()
+}
+
 /// Extracts parameter names from a path template like `/users/{id}`.
 pub(crate) fn extract_path_vars(path: &str) -> Vec<String> {
     let re = Regex::new(r"\{([^}]+)}").expect("Invalid regex constant");
@@ -66,6 +78,40 @@ pub(crate) fn to_snake_case(s: &str) -> String {
     result.replace('-', "_")
 }
 
+/// Converts a string to PascalCase for use as a type name.
+pub(crate) fn to_pascal_case(s: &str) -> String {
+    let mut out = String::new();
+    let mut capitalize = true;
+
+    for ch in s.chars() {
+        if ch.is_ascii_alphanumeric() {
+            if capitalize {
+                out.extend(ch.to_uppercase());
+                capitalize = false;
+            } else {
+                out.extend(ch.to_lowercase());
+            }
+        } else {
+            capitalize = true;
+        }
+    }
+
+    if out.is_empty() {
+        out.push_str("Query");
+    }
+
+    if out
+        .chars()
+        .next()
+        .map(|c| c.is_ascii_digit())
+        .unwrap_or(false)
+    {
+        out.insert(0, 'Q');
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,5 +133,23 @@ mod tests {
         assert_eq!(to_snake_case("id"), "id");
         assert_eq!(to_snake_case("camelCaseTemp"), "camel_case_temp");
         assert_eq!(to_snake_case("X-Forwarded-For"), "x_forwarded_for");
+    }
+
+    #[test]
+    fn test_extract_struct_names() {
+        let code = r#"
+            pub struct QueryParams {}
+            struct Internal;
+        "#;
+        let names = extract_struct_names(code);
+        assert!(names.contains("QueryParams"));
+        assert!(names.contains("Internal"));
+    }
+
+    #[test]
+    fn test_pascal_case_conversion() {
+        assert_eq!(to_pascal_case("get_user"), "GetUser");
+        assert_eq!(to_pascal_case("querystring"), "Querystring");
+        assert_eq!(to_pascal_case("x-token"), "XToken");
     }
 }

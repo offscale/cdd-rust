@@ -24,6 +24,8 @@ existing codebase.
     * `format: uuid` ➔ `uuid::Uuid`
     * `format: date-time` ➔ `chrono::DateTime<Utc>`
     * `format: password` ➔ `Secret<String>`
+* **Typed Queries:** Query parameters are generated as dedicated structs (with `serde` renames) and injected into
+  handler signatures for strong typing.
 
 ### 2. Synchronization (Database ➔ Rust ➔ OpenAPI)
 
@@ -42,8 +44,8 @@ verify compliance with the spec.
 
 * **Smart Mocking:** Automatically creates dummy values for Path, Query, and Body parameters based on strict type
   definitions.
-* **Runtime Expression Resolution:** fully supports OAS 3.2 runtime expressions (e.g., `{$request.body#/id}`) for
-  HATEOAS link validation.
+* **Runtime Expression Resolution:** supports OAS 3.2 runtime expressions and embedded templates
+  (e.g., `{$request.body#/id}` and `https://example.com?x={$request.path.id}`) for HATEOAS link validation.
 * **Schema Validation:** Verifies that API responses strictly match the JSON Schema defined in your OpenAPI document
   using `jsonschema`.
 
@@ -204,6 +206,25 @@ This generates a test file that:
 3. Sensibly mocks requests.
 4. Validates that your Rust implementation returns the headers and bodies defined in the YAML.
 
+### 3. Schema Generation (Rust ➔ OpenAPI)
+
+Emit a minimal OpenAPI 3.2 document from a Rust struct/enum with optional `info` metadata.
+
+```bash
+cargo run -p cdd-cli -- schema-gen \
+  --source-path web/src/models/user.rs \
+  --name User \
+  --openapi \
+  --info-title "User API" \
+  --info-version "1.0.0" \
+  --info-summary "User service schema" \
+  --info-terms-of-service "https://example.com/terms" \
+  --info-contact-name "API Support" \
+  --info-contact-email "support@example.com" \
+  --info-license-name "Apache 2.0" \
+  --info-license-identifier "Apache-2.0"
+```
+
 ## 🛠 OpenAPI Compliance
 
 `cdd-rust` features a highly compliant custom parser found in `core/src/oas`.
@@ -211,12 +232,44 @@ This generates a test file that:
 * **Versions:** Supports OpenAPI 3.0 and 3.1 directly.
 * **Compatibility:** Implements shims for **OpenAPI 3.2**, specifically handling the `$self` keyword for Base URI
   determination (Appendix F) and downgrading version strings for library compatibility.
-* **Validation:** Enforces required `info`, leading-slash `paths`, unique `operationId` values, templated path
-  conflicts, component key naming rules, and rejects `additionalOperations` that reuse reserved HTTP methods.
-* **Resolution:** Full support for local, relative, and remote `$ref` resolution.
+* **Validation:** Enforces required `info`, URI/email formatting for Info/Contact/License, leading-slash `paths`,
+  unique `operationId` values, templated path conflicts, component key naming rules, response status code keys,
+  security scheme definitions, security requirement resolution, non-empty `response.description` and `requestBody.content`,
+  mutual exclusivity of `example` vs `examples` for parameters/headers, sequential-only use of `itemSchema`,
+  and rejects `additionalOperations` that reuse reserved HTTP methods.
+* **Resolution:** Local `$ref` resolution plus base-URI-aware absolute/relative self-references (no external fetch).
+* **Relative Server URLs:** Resolves relative `servers.url` values (e.g., `.`, `./v1`, `v1`) into base paths with RFC3986 dot-segment normalization.
 * **Polymorphism:** handles `oneOf`, `anyOf`, and `allOf` (flattening) into Rust Enums and Structs.
+* **Discriminator Defaults:** supports `discriminator.defaultMapping` for OAS 3.2 polymorphic schemas.
 * **Extractors:** Maps OAS parameters to backend-specific extractors (e.g., `web::Query`, `web::Path`, `web::Json`,
   `SecurityScheme`).
+* **Media Types:** Recognizes vendor `+json` media types, `text/*`, and binary request bodies with dedicated extractors.
+* **Media Type References:** Resolves `components.mediaTypes` `$ref` entries inside `content` (request bodies, responses, and headers).
+* **Sequential Multipart:** supports `multipart/mixed` and `multipart/byteranges` `itemSchema` normalization.
+* **Positional Encoding:** parses `prefixEncoding` / `itemEncoding` for multipart media types (OAS 3.2).
+* **Examples:** Uses parameter `content` examples when generating contract tests, and supports
+  `dataValue` / `serializedValue` / `externalValue` for request body examples (OAS 3.2).
+* **Sequential Media Types:** Supports `itemSchema` for sequential JSON request bodies (e.g., `jsonl`, `ndjson`) and maps to `Vec<T>`.
+* **Sequential Response Types:** Uses `itemSchema` for sequential media types (including `text/event-stream` and `multipart/*`) to infer `Vec<T>` when no `schema` is present.
+* **Response Validation:** Contract tests validate JSON, vendor `+json`, sequential JSON, and `text/event-stream` responses.
+* **Response Headers:** Resolves response header `$ref` and `content` definitions when extracting response metadata.
+* **Reference Overrides:** Honors Reference Object `description` overrides for responses during validation and resolution.
+* **Querystring:** Serializes `querystring` params
+  as JSON when the media type is `application/json` (RFC3986-encoded).
+* **Header/Cookie Params:** Contract tests serialize header/cookie parameters using OAS `style`/`explode` rules or `content` media types.
+* **Header Validation:** Enforces Header Object constraints (`schema` vs `content`, `style: simple`, no `allowEmptyValue`), and ignores `Content-Type` headers.
+* **Media Type Examples:** Validates `example` vs `examples` mutual exclusivity in request/response content.
+* **Boolean Schemas:** Handles `schema: true/false` in request/response bodies (rejects required `false` bodies).
+* **Style Validation:** Enforces type constraints for `deepObject`, `spaceDelimited`, and `pipeDelimited` parameter styles.
+* **Schema ExternalDocs:** emits `externalDocs` metadata when generating OpenAPI schemas from Rust models.
+* **Serde Mapping:** respects `rename_all` and `deny_unknown_fields` when generating OpenAPI schemas from Rust models.
+* **Link Servers:** Applies Link Object `server` overrides (including defaulted variables) when generating HATEOAS link construction code.
+* **Link Validation:** Resolves `operationRef` pointers to concrete path+method targets and errors on unknown `operationId` links.
+* **Link Validation (Local Ref):** Errors when a local `operationRef` fails to resolve to a known operation.
+* **Link Object Validation:** Enforces exactly one of `operationId` or `operationRef`, validates Link Object `server` definitions, enforces link name key patterns, and detects link `$ref` cycles.
+* **Link Parsing:** Accepts normalized snake_case link keys (`operation_id`, `operation_ref`, `request_body`) during YAML preprocessing.
+* **Contract Tests:** Skips webhook routes (inbound) during test generation.
+* **Callbacks:** Enforces `operationId` uniqueness across callbacks and top-level operations.
 
 ## Developer Guide
 

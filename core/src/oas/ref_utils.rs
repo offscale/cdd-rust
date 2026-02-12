@@ -9,6 +9,7 @@
 //! document part matches the current document's `$self` URI.
 
 use crate::oas::schemas::refs::{parse_reference, ReferenceKind};
+use percent_encoding::percent_decode_str;
 use std::path::Path;
 use url::Url;
 
@@ -64,7 +65,10 @@ pub(crate) fn extract_component_name(
 
 /// Decodes a JSON Pointer segment (handles `~1` and `~0`).
 pub(crate) fn decode_pointer_segment(segment: &str) -> String {
-    segment.replace("~1", "/").replace("~0", "~")
+    let decoded = segment.replace("~1", "/").replace("~0", "~");
+    percent_decode_str(&decoded)
+        .decode_utf8_lossy()
+        .into_owned()
 }
 
 fn ref_doc_matches_self(ref_doc: &str, self_uri: &str) -> bool {
@@ -129,6 +133,13 @@ mod tests {
         let ref_str = "https://example.com/openapi.yaml#/components/parameters/Limit";
         let name = extract_component_name(ref_str, self_uri, "parameters").unwrap();
         assert_eq!(name, "Limit");
+    }
+
+    #[test]
+    fn test_decode_pointer_segment_percent_encoding() {
+        let encoded = "User%20Profile~1details";
+        let decoded = decode_pointer_segment(encoded);
+        assert_eq!(decoded, "User Profile/details");
     }
 
     #[test]

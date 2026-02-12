@@ -7,6 +7,7 @@
 
 use crate::oas::models::{ParsedLink, ResponseHeader, SecurityRequirement};
 use crate::oas::ParsedRoute;
+use crate::oas::RequestBodyDefinition;
 
 /// A strategy trait for decoupling framework-specific code generation.
 ///
@@ -47,6 +48,16 @@ pub trait BackendStrategy {
     /// Generates the type string for query parameter extraction.
     fn query_extractor(&self) -> String;
 
+    /// Generates the type string for strongly typed query parameter extraction.
+    ///
+    /// # Arguments
+    ///
+    /// * `inner_type` - The Rust struct type representing query parameters.
+    fn typed_query_extractor(&self, inner_type: &str) -> String {
+        let _ = inner_type;
+        self.query_extractor()
+    }
+
     /// Generates the type string for the entire Query String extraction (OAS 3.2).
     ///
     /// # Arguments
@@ -81,6 +92,20 @@ pub trait BackendStrategy {
     /// * `body_type` - The Rust type of the body (e.g. `UploadForm`).
     fn multipart_extractor(&self, body_type: &str) -> String;
 
+    /// Generates the type string for Text request body extraction.
+    ///
+    /// # Arguments
+    ///
+    /// * `body_type` - The Rust type of the body (e.g. `String`).
+    fn text_extractor(&self, body_type: &str) -> String;
+
+    /// Generates the type string for Binary request body extraction.
+    ///
+    /// # Arguments
+    ///
+    /// * `body_type` - The Rust type of the body (e.g. `Vec<u8>`).
+    fn bytes_extractor(&self, body_type: &str) -> String;
+
     /// Generates the type string for a Security extraction/Guard.
     /// Used when `security: [{...}]` is present.
     /// Expects a placeholder type name (e.g. `UserPrincipal` or generic `Auth`)
@@ -110,8 +135,10 @@ pub trait BackendStrategy {
     /// * `app_factory` - code string for the app factory (e.g. `crate::create_app`).
     fn test_app_init(&self, app_factory: &str) -> String;
 
-    /// Returns the code snippet that attaches a dummy JSON body to the request.
-    fn test_body_setup_code(&self) -> String;
+    /// Returns the code snippet that attaches a dummy body to the request.
+    ///
+    /// * `body` - The parsed request body definition.
+    fn test_body_setup_code(&self, body: &RequestBodyDefinition) -> String;
 
     /// Returns code to build the request object.
     ///

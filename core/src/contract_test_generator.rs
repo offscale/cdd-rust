@@ -3,8 +3,11 @@
 //! # Contract Test Generator
 //!
 //! Generates integration tests that verify API implementation against the OpenAPI specification.
+//! Webhook routes are skipped because they are inbound and not callable by the API client.
 
 use crate::error::AppResult;
+use crate::oas::models::RouteKind;
+use crate::oas::models::{ContentMediaType, ParamStyle};
 use crate::oas::{ParamSource, ParsedRoute};
 use crate::strategies::BackendStrategy;
 
@@ -29,6 +32,9 @@ pub fn generate_contract_tests_file(
     ));
 
     for route in routes {
+        if matches!(route.kind, RouteKind::Webhook) {
+            continue;
+        }
         code.push_str(&generate_test_fn(route, app_factory, strategy));
         code.push('\n');
     }
@@ -53,15 +59,7 @@ fn generate_test_fn(
         route.path.clone()
     };
 
-    let mut uri = full_path_template.clone();
-
-    for param in &route.params {
-        if param.source == ParamSource::Path {
-            let placeholder = format!("{{{}}}", param.name);
-            let dummy = get_dummy_value(&param.ty);
-            uri = uri.replace(&placeholder, &dummy);
-        }
-    }
+    let mut uri = apply_path_params(&full_path_template, &route.params);
 
     if let Some(qs_param) = route
         .params
@@ -74,24 +72,25 @@ fn generate_test_fn(
             uri.push_str(&raw_query);
         }
     } else {
-        let query_params: Vec<String> = route
-            .params
-            .iter()
-            .filter(|p| p.source == ParamSource::Query)
-            .map(|p| format!("{}={}", p.name, get_dummy_value(&p.ty)))
-            .collect();
-
-        if !query_params.is_empty() {
+        let query = serialize_query_params(&route.params);
+        if !query.is_empty() {
             uri.push('?');
-            uri.push_str(&query_params.join("&"));
+            uri.push_str(&query);
         }
     }
 
-    let body_setup = if route.request_body.is_some() {
-        strategy.test_body_setup_code()
+    let body_setup = if let Some(def) = route.request_body.as_ref() {
+        if def.required {
+            strategy.test_body_setup_code(def)
+        } else {
+            String::new()
+        }
     } else {
         String::new()
     };
+    let header_setup = build_header_setup(route);
+    let cookie_setup = build_cookie_setup(route);
+    let request_setup = format!("{}{}{}", body_setup, header_setup, cookie_setup);
 
     let mut code = String::new();
 
@@ -103,7 +102,7 @@ fn generate_test_fn(
     code.push('\n');
 
     code.push_str("    // 2. Create Request\n");
-    code.push_str(&strategy.test_request_builder(&route.method, &uri, &body_setup));
+    code.push_str(&strategy.test_request_builder(&route.method, &uri, &request_setup));
     code.push('\n');
 
     code.push_str("    // 3. Call Service\n");
@@ -125,23 +124,726 @@ fn generate_test_fn(
     code
 }
 
-fn get_dummy_value(ty: &str) -> String {
+fn dummy_json_value(ty: &str) -> serde_json::Value {
     if ty.contains("Uuid") {
-        "00000000-0000-0000-0000-000000000000".to_string()
+        serde_json::Value::String("00000000-0000-0000-0000-000000000000".to_string())
     } else if ty.contains("i32") || ty.contains("i64") || ty.contains("Integer") {
-        "1".to_string()
+        serde_json::Value::Number(serde_json::Number::from(1))
     } else if ty.contains("bool") || ty.contains("Boolean") {
-        "true".to_string()
+        serde_json::Value::Bool(true)
     } else if ty.contains("Date") {
-        "2023-01-01T00:00:00Z".to_string()
+        serde_json::Value::String("2023-01-01T00:00:00Z".to_string())
     } else {
-        "test_val".to_string()
+        serde_json::Value::String("test_val".to_string())
     }
 }
 
+fn apply_path_params(path_template: &str, params: &[crate::oas::RouteParam]) -> String {
+    let mut uri = path_template.to_string();
+    for param in params.iter().filter(|p| p.source == ParamSource::Path) {
+        let placeholder = format!("{{{}}}", param.name);
+        let serialized = serialize_path_param(param);
+        uri = uri.replace(&placeholder, &serialized);
+    }
+    uri
+}
+
+fn serialize_path_param(param: &crate::oas::RouteParam) -> String {
+    let value = param
+        .example
+        .clone()
+        .unwrap_or_else(|| dummy_json_value(&param.ty));
+    let style = param.style.clone().unwrap_or(ParamStyle::Simple);
+    let explode = param.explode;
+    let allow_reserved = param.allow_reserved;
+
+    match value {
+        serde_json::Value::Array(arr) => {
+            serialize_path_array(&param.name, &style, explode, allow_reserved, &arr)
+        }
+        serde_json::Value::Object(map) => {
+            serialize_path_object(&param.name, &style, explode, allow_reserved, &map)
+        }
+        _ => serialize_path_primitive(&param.name, &style, allow_reserved, &value),
+    }
+}
+
+fn serialize_path_primitive(
+    name: &str,
+    style: &ParamStyle,
+    allow_reserved: bool,
+    value: &serde_json::Value,
+) -> String {
+    let encoded = encode_path_value(&example_to_string(value), allow_reserved);
+    match style {
+        ParamStyle::Matrix => format!(";{}={}", encode_path_name(name), encoded),
+        ParamStyle::Label => format!(".{}", encoded),
+        _ => encoded,
+    }
+}
+
+fn serialize_path_array(
+    name: &str,
+    style: &ParamStyle,
+    explode: bool,
+    allow_reserved: bool,
+    items: &[serde_json::Value],
+) -> String {
+    if items.is_empty() {
+        return String::new();
+    }
+
+    let encoded_items = items
+        .iter()
+        .map(|v| encode_path_value(&example_to_string(v), allow_reserved))
+        .collect::<Vec<_>>();
+
+    match style {
+        ParamStyle::Matrix => {
+            if explode {
+                encoded_items
+                    .iter()
+                    .map(|v| format!(";{}={}", encode_path_name(name), v))
+                    .collect::<Vec<_>>()
+                    .join("")
+            } else {
+                format!(";{}={}", encode_path_name(name), encoded_items.join(","))
+            }
+        }
+        ParamStyle::Label => {
+            let joiner = if explode { "." } else { "," };
+            format!(".{}", encoded_items.join(joiner))
+        }
+        _ => encoded_items.join(","),
+    }
+}
+
+fn serialize_path_object(
+    name: &str,
+    style: &ParamStyle,
+    explode: bool,
+    allow_reserved: bool,
+    map: &serde_json::Map<String, serde_json::Value>,
+) -> String {
+    if map.is_empty() {
+        return String::new();
+    }
+
+    let encoded_pairs = map
+        .iter()
+        .map(|(k, v)| {
+            (
+                encode_path_name(k),
+                encode_path_value(&example_to_string(v), allow_reserved),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    match style {
+        ParamStyle::Matrix => {
+            if explode {
+                encoded_pairs
+                    .iter()
+                    .map(|(k, v)| format!(";{}={}", k, v))
+                    .collect::<Vec<_>>()
+                    .join("")
+            } else {
+                let joined = encoded_pairs
+                    .iter()
+                    .flat_map(|(k, v)| [k.as_str(), v.as_str()])
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!(";{}={}", encode_path_name(name), joined)
+            }
+        }
+        ParamStyle::Label => {
+            if explode {
+                let joined = encoded_pairs
+                    .iter()
+                    .map(|(k, v)| format!("{}={}", k, v))
+                    .collect::<Vec<_>>()
+                    .join(".");
+                format!(".{}", joined)
+            } else {
+                let joined = encoded_pairs
+                    .iter()
+                    .flat_map(|(k, v)| [k.as_str(), v.as_str()])
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!(".{}", joined)
+            }
+        }
+        _ => {
+            if explode {
+                encoded_pairs
+                    .iter()
+                    .map(|(k, v)| format!("{}={}", k, v))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            } else {
+                encoded_pairs
+                    .iter()
+                    .flat_map(|(k, v)| [k.as_str(), v.as_str()])
+                    .collect::<Vec<_>>()
+                    .join(",")
+            }
+        }
+    }
+}
+
+fn encode_path_name(name: &str) -> String {
+    encode_rfc3986(name, false)
+}
+
+fn encode_path_value(value: &str, allow_reserved: bool) -> String {
+    encode_rfc3986(value, allow_reserved)
+}
+
 fn build_querystring_value(param: &crate::oas::RouteParam) -> String {
-    let value = get_dummy_value(&param.ty);
-    format!("{}={}", param.name, value)
+    let value = param
+        .example
+        .clone()
+        .unwrap_or_else(|| dummy_json_value(&param.ty));
+
+    if matches!(
+        param.content_media_type,
+        None | Some(crate::oas::ContentMediaType::FormUrlEncoded)
+    ) {
+        return serialize_form_urlencoded_querystring(&value);
+    }
+
+    match param.content_media_type {
+        Some(crate::oas::ContentMediaType::Json) => {
+            let serialized = serde_json::to_string(&value).unwrap_or_else(|_| value.to_string());
+            encode_rfc3986(&serialized, false)
+        }
+        Some(crate::oas::ContentMediaType::Other(_)) | None => {
+            let raw = match value {
+                serde_json::Value::String(s) => s,
+                _ => value.to_string(),
+            };
+            encode_rfc3986(&raw, false)
+        }
+        Some(crate::oas::ContentMediaType::FormUrlEncoded) => {
+            serialize_form_urlencoded_querystring(&value)
+        }
+    }
+}
+
+fn serialize_content_value(media_type: &ContentMediaType, value: &serde_json::Value) -> String {
+    match media_type {
+        ContentMediaType::Json => {
+            serde_json::to_string(value).unwrap_or_else(|_| value.to_string())
+        }
+        ContentMediaType::FormUrlEncoded => serialize_form_urlencoded_querystring(value),
+        ContentMediaType::Other(_) => match value {
+            serde_json::Value::String(s) => s.clone(),
+            _ => value.to_string(),
+        },
+    }
+}
+
+fn example_to_string(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Null => "null".to_string(),
+        _ => value.to_string(),
+    }
+}
+
+fn rust_string_literal(value: &str) -> String {
+    format!("{:?}", value)
+}
+
+fn serialize_query_params(params: &[crate::oas::RouteParam]) -> String {
+    let mut pairs = Vec::new();
+    for param in params.iter().filter(|p| p.source == ParamSource::Query) {
+        pairs.extend(serialize_query_param(param));
+    }
+    pairs.join("&")
+}
+
+fn build_header_setup(route: &ParsedRoute) -> String {
+    let mut setup = String::new();
+    for param in route
+        .params
+        .iter()
+        .filter(|p| p.source == ParamSource::Header)
+    {
+        let serialized = serialize_header_param(param);
+        let literal = rust_string_literal(&serialized);
+        setup.push_str(&format!(
+            "        .insert_header((\"{}\", {}))\n",
+            param.name, literal
+        ));
+    }
+    setup
+}
+
+fn build_cookie_setup(route: &ParsedRoute) -> String {
+    let cookie_header = serialize_cookie_params(&route.params);
+    if cookie_header.is_empty() {
+        return String::new();
+    }
+
+    let literal = rust_string_literal(&cookie_header);
+    format!("        .insert_header((\"Cookie\", {}))\n", literal)
+}
+
+fn serialize_cookie_params(params: &[crate::oas::RouteParam]) -> String {
+    let mut pairs = Vec::new();
+    for param in params.iter().filter(|p| p.source == ParamSource::Cookie) {
+        pairs.extend(serialize_cookie_param(param));
+    }
+    pairs.join("; ")
+}
+
+fn serialize_header_param(param: &crate::oas::RouteParam) -> String {
+    let value = param
+        .example
+        .clone()
+        .unwrap_or_else(|| dummy_json_value(&param.ty));
+    if let Some(media_type) = param.content_media_type.as_ref() {
+        return serialize_content_value(media_type, &value);
+    }
+    let style = param.style.clone().unwrap_or(ParamStyle::Simple);
+
+    match value {
+        serde_json::Value::Array(arr) => serialize_header_array(&style, param.explode, &arr),
+        serde_json::Value::Object(map) => serialize_header_object(&style, param.explode, &map),
+        _ => example_to_string(&value),
+    }
+}
+
+fn serialize_header_array(
+    _style: &ParamStyle,
+    _explode: bool,
+    items: &[serde_json::Value],
+) -> String {
+    if items.is_empty() {
+        return String::new();
+    }
+
+    items
+        .iter()
+        .map(example_to_string)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn serialize_header_object(
+    _style: &ParamStyle,
+    explode: bool,
+    map: &serde_json::Map<String, serde_json::Value>,
+) -> String {
+    if map.is_empty() {
+        return String::new();
+    }
+
+    if explode {
+        map.iter()
+            .map(|(k, v)| format!("{}={}", k, example_to_string(v)))
+            .collect::<Vec<_>>()
+            .join(",")
+    } else {
+        map.iter()
+            .flat_map(|(k, v)| [k.clone(), example_to_string(v)])
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+}
+
+fn serialize_cookie_param(param: &crate::oas::RouteParam) -> Vec<String> {
+    let value = param
+        .example
+        .clone()
+        .unwrap_or_else(|| dummy_json_value(&param.ty));
+    if let Some(media_type) = param.content_media_type.as_ref() {
+        let serialized = serialize_content_value(media_type, &value);
+        return vec![format!("{}={}", param.name, serialized)];
+    }
+    let style = param.style.clone().unwrap_or(ParamStyle::Cookie);
+
+    match value {
+        serde_json::Value::Array(arr) => {
+            serialize_cookie_array(&param.name, &style, param.explode, &arr)
+        }
+        serde_json::Value::Object(map) => {
+            serialize_cookie_object(&param.name, &style, param.explode, &map)
+        }
+        _ => vec![format!("{}={}", param.name, example_to_string(&value))],
+    }
+}
+
+fn serialize_cookie_array(
+    name: &str,
+    style: &ParamStyle,
+    explode: bool,
+    items: &[serde_json::Value],
+) -> Vec<String> {
+    if items.is_empty() {
+        return Vec::new();
+    }
+
+    match style {
+        ParamStyle::SpaceDelimited => {
+            let joined = items
+                .iter()
+                .map(example_to_string)
+                .collect::<Vec<_>>()
+                .join(" ");
+            vec![format!("{}={}", name, joined)]
+        }
+        ParamStyle::PipeDelimited => {
+            let joined = items
+                .iter()
+                .map(example_to_string)
+                .collect::<Vec<_>>()
+                .join("|");
+            vec![format!("{}={}", name, joined)]
+        }
+        _ => {
+            if explode {
+                items
+                    .iter()
+                    .map(|v| format!("{}={}", name, example_to_string(v)))
+                    .collect()
+            } else {
+                let joined = items
+                    .iter()
+                    .map(example_to_string)
+                    .collect::<Vec<_>>()
+                    .join(",");
+                vec![format!("{}={}", name, joined)]
+            }
+        }
+    }
+}
+
+fn serialize_cookie_object(
+    name: &str,
+    style: &ParamStyle,
+    explode: bool,
+    map: &serde_json::Map<String, serde_json::Value>,
+) -> Vec<String> {
+    if map.is_empty() {
+        return Vec::new();
+    }
+
+    match style {
+        ParamStyle::SpaceDelimited => {
+            let joined = map
+                .iter()
+                .flat_map(|(k, v)| [k.clone(), example_to_string(v)])
+                .collect::<Vec<_>>()
+                .join(" ");
+            vec![format!("{}={}", name, joined)]
+        }
+        ParamStyle::PipeDelimited => {
+            let joined = map
+                .iter()
+                .flat_map(|(k, v)| [k.clone(), example_to_string(v)])
+                .collect::<Vec<_>>()
+                .join("|");
+            vec![format!("{}={}", name, joined)]
+        }
+        _ => {
+            if explode {
+                map.iter()
+                    .map(|(k, v)| format!("{}={}", k, example_to_string(v)))
+                    .collect()
+            } else {
+                let joined = map
+                    .iter()
+                    .flat_map(|(k, v)| [k.clone(), example_to_string(v)])
+                    .collect::<Vec<_>>()
+                    .join(",");
+                vec![format!("{}={}", name, joined)]
+            }
+        }
+    }
+}
+
+fn serialize_query_param(param: &crate::oas::RouteParam) -> Vec<String> {
+    let value = match param.example.clone() {
+        Some(example) => example,
+        None if param.allow_empty_value => serde_json::Value::String(String::new()),
+        None => dummy_json_value(&param.ty),
+    };
+    let style = param.style.clone().unwrap_or(ParamStyle::Form);
+
+    match value {
+        serde_json::Value::Array(arr) => serialize_array_param(
+            &param.name,
+            &style,
+            param.explode,
+            param.allow_reserved,
+            &arr,
+        ),
+        serde_json::Value::Object(map) => serialize_object_param(
+            &param.name,
+            &style,
+            param.explode,
+            param.allow_reserved,
+            &map,
+        ),
+        _ => vec![format!(
+            "{}={}",
+            encode_name(&param.name),
+            encode_value(&example_to_string(&value), param.allow_reserved)
+        )],
+    }
+}
+
+fn serialize_array_param(
+    name: &str,
+    style: &ParamStyle,
+    explode: bool,
+    allow_reserved: bool,
+    items: &[serde_json::Value],
+) -> Vec<String> {
+    if items.is_empty() {
+        return Vec::new();
+    }
+
+    match style {
+        ParamStyle::SpaceDelimited => {
+            let joined = items
+                .iter()
+                .map(|v| encode_value(&example_to_string(v), allow_reserved))
+                .collect::<Vec<_>>()
+                .join("%20");
+            vec![format!("{}={}", encode_name(name), joined)]
+        }
+        ParamStyle::PipeDelimited => {
+            let joined = items
+                .iter()
+                .map(|v| encode_value(&example_to_string(v), allow_reserved))
+                .collect::<Vec<_>>()
+                .join("%7C");
+            vec![format!("{}={}", encode_name(name), joined)]
+        }
+        ParamStyle::Form
+        | ParamStyle::DeepObject
+        | ParamStyle::Simple
+        | ParamStyle::Label
+        | ParamStyle::Matrix
+        | ParamStyle::Cookie => {
+            if explode {
+                items
+                    .iter()
+                    .map(|v| {
+                        format!(
+                            "{}={}",
+                            encode_name(name),
+                            encode_value(&example_to_string(v), allow_reserved)
+                        )
+                    })
+                    .collect()
+            } else {
+                let joined = items
+                    .iter()
+                    .map(|v| encode_value(&example_to_string(v), allow_reserved))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                vec![format!("{}={}", encode_name(name), joined)]
+            }
+        }
+    }
+}
+
+fn serialize_object_param(
+    name: &str,
+    style: &ParamStyle,
+    explode: bool,
+    allow_reserved: bool,
+    map: &serde_json::Map<String, serde_json::Value>,
+) -> Vec<String> {
+    if map.is_empty() {
+        return Vec::new();
+    }
+
+    match style {
+        ParamStyle::DeepObject => map
+            .iter()
+            .map(|(k, v)| {
+                format!(
+                    "{}={}",
+                    encode_deep_object_name(name, k),
+                    encode_value(&example_to_string(v), allow_reserved)
+                )
+            })
+            .collect(),
+        ParamStyle::SpaceDelimited => {
+            let joined = map
+                .iter()
+                .flat_map(|(k, v)| {
+                    [
+                        encode_value(k, allow_reserved),
+                        encode_value(&example_to_string(v), allow_reserved),
+                    ]
+                })
+                .collect::<Vec<_>>()
+                .join("%20");
+            vec![format!("{}={}", encode_name(name), joined)]
+        }
+        ParamStyle::PipeDelimited => {
+            let joined = map
+                .iter()
+                .flat_map(|(k, v)| {
+                    [
+                        encode_value(k, allow_reserved),
+                        encode_value(&example_to_string(v), allow_reserved),
+                    ]
+                })
+                .collect::<Vec<_>>()
+                .join("%7C");
+            vec![format!("{}={}", encode_name(name), joined)]
+        }
+        ParamStyle::Form
+        | ParamStyle::Simple
+        | ParamStyle::Label
+        | ParamStyle::Matrix
+        | ParamStyle::Cookie => {
+            if explode {
+                map.iter()
+                    .map(|(k, v)| {
+                        format!(
+                            "{}={}",
+                            encode_name(k),
+                            encode_value(&example_to_string(v), allow_reserved)
+                        )
+                    })
+                    .collect()
+            } else {
+                let joined = map
+                    .iter()
+                    .flat_map(|(k, v)| {
+                        [
+                            encode_value(k, allow_reserved),
+                            encode_value(&example_to_string(v), allow_reserved),
+                        ]
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                vec![format!("{}={}", encode_name(name), joined)]
+            }
+        }
+    }
+}
+
+fn encode_deep_object_name(param_name: &str, key: &str) -> String {
+    let name = encode_name(param_name);
+    let key = encode_name(key);
+    format!("{}%5B{}%5D", name, key)
+}
+
+fn encode_name(name: &str) -> String {
+    encode_rfc3986(name, false)
+}
+
+fn encode_value(value: &str, allow_reserved: bool) -> String {
+    encode_rfc3986(value, allow_reserved)
+}
+
+fn serialize_form_urlencoded_querystring(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Object(map) => map
+            .iter()
+            .map(|(k, v)| {
+                format!(
+                    "{}={}",
+                    encode_form_urlencoded(k),
+                    encode_form_urlencoded(&example_to_string(v))
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("&"),
+        serde_json::Value::String(s) => s.clone(),
+        _ => encode_form_urlencoded(&example_to_string(value)),
+    }
+}
+
+fn encode_rfc3986(input: &str, allow_reserved: bool) -> String {
+    let bytes = input.as_bytes();
+    let mut out = String::new();
+    let mut idx = 0;
+
+    while idx < bytes.len() {
+        let b = bytes[idx];
+
+        if allow_reserved && b == b'%' && idx + 2 < bytes.len() {
+            let b1 = bytes[idx + 1];
+            let b2 = bytes[idx + 2];
+            if is_hex_digit(b1) && is_hex_digit(b2) {
+                out.push('%');
+                out.push(b1 as char);
+                out.push(b2 as char);
+                idx += 3;
+                continue;
+            }
+        }
+
+        if is_unreserved(b) || (allow_reserved && is_reserved(b)) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{:02X}", b));
+        }
+        idx += 1;
+    }
+
+    out
+}
+
+fn is_unreserved(b: u8) -> bool {
+    matches!(
+        b,
+        b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~'
+    )
+}
+
+fn is_reserved(b: u8) -> bool {
+    matches!(
+        b,
+        b':' | b'/'
+            | b'?'
+            | b'#'
+            | b'['
+            | b']'
+            | b'@'
+            | b'!'
+            | b'$'
+            | b'&'
+            | b'\''
+            | b'('
+            | b')'
+            | b'*'
+            | b'+'
+            | b','
+            | b';'
+            | b'='
+    )
+}
+
+fn is_hex_digit(b: u8) -> bool {
+    matches!(b, b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F')
+}
+
+fn encode_form_urlencoded(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = String::new();
+    for &b in bytes {
+        match b {
+            b' ' => out.push('+'),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'*' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -155,16 +857,23 @@ mod tests {
     fn test_generate_contract_test_structure() {
         let routes = vec![ParsedRoute {
             path: "/users/{id}".into(),
+            summary: None,
+            description: None,
             base_path: None,
             method: "GET".into(),
             handler_name: "get_user".into(),
             params: vec![crate::oas::RouteParam {
                 name: "id".into(),
+                description: None,
                 source: ParamSource::Path,
                 ty: "Uuid".into(),
+                content_media_type: None,
                 style: None,
                 explode: false,
+                deprecated: false,
+                allow_empty_value: false,
                 allow_reserved: false,
+                example: None,
             }],
             request_body: None,
             security: vec![],
@@ -194,28 +903,92 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_contract_tests_skips_webhooks() {
+        let routes = vec![
+            ParsedRoute {
+                path: "/users".into(),
+                summary: None,
+                description: None,
+                base_path: None,
+                method: "GET".into(),
+                handler_name: "list_users".into(),
+                params: vec![],
+                request_body: None,
+                security: vec![],
+                response_type: None,
+                response_headers: vec![],
+                response_links: None,
+                kind: RouteKind::Path,
+                tags: vec![],
+                callbacks: vec![],
+                deprecated: false,
+                external_docs: None,
+            },
+            ParsedRoute {
+                path: "userCreated".into(),
+                summary: None,
+                description: None,
+                base_path: None,
+                method: "POST".into(),
+                handler_name: "user_created".into(),
+                params: vec![],
+                request_body: None,
+                security: vec![],
+                response_type: None,
+                response_headers: vec![],
+                response_links: None,
+                kind: RouteKind::Webhook,
+                tags: vec![],
+                callbacks: vec![],
+                deprecated: false,
+                external_docs: None,
+            },
+        ];
+
+        let strategy = ActixStrategy;
+        let code =
+            generate_contract_tests_file(&routes, "tests/openapi.yaml", "crate::app", &strategy)
+                .unwrap();
+
+        assert!(code.contains("test_list_users"));
+        assert!(!code.contains("test_user_created"));
+    }
+
+    #[test]
     fn test_generate_with_query_params() {
         let routes = vec![ParsedRoute {
             path: "/search".into(),
+            summary: None,
+            description: None,
             base_path: None,
             method: "GET".into(),
             handler_name: "search_items".into(),
             params: vec![
                 crate::oas::RouteParam {
                     name: "q".into(),
+                    description: None,
                     source: ParamSource::Query,
                     ty: "String".into(),
+                    content_media_type: None,
                     style: None,
                     explode: false,
+                    deprecated: false,
+                    allow_empty_value: false,
                     allow_reserved: false,
+                    example: None,
                 },
                 crate::oas::RouteParam {
                     name: "page".into(),
+                    description: None,
                     source: ParamSource::Query,
                     ty: "i32".into(),
+                    content_media_type: None,
                     style: None,
                     explode: false,
+                    deprecated: false,
+                    allow_empty_value: false,
                     allow_reserved: false,
+                    example: None,
                 },
             ],
             request_body: None,
@@ -236,19 +1009,26 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_with_querystring_param() {
+    fn test_generate_uses_parameter_example() {
         let routes = vec![ParsedRoute {
-            path: "/search".into(),
+            path: "/items/{itemId}".into(),
+            summary: None,
+            description: None,
             base_path: None,
             method: "GET".into(),
-            handler_name: "search_raw".into(),
+            handler_name: "get_item".into(),
             params: vec![crate::oas::RouteParam {
-                name: "raw".into(),
-                source: ParamSource::QueryString,
+                name: "itemId".into(),
+                description: None,
+                source: ParamSource::Path,
                 ty: "String".into(),
+                content_media_type: None,
                 style: None,
                 explode: false,
+                deprecated: false,
+                allow_empty_value: false,
                 allow_reserved: false,
+                example: Some(serde_json::json!("item-42")),
             }],
             request_body: None,
             security: vec![],
@@ -264,21 +1044,503 @@ mod tests {
 
         let strategy = ActixStrategy;
         let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy).unwrap();
-        assert!(code.contains("?raw=test_val"));
+        assert!(code.contains(".uri(\"/items/item-42\")"));
+    }
+
+    #[test]
+    fn test_path_param_matrix_style() {
+        let param = crate::oas::RouteParam {
+            name: "color".into(),
+            description: None,
+            source: ParamSource::Path,
+            ty: "String".into(),
+            content_media_type: None,
+            style: Some(ParamStyle::Matrix),
+            explode: false,
+            deprecated: false,
+            allow_empty_value: false,
+            allow_reserved: false,
+            example: Some(serde_json::json!("blue")),
+        };
+
+        let serialized = serialize_path_param(&param);
+        assert_eq!(serialized, ";color=blue");
+    }
+
+    #[test]
+    fn test_path_param_label_array_explode() {
+        let param = crate::oas::RouteParam {
+            name: "color".into(),
+            description: None,
+            source: ParamSource::Path,
+            ty: "Vec<String>".into(),
+            content_media_type: None,
+            style: Some(ParamStyle::Label),
+            explode: true,
+            deprecated: false,
+            allow_empty_value: false,
+            allow_reserved: false,
+            example: Some(serde_json::json!(["blue", "black"])),
+        };
+
+        let serialized = serialize_path_param(&param);
+        assert_eq!(serialized, ".blue.black");
+    }
+
+    #[test]
+    fn test_path_param_simple_object_explode() {
+        let param = crate::oas::RouteParam {
+            name: "color".into(),
+            description: None,
+            source: ParamSource::Path,
+            ty: "Color".into(),
+            content_media_type: None,
+            style: Some(ParamStyle::Simple),
+            explode: true,
+            deprecated: false,
+            allow_empty_value: false,
+            allow_reserved: false,
+            example: Some(serde_json::json!({"R": 100, "G": 200})),
+        };
+
+        let serialized = serialize_path_param(&param);
+        assert_eq!(serialized, "R=100,G=200");
+    }
+
+    #[test]
+    fn test_generate_with_querystring_param() {
+        let routes = vec![ParsedRoute {
+            path: "/search".into(),
+            summary: None,
+            description: None,
+            base_path: None,
+            method: "GET".into(),
+            handler_name: "search_raw".into(),
+            params: vec![crate::oas::RouteParam {
+                name: "raw".into(),
+                description: None,
+                source: ParamSource::QueryString,
+                ty: "String".into(),
+                content_media_type: None,
+                style: None,
+                explode: false,
+                deprecated: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                example: None,
+            }],
+            request_body: None,
+            security: vec![],
+            response_type: None,
+            response_headers: vec![],
+            response_links: None,
+            kind: RouteKind::Path,
+            callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
+            tags: vec![],
+        }];
+
+        let strategy = ActixStrategy;
+        let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy).unwrap();
+        assert!(code.contains("?test_val"));
+    }
+
+    #[test]
+    fn test_generate_with_header_and_cookie_params() {
+        let routes = vec![ParsedRoute {
+            path: "/secure".into(),
+            summary: None,
+            description: None,
+            base_path: None,
+            method: "GET".into(),
+            handler_name: "secure".into(),
+            params: vec![
+                crate::oas::RouteParam {
+                    name: "X-Token".into(),
+                    description: None,
+                    source: ParamSource::Header,
+                    ty: "String".into(),
+                    content_media_type: None,
+                    style: None,
+                    explode: false,
+                    deprecated: false,
+                    allow_empty_value: false,
+                    allow_reserved: false,
+                    example: Some(serde_json::json!("abc123")),
+                },
+                crate::oas::RouteParam {
+                    name: "session".into(),
+                    description: None,
+                    source: ParamSource::Cookie,
+                    ty: "String".into(),
+                    content_media_type: None,
+                    style: None,
+                    explode: false,
+                    deprecated: false,
+                    allow_empty_value: false,
+                    allow_reserved: false,
+                    example: None,
+                },
+            ],
+            request_body: None,
+            security: vec![],
+            response_type: None,
+            response_headers: vec![],
+            response_links: None,
+            kind: RouteKind::Path,
+            callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
+            tags: vec![],
+        }];
+
+        let strategy = ActixStrategy;
+        let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy).unwrap();
+        assert!(code.contains(".insert_header((\"X-Token\", \"abc123\"))"));
+        assert!(code.contains(".insert_header((\"Cookie\", \"session=test_val\"))"));
+    }
+
+    #[test]
+    fn test_header_object_serialization_exploded() {
+        let param = crate::oas::RouteParam {
+            name: "X-Colors".into(),
+            description: None,
+            source: ParamSource::Header,
+            ty: "serde_json::Value".into(),
+            content_media_type: None,
+            style: Some(ParamStyle::Simple),
+            explode: true,
+            deprecated: false,
+            allow_empty_value: false,
+            allow_reserved: false,
+            example: Some(serde_json::json!({"R": 100, "G": 200})),
+        };
+
+        let header = serialize_header_param(&param);
+        assert_eq!(header, "R=100,G=200");
+    }
+
+    #[test]
+    fn test_header_object_serialization_non_exploded() {
+        let param = crate::oas::RouteParam {
+            name: "X-Colors".into(),
+            description: None,
+            source: ParamSource::Header,
+            ty: "serde_json::Value".into(),
+            content_media_type: None,
+            style: Some(ParamStyle::Simple),
+            explode: false,
+            deprecated: false,
+            allow_empty_value: false,
+            allow_reserved: false,
+            example: Some(serde_json::json!({"R": 100, "G": 200})),
+        };
+
+        let header = serialize_header_param(&param);
+        assert_eq!(header, "R,100,G,200");
+    }
+
+    #[test]
+    fn test_header_array_serialization() {
+        let param = crate::oas::RouteParam {
+            name: "X-Colors".into(),
+            description: None,
+            source: ParamSource::Header,
+            ty: "Vec<String>".into(),
+            content_media_type: None,
+            style: Some(ParamStyle::Simple),
+            explode: false,
+            deprecated: false,
+            allow_empty_value: false,
+            allow_reserved: false,
+            example: Some(serde_json::json!(["blue", "black"])),
+        };
+
+        let header = serialize_header_param(&param);
+        assert_eq!(header, "blue,black");
+    }
+
+    #[test]
+    fn test_header_content_json_serialization() {
+        let param = crate::oas::RouteParam {
+            name: "X-Filter".into(),
+            description: None,
+            source: ParamSource::Header,
+            ty: "serde_json::Value".into(),
+            content_media_type: Some(ContentMediaType::Json),
+            style: None,
+            explode: false,
+            deprecated: false,
+            allow_empty_value: false,
+            allow_reserved: false,
+            example: Some(serde_json::json!({"a": 1})),
+        };
+
+        let header = serialize_header_param(&param);
+        assert_eq!(header, r#"{"a":1}"#);
+    }
+
+    #[test]
+    fn test_cookie_exploded_array_serialization() {
+        let param = crate::oas::RouteParam {
+            name: "color".into(),
+            description: None,
+            source: ParamSource::Cookie,
+            ty: "Vec<String>".into(),
+            content_media_type: None,
+            style: Some(ParamStyle::Cookie),
+            explode: true,
+            deprecated: false,
+            allow_empty_value: false,
+            allow_reserved: false,
+            example: Some(serde_json::json!(["blue", "black"])),
+        };
+
+        let header = serialize_cookie_params(&[param]);
+        assert_eq!(header, "color=blue; color=black");
+    }
+
+    #[test]
+    fn test_cookie_object_non_exploded_serialization() {
+        let param = crate::oas::RouteParam {
+            name: "color".into(),
+            description: None,
+            source: ParamSource::Cookie,
+            ty: "serde_json::Value".into(),
+            content_media_type: None,
+            style: Some(ParamStyle::Cookie),
+            explode: false,
+            deprecated: false,
+            allow_empty_value: false,
+            allow_reserved: false,
+            example: Some(serde_json::json!({"R": 100, "G": 200})),
+        };
+
+        let header = serialize_cookie_params(&[param]);
+        assert_eq!(header, "color=R,100,G,200");
+    }
+
+    #[test]
+    fn test_cookie_content_form_urlencoded_serialization() {
+        let param = crate::oas::RouteParam {
+            name: "filter".into(),
+            description: None,
+            source: ParamSource::Cookie,
+            ty: "serde_json::Value".into(),
+            content_media_type: Some(ContentMediaType::FormUrlEncoded),
+            style: None,
+            explode: false,
+            deprecated: false,
+            allow_empty_value: false,
+            allow_reserved: false,
+            example: Some(serde_json::json!({"a": "b", "c": "d e"})),
+        };
+
+        let header = serialize_cookie_params(&[param]);
+        assert_eq!(header, "filter=a=b&c=d+e");
+    }
+
+    #[test]
+    fn test_serialize_query_form_exploded_array() {
+        let param = crate::oas::RouteParam {
+            name: "color".into(),
+            description: None,
+            source: ParamSource::Query,
+            ty: "Vec<String>".into(),
+            content_media_type: None,
+            style: Some(ParamStyle::Form),
+            explode: true,
+            deprecated: false,
+            allow_empty_value: false,
+            allow_reserved: false,
+            example: Some(serde_json::json!(["blue", "black"])),
+        };
+
+        let query = serialize_query_params(&[param]);
+        assert_eq!(query, "color=blue&color=black");
+    }
+
+    #[test]
+    fn test_serialize_query_form_object_non_exploded() {
+        let param = crate::oas::RouteParam {
+            name: "color".into(),
+            description: None,
+            source: ParamSource::Query,
+            ty: "serde_json::Value".into(),
+            content_media_type: None,
+            style: Some(ParamStyle::Form),
+            explode: false,
+            deprecated: false,
+            allow_empty_value: false,
+            allow_reserved: false,
+            example: Some(serde_json::json!({"R": 100, "G": 200})),
+        };
+
+        let query = serialize_query_params(&[param]);
+        assert_eq!(query, "color=R,100,G,200");
+    }
+
+    #[test]
+    fn test_query_allow_empty_value_serializes_empty() {
+        let param = crate::oas::RouteParam {
+            name: "q".into(),
+            description: None,
+            source: ParamSource::Query,
+            ty: "String".into(),
+            content_media_type: None,
+            style: Some(ParamStyle::Form),
+            explode: true,
+            deprecated: false,
+            allow_empty_value: true,
+            allow_reserved: false,
+            example: None,
+        };
+
+        let query = serialize_query_params(&[param]);
+        assert_eq!(query, "q=");
+    }
+
+    #[test]
+    fn test_serialize_query_space_delimited() {
+        let param = crate::oas::RouteParam {
+            name: "color".into(),
+            description: None,
+            source: ParamSource::Query,
+            ty: "Vec<String>".into(),
+            content_media_type: None,
+            style: Some(ParamStyle::SpaceDelimited),
+            explode: false,
+            deprecated: false,
+            allow_empty_value: false,
+            allow_reserved: false,
+            example: Some(serde_json::json!(["blue", "black"])),
+        };
+
+        let query = serialize_query_params(&[param]);
+        assert_eq!(query, "color=blue%20black");
+    }
+
+    #[test]
+    fn test_serialize_query_pipe_delimited() {
+        let param = crate::oas::RouteParam {
+            name: "color".into(),
+            description: None,
+            source: ParamSource::Query,
+            ty: "Vec<String>".into(),
+            content_media_type: None,
+            style: Some(ParamStyle::PipeDelimited),
+            explode: false,
+            deprecated: false,
+            allow_empty_value: false,
+            allow_reserved: false,
+            example: Some(serde_json::json!(["blue", "black"])),
+        };
+
+        let query = serialize_query_params(&[param]);
+        assert_eq!(query, "color=blue%7Cblack");
+    }
+
+    #[test]
+    fn test_serialize_query_deep_object() {
+        let param = crate::oas::RouteParam {
+            name: "color".into(),
+            description: None,
+            source: ParamSource::Query,
+            ty: "serde_json::Value".into(),
+            content_media_type: None,
+            style: Some(ParamStyle::DeepObject),
+            explode: true,
+            deprecated: false,
+            allow_empty_value: false,
+            allow_reserved: false,
+            example: Some(serde_json::json!({"R": 100, "G": 200})),
+        };
+
+        let query = serialize_query_params(&[param]);
+        assert_eq!(query, "color%5BR%5D=100&color%5BG%5D=200");
+    }
+
+    #[test]
+    fn test_querystring_json_encodes_non_string() {
+        let param = crate::oas::RouteParam {
+            name: "raw".into(),
+            description: None,
+            source: ParamSource::QueryString,
+            ty: "serde_json::Value".into(),
+            content_media_type: Some(crate::oas::ContentMediaType::Json),
+            style: None,
+            explode: false,
+            deprecated: false,
+            allow_empty_value: false,
+            allow_reserved: false,
+            example: Some(serde_json::json!({"foo": "bar"})),
+        };
+
+        let raw = build_querystring_value(&param);
+        assert_eq!(raw, "%7B%22foo%22%3A%22bar%22%7D");
+    }
+
+    #[test]
+    fn test_querystring_json_string_is_quoted() {
+        let param = crate::oas::RouteParam {
+            name: "raw".into(),
+            description: None,
+            source: ParamSource::QueryString,
+            ty: "String".into(),
+            content_media_type: Some(crate::oas::ContentMediaType::Json),
+            style: None,
+            explode: false,
+            deprecated: false,
+            allow_empty_value: false,
+            allow_reserved: false,
+            example: Some(serde_json::json!("hello")),
+        };
+
+        let raw = build_querystring_value(&param);
+        assert_eq!(raw, "%22hello%22");
+    }
+
+    #[test]
+    fn test_querystring_form_urlencoded_encodes_spaces() {
+        let param = crate::oas::RouteParam {
+            name: "raw".into(),
+            description: None,
+            source: ParamSource::QueryString,
+            ty: "serde_json::Value".into(),
+            content_media_type: Some(crate::oas::ContentMediaType::FormUrlEncoded),
+            style: None,
+            explode: false,
+            deprecated: false,
+            allow_empty_value: false,
+            allow_reserved: false,
+            example: Some(serde_json::json!({"foo": "a + b"})),
+        };
+
+        let raw = build_querystring_value(&param);
+        assert_eq!(raw, "foo=a+%2B+b");
     }
 
     #[test]
     fn test_generate_with_body() {
         let routes = vec![ParsedRoute {
             path: "/create".into(),
+            summary: None,
+            description: None,
             base_path: None,
             method: "POST".into(),
             handler_name: "create_item".into(),
             params: vec![],
             request_body: Some(RequestBodyDefinition {
                 ty: "Item".into(),
+                description: None,
+                media_type: "application/json".into(),
                 format: BodyFormat::Json,
+                required: true,
                 encoding: None,
+                prefix_encoding: None,
+                item_encoding: None,
+                example: None,
             }),
             security: vec![],
             response_type: None,
@@ -300,6 +1562,8 @@ mod tests {
     fn test_generate_with_base_path() {
         let routes = vec![ParsedRoute {
             path: "/ping".into(),
+            summary: None,
+            description: None,
             base_path: Some("/api/v1".into()),
             method: "GET".into(),
             handler_name: "ping".into(),
@@ -322,5 +1586,43 @@ mod tests {
         assert!(code.contains(".uri(\"/api/v1/ping\")"));
         // Expect validation logic to use original template
         assert!(code.contains("validate_response(resp, \"GET\", \"/ping\").await;"));
+    }
+
+    #[test]
+    fn test_optional_body_omits_payload() {
+        let routes = vec![ParsedRoute {
+            path: "/optional".into(),
+            summary: None,
+            description: None,
+            base_path: None,
+            method: "POST".into(),
+            handler_name: "optional_body".into(),
+            params: vec![],
+            request_body: Some(RequestBodyDefinition {
+                ty: "Payload".into(),
+                description: None,
+                media_type: "application/json".into(),
+                format: BodyFormat::Json,
+                required: false,
+                encoding: None,
+                prefix_encoding: None,
+                item_encoding: None,
+                example: None,
+            }),
+            security: vec![],
+            response_type: None,
+            response_headers: vec![],
+            response_links: None,
+            kind: RouteKind::Path,
+            callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
+            tags: vec![],
+        }];
+
+        let strategy = ActixStrategy;
+        let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy).unwrap();
+        assert!(!code.contains(".set_json("));
+        assert!(!code.contains(".set_form("));
     }
 }

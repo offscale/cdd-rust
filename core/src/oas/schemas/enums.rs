@@ -143,7 +143,10 @@ mod tests {
     fn test_derive_name_from_type() {
         assert_eq!(derive_name_from_type("String"), Some("String".to_string()));
         assert_eq!(derive_name_from_type("i32"), Some("Integer".to_string()));
-        assert_eq!(derive_name_from_type("Vec<User>"), Some("Array".to_string()));
+        assert_eq!(
+            derive_name_from_type("Vec<User>"),
+            Some("Array".to_string())
+        );
         assert_eq!(derive_name_from_type("Unknown"), None);
     }
 }
