@@ -5,7 +5,9 @@
 //! Helper functions for case conversion and runtime expression resolution used
 //! by the Actix strategy modules.
 
-use crate::oas::models::RuntimeExpression;
+use crate::oas::models::{
+    split_runtime_expression_template, RuntimeExpression, RuntimeExpressionSegment,
+};
 
 /// Converts a string to PascalCase.
 pub fn to_pascal_case(s: &str) -> String {
@@ -61,22 +63,59 @@ pub fn to_snake_case(s: &str) -> String {
 /// - `$response.body#/ptr` -> `response_body.ptr`
 ///
 /// Note: Constants (non-expressions) are converted to string literals.
+/// Templates with embedded `{...}` expressions are emitted as `format!` calls.
 pub fn resolve_runtime_expr(expr_obj: &RuntimeExpression) -> String {
     let expr = expr_obj.as_str();
 
-    // Handle Constants (not starting with $)
-    // OAS Spec: "Expressions can be embedded into string values by surrounding the expression with {}"
-    // This function handles strict expressions. String interpolation logic belongs in the caller if needed.
-    if !expr.starts_with('$') {
-        return format!("\"{}\"", expr.replace('"', "\\\""));
+    if expr.starts_with('$') {
+        return resolve_runtime_expr_inner(expr);
     }
 
-    match expr {
-        "$url" => "req.uri().to_string()".to_string(),
-        "$method" => "req.method().as_str()".to_string(),
-        "$statusCode" => "status_code".to_string(),
-        _ => resolve_compound_expression(expr),
+    // Handle templates with embedded runtime expressions.
+    let segments = split_runtime_expression_template(expr);
+    let has_expr = segments
+        .iter()
+        .any(|seg| matches!(seg, RuntimeExpressionSegment::Expression(_)));
+
+    if !has_expr {
+        return quote_rust_string(expr);
     }
+
+    let mut format_str = String::new();
+    let mut args = Vec::new();
+
+    for seg in segments {
+        match seg {
+            RuntimeExpressionSegment::Literal(text) => {
+                format_str.push_str(&escape_format_literal(&text));
+            }
+            RuntimeExpressionSegment::Expression(raw) => {
+                format_str.push_str("{}");
+                args.push(resolve_runtime_expr_inner(&raw));
+            }
+        }
+    }
+
+    if args.is_empty() {
+        return quote_rust_string(&format_str);
+    }
+
+    format!(
+        "format!(\"{}\", {})",
+        escape_rust_string(&format_str),
+        args.join(", ")
+    )
+}
+
+fn resolve_runtime_expr_inner(expr: &str) -> String {
+    match expr {
+        "$url" => return "req.uri().to_string()".to_string(),
+        "$method" => return "req.method().as_str()".to_string(),
+        "$statusCode" => return "status_code".to_string(),
+        _ => {}
+    }
+
+    resolve_compound_expression(expr)
 }
 
 fn resolve_compound_expression(expr: &str) -> String {
@@ -122,6 +161,18 @@ fn resolve_compound_expression(expr: &str) -> String {
 
     // Fallback
     format!("/* Unresolved expr: {} */", expr)
+}
+
+fn escape_format_literal(input: &str) -> String {
+    input.replace('{', "{{").replace('}', "}}")
+}
+
+fn escape_rust_string(input: &str) -> String {
+    input.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn quote_rust_string(input: &str) -> String {
+    format!("\"{}\"", escape_rust_string(input))
 }
 
 /// Parses a JSON Pointer (RFC 6901) into a Rust struct/array accessor chain.
@@ -201,6 +252,15 @@ mod tests {
             "response_header_location"
         );
         assert_eq!(resolve_runtime_expr(&rx("$response.body")), "response_body");
+    }
+
+    #[test]
+    fn test_resolve_runtime_expr_template() {
+        let expr = rx("http://example.com/items/{$request.path.id}?q={$request.query.filter}");
+        let rendered = resolve_runtime_expr(&expr);
+        assert!(rendered.contains("format!(\"http://example.com/items/{}?q={}\""));
+        assert!(rendered.contains("id"));
+        assert!(rendered.contains("query_filter"));
     }
 
     #[test]

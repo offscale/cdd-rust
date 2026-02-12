@@ -10,7 +10,7 @@ use crate::oas::ref_utils::extract_component_name;
 use crate::oas::resolver::extract_request_body_type;
 use crate::oas::resolver::responses::extract_response_details;
 use crate::oas::routes::shims::{ShimComponents, ShimOperation, ShimPathItem};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use utoipa::openapi::RefOr;
 
 /// Resolves a Callback object which can be an inline map or a Reference.
@@ -24,19 +24,15 @@ pub fn resolve_callback_object(
             let (comps, self_uri) = components
                 .map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))
                 .ok_or_else(|| {
-                    AppError::General(format!(
-                        "Callback reference not found: {}",
-                        r.ref_location
-                    ))
+                    AppError::General(format!("Callback reference not found: {}", r.ref_location))
                 })?;
 
             let ref_name = extract_component_name(&r.ref_location, self_uri, "callbacks")
                 .unwrap_or_else(|| "Unknown".to_string());
 
             if let Some(cb_json) = comps.extra.get("callbacks").and_then(|c| c.get(&ref_name)) {
-                let map =
-                    serde_json::from_value::<BTreeMap<String, ShimPathItem>>(cb_json.clone())
-                        .map_err(|e| {
+                let map = serde_json::from_value::<BTreeMap<String, ShimPathItem>>(cb_json.clone())
+                    .map_err(|e| {
                         AppError::General(format!(
                             "Failed to parse resolved callback '{}': {}",
                             ref_name, e
@@ -59,6 +55,7 @@ pub fn extract_callback_operations(
     expression: &str,
     path_item: &ShimPathItem,
     components: Option<&ShimComponents>,
+    operation_ids: &mut HashSet<String>,
 ) -> AppResult<()> {
     let mut path_item = path_item.clone();
     if let Some(ref_path) = path_item.ref_path.as_deref() {
@@ -66,8 +63,18 @@ pub fn extract_callback_operations(
         path_item = super::resolve_path_item_ref(ref_path, components, &empty_paths)?;
     }
 
+    let parsed_expression = RuntimeExpression::parse_expression(expression)?;
+
     let mut add_cb_op = |method: &str, op: Option<&ShimOperation>| -> AppResult<()> {
         if let Some(o) = op {
+            if let Some(op_id) = &o.operation_id {
+                if !operation_ids.insert(op_id.clone()) {
+                    return Err(AppError::General(format!(
+                        "Duplicate operationId '{}' detected",
+                        op_id
+                    )));
+                }
+            }
             let mut req_body = None;
             if let Some(rb) = &o.request_body {
                 if let Some(def) = extract_request_body_type(rb, components)? {
@@ -84,7 +91,7 @@ pub fn extract_callback_operations(
 
             callbacks.push(ParsedCallback {
                 name: name.to_string(),
-                expression: RuntimeExpression::new(expression),
+                expression: parsed_expression.clone(),
                 method: method.to_string(),
                 request_body: req_body,
                 response_type: resp_type,
@@ -120,9 +127,9 @@ mod tests {
     use crate::oas::routes::shims::{ShimComponents, ShimOperation, ShimPathItem};
     use serde_json::json;
     use std::collections::BTreeMap;
-    use utoipa::openapi::{Content, Ref, RefOr, Responses};
     use utoipa::openapi::request_body::RequestBodyBuilder;
     use utoipa::openapi::ResponseBuilder;
+    use utoipa::openapi::{Content, Ref, RefOr, Responses};
 
     fn empty_operation() -> ShimOperation {
         ShimOperation {
@@ -131,7 +138,7 @@ mod tests {
             description: None,
             parameters: None,
             request_body: None,
-            responses: Responses::new(),
+            responses: crate::oas::routes::shims::ShimResponses::from(Responses::new()),
             security: None,
             callbacks: None,
             tags: None,
@@ -213,9 +220,7 @@ mod tests {
         let body = RequestBodyBuilder::new()
             .content(
                 "application/json",
-                Content::new(Some(RefOr::Ref(Ref::new(
-                    "#/components/schemas/Payload",
-                )))),
+                Content::new(Some(RefOr::Ref(Ref::new("#/components/schemas/Payload")))),
             )
             .build();
 
@@ -223,9 +228,7 @@ mod tests {
             .description("OK")
             .content(
                 "application/json",
-                Content::new(Some(RefOr::Ref(Ref::new(
-                    "#/components/schemas/Ack",
-                )))),
+                Content::new(Some(RefOr::Ref(Ref::new("#/components/schemas/Ack")))),
             )
             .build();
 
@@ -235,8 +238,10 @@ mod tests {
             .insert("200".to_string(), RefOr::T(response));
 
         let mut op = empty_operation();
-        op.request_body = Some(RefOr::T(body));
-        op.responses = responses;
+        op.request_body = Some(RefOr::T(crate::oas::routes::shims::ShimRequestBody::from(
+            body,
+        )));
+        op.responses = crate::oas::routes::shims::ShimResponses::from(responses);
         path_item.get = Some(op);
 
         let mut callbacks = Vec::new();
@@ -246,6 +251,7 @@ mod tests {
             "$request.body#/callbackUrl",
             &path_item,
             None,
+            &mut HashSet::new(),
         )
         .unwrap();
 
@@ -260,11 +266,52 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_callback_invalid_expression_rejected() {
+        let mut path_item = empty_path_item();
+        path_item.get = Some(empty_operation());
+
+        let mut callbacks = Vec::new();
+        let err = extract_callback_operations(
+            &mut callbacks,
+            "OnEvent",
+            "not-a-runtime-expression",
+            &path_item,
+            None,
+            &mut HashSet::new(),
+        )
+        .unwrap_err();
+
+        assert!(format!("{err}").contains("must include a '$' expression"));
+    }
+
+    #[test]
+    fn test_extract_callback_expression_template() {
+        let mut path_item = empty_path_item();
+        path_item.get = Some(empty_operation());
+
+        let mut callbacks = Vec::new();
+        let expr = "https://notify.example.com?url={$request.body#/url}";
+        extract_callback_operations(
+            &mut callbacks,
+            "OnEvent",
+            expr,
+            &path_item,
+            None,
+            &mut HashSet::new(),
+        )
+        .unwrap();
+
+        assert_eq!(callbacks.len(), 1);
+        assert_eq!(callbacks[0].expression.as_str(), expr);
+        assert!(callbacks[0].expression.is_expression());
+    }
+
+    #[test]
     fn test_extract_callback_query_and_additional() {
         let mut path_item = empty_path_item();
 
         let mut op = empty_operation();
-        op.responses = Responses::new();
+        op.responses = crate::oas::routes::shims::ShimResponses::from(Responses::new());
 
         path_item.query = Some(op.clone());
         let mut additional = BTreeMap::new();
@@ -278,6 +325,7 @@ mod tests {
             "$request.body#/url",
             &path_item,
             None,
+            &mut HashSet::new(),
         )
         .unwrap();
 
@@ -312,6 +360,7 @@ mod tests {
             "$request.body#/url",
             &path_item,
             Some(&components),
+            &mut HashSet::new(),
         )
         .unwrap();
 

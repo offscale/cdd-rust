@@ -9,8 +9,9 @@
 //! do not implement `Debug`.
 
 use crate::oas::resolver::ShimParameter;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde::de::Error as DeError;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use utoipa::openapi::request_body::RequestBody;
 use utoipa::openapi::{RefOr, Responses};
@@ -410,6 +411,264 @@ pub struct ShimPathItem {
     pub extensions: BTreeMap<String, Value>,
 }
 
+/// Wrapper for Responses that preserves raw JSON to access OAS 3.2-only fields.
+///
+/// This enables extraction of `itemSchema` and other Media Type fields that are
+/// not modeled by `utoipa::openapi::Responses`.
+#[derive(Clone)]
+pub struct ShimResponses {
+    /// Raw JSON representation of the responses map.
+    pub raw: Value,
+    /// Parsed Responses model from utoipa.
+    pub inner: Responses,
+}
+
+impl ShimResponses {
+    /// Returns the parsed Responses model.
+    pub fn typed(&self) -> &Responses {
+        &self.inner
+    }
+
+    /// Returns the raw JSON representation.
+    pub fn raw(&self) -> &Value {
+        &self.raw
+    }
+
+    /// Builds a ShimResponses wrapper from raw JSON.
+    pub fn from_raw(raw: Value) -> Result<Self, serde_json::Error> {
+        let mut sanitized = raw.clone();
+        normalize_responses_for_utoipa(&mut sanitized);
+        let inner = serde_json::from_value::<Responses>(sanitized)?;
+        Ok(Self { raw, inner })
+    }
+}
+
+impl Default for ShimResponses {
+    fn default() -> Self {
+        Self {
+            raw: Value::Object(Map::new()),
+            inner: Responses::new(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ShimResponses {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = Value::deserialize(deserializer)?;
+        let mut sanitized = raw.clone();
+        normalize_responses_for_utoipa(&mut sanitized);
+        let inner = serde_json::from_value::<Responses>(sanitized)
+            .map_err(|e| DeError::custom(format!("Failed to parse Responses: {}", e)))?;
+        Ok(Self { raw, inner })
+    }
+}
+
+impl Serialize for ShimResponses {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.raw.serialize(serializer)
+    }
+}
+
+impl From<Responses> for ShimResponses {
+    fn from(responses: Responses) -> Self {
+        let raw = serde_json::to_value(&responses).unwrap_or(Value::Object(Map::new()));
+        Self {
+            raw,
+            inner: responses,
+        }
+    }
+}
+
+/// Wrapper for RequestBody that preserves raw JSON to access OAS 3.2-only fields.
+///
+/// This enables extraction of `itemSchema`, `serializedValue`, and other fields
+/// that are not yet modeled by `utoipa::openapi::RequestBody`.
+#[derive(Clone)]
+pub struct ShimRequestBody {
+    /// Raw JSON representation of the request body.
+    pub raw: Value,
+    /// Parsed RequestBody model from utoipa.
+    pub inner: RequestBody,
+}
+
+impl ShimRequestBody {
+    /// Returns the parsed RequestBody model.
+    pub fn typed(&self) -> &RequestBody {
+        &self.inner
+    }
+
+    /// Returns the raw JSON representation.
+    pub fn raw(&self) -> &Value {
+        &self.raw
+    }
+}
+
+impl<'de> Deserialize<'de> for ShimRequestBody {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = Value::deserialize(deserializer)?;
+        let mut sanitized = raw.clone();
+        normalize_encoding_headers(&mut sanitized);
+        let inner = serde_json::from_value::<RequestBody>(sanitized)
+            .map_err(|e| DeError::custom(format!("Failed to parse RequestBody: {}", e)))?;
+        Ok(Self { raw, inner })
+    }
+}
+
+impl Serialize for ShimRequestBody {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.raw.serialize(serializer)
+    }
+}
+
+impl From<RequestBody> for ShimRequestBody {
+    fn from(body: RequestBody) -> Self {
+        let raw = serde_json::to_value(&body).unwrap_or(Value::Null);
+        Self { raw, inner: body }
+    }
+}
+
+fn normalize_encoding_headers(value: &mut Value) {
+    let Value::Object(map) = value else {
+        return;
+    };
+
+    if let Some(schema_val) = map.get("schema") {
+        if schema_val.is_boolean() {
+            map.remove("schema");
+        }
+    }
+
+    if let Some(encoding_val) = map.get_mut("encoding") {
+        normalize_encoding_map_headers(encoding_val);
+    }
+    if let Some(prefix_val) = map.get_mut("prefixEncoding") {
+        normalize_encoding_array_headers(prefix_val);
+    }
+    if let Some(item_val) = map.get_mut("itemEncoding") {
+        normalize_encoding_object_headers(item_val);
+    }
+
+    for (_, v) in map.iter_mut() {
+        normalize_encoding_headers(v);
+    }
+}
+
+fn normalize_responses_for_utoipa(value: &mut Value) {
+    let Value::Object(map) = value else {
+        return;
+    };
+
+    for (_, response) in map.iter_mut() {
+        normalize_response_object(response);
+    }
+}
+
+fn normalize_response_object(value: &mut Value) {
+    let Value::Object(map) = value else {
+        return;
+    };
+
+    if let Some(headers_val) = map.get_mut("headers") {
+        normalize_response_headers(headers_val);
+    }
+
+    if let Some(content_val) = map.get_mut("content") {
+        normalize_response_content(content_val);
+    }
+
+    if map.contains_key("links") {
+        map.remove("links");
+    }
+}
+
+fn normalize_response_headers(value: &mut Value) {
+    let Value::Object(headers) = value else {
+        return;
+    };
+
+    for (_, header) in headers.iter_mut() {
+        let Value::Object(obj) = header else {
+            continue;
+        };
+        if obj.contains_key("$ref") {
+            obj.clear();
+            let mut schema = Map::new();
+            schema.insert("type".to_string(), Value::String("string".to_string()));
+            obj.insert("schema".to_string(), Value::Object(schema));
+            continue;
+        }
+        if obj.get("schema").is_none() && obj.contains_key("content") {
+            let mut schema = Map::new();
+            schema.insert("type".to_string(), Value::String("string".to_string()));
+            obj.insert("schema".to_string(), Value::Object(schema));
+        } else if obj.get("schema").is_none() && !obj.contains_key("content") {
+            let mut schema = Map::new();
+            schema.insert("type".to_string(), Value::String("string".to_string()));
+            obj.insert("schema".to_string(), Value::Object(schema));
+        }
+        obj.remove("content");
+    }
+}
+
+fn normalize_response_content(value: &mut Value) {
+    let Value::Object(content) = value else {
+        return;
+    };
+
+    for (_, media) in content.iter_mut() {
+        let Value::Object(obj) = media else {
+            *media = Value::Object(Map::new());
+            continue;
+        };
+        if obj.contains_key("$ref") {
+            obj.remove("$ref");
+        }
+        if let Some(schema_val) = obj.get("schema") {
+            if schema_val.is_boolean() {
+                obj.remove("schema");
+            }
+        }
+    }
+}
+
+fn normalize_encoding_map_headers(value: &mut Value) {
+    let Value::Object(map) = value else {
+        return;
+    };
+    for (_, encoding) in map.iter_mut() {
+        normalize_encoding_object_headers(encoding);
+    }
+}
+
+fn normalize_encoding_array_headers(value: &mut Value) {
+    let Value::Array(items) = value else {
+        return;
+    };
+    for encoding in items.iter_mut() {
+        normalize_encoding_object_headers(encoding);
+    }
+}
+
+fn normalize_encoding_object_headers(value: &mut Value) {
+    let Value::Object(obj) = value else {
+        return;
+    };
+    obj.entry("headers".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+}
+
 /// A single HTTP Operation definition.
 #[derive(Deserialize, Serialize, Clone)]
 pub struct ShimOperation {
@@ -425,10 +684,10 @@ pub struct ShimOperation {
     pub parameters: Option<Vec<RefOr<ShimParameter>>>,
     /// Request Body.
     #[serde(rename = "requestBody")]
-    pub request_body: Option<RefOr<RequestBody>>,
+    pub request_body: Option<RefOr<ShimRequestBody>>,
     /// Responses.
     #[serde(default)]
-    pub responses: Responses,
+    pub responses: ShimResponses,
     /// Security requirements (raw JSON values to be generic).
     #[serde(default)]
     pub security: Option<Vec<Value>>,
@@ -496,7 +755,8 @@ paths: {}
         let yaml = r#"
 query:
   operationId: queryOp
-  responses: {}
+  responses:
+    '200': { description: OK }
 "#;
         let path_item: ShimPathItem = serde_yaml::from_str(yaml).unwrap();
         assert!(path_item.query.is_some());
@@ -516,7 +776,8 @@ deprecated: true
 externalDocs:
   url: https://example.com
   description: More info
-responses: {}
+responses:
+  '200': { description: OK }
 "#;
         let op: ShimOperation = serde_yaml::from_str(yaml).unwrap();
         assert!(op.deprecated);
@@ -696,7 +957,8 @@ paths:
   /foo:
     get:
       x-controller: FooController
-      responses: {}
+      responses:
+        '200': { description: OK }
 x-global-config:
   env: dev
 "#;

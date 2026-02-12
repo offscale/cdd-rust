@@ -2,6 +2,7 @@
 //!
 //! internal logic for parsing `#[serde(...)]` and `#[oai(...)]` attributes.
 
+use crate::parser::models::RenameRule;
 use ra_ap_syntax::ast::{self};
 use ra_ap_syntax::{AstNode, SyntaxNode};
 use regex::Regex;
@@ -12,12 +13,16 @@ use std::sync::OnceLock;
 pub struct AttrInfo {
     /// The rename value if present.
     pub rename: Option<String>,
+    /// The rename_all rule if present.
+    pub rename_all: Option<RenameRule>,
     /// Whether the skip flag was found.
     pub is_skipped: bool,
     /// The tag value (for enums) if present.
     pub tag: Option<String>,
     /// Whether the untagged flag was found (for enums).
     pub untagged: bool,
+    /// Whether deny_unknown_fields was found.
+    pub deny_unknown_fields: bool,
 }
 
 /// Analyzes attributes on a node to find `serde` or `oai` configurations.
@@ -64,9 +69,23 @@ fn parse_attribute_content(content: &str, info: &mut AttrInfo) {
     let untagged_re =
         UNTAGGED_RE.get_or_init(|| Regex::new(r#"\buntagged\b"#).expect("Invalid regex"));
 
+    static RENAME_ALL_RE: OnceLock<Regex> = OnceLock::new();
+    let rename_all_re = RENAME_ALL_RE
+        .get_or_init(|| Regex::new(r#"rename_all\s*=\s*"([^"]+)""#).expect("Invalid regex"));
+
+    static DENY_UNKNOWN_RE: OnceLock<Regex> = OnceLock::new();
+    let deny_unknown_re = DENY_UNKNOWN_RE
+        .get_or_init(|| Regex::new(r#"\bdeny_unknown_fields\b"#).expect("Invalid regex"));
+
     if let Some(caps) = rename_re.captures(content) {
         if let Some(val) = caps.get(1) {
             info.rename = Some(val.as_str().to_string());
+        }
+    }
+
+    if let Some(caps) = rename_all_re.captures(content) {
+        if let Some(val) = caps.get(1) {
+            info.rename_all = RenameRule::parse(val.as_str());
         }
     }
 
@@ -82,6 +101,10 @@ fn parse_attribute_content(content: &str, info: &mut AttrInfo) {
 
     if untagged_re.is_match(content) {
         info.untagged = true;
+    }
+
+    if deny_unknown_re.is_match(content) {
+        info.deny_unknown_fields = true;
     }
 }
 
@@ -123,6 +146,8 @@ mod tests {
         assert!(!info.is_skipped);
         assert!(info.tag.is_none());
         assert!(!info.untagged);
+        assert!(info.rename_all.is_none());
+        assert!(!info.deny_unknown_fields);
     }
 
     #[test]
@@ -138,6 +163,22 @@ mod tests {
         let info = extract_attributes(e.syntax());
         assert_eq!(info.tag.as_deref(), Some("kind"));
         assert!(info.untagged);
+        assert!(info.rename_all.is_none());
+        assert!(!info.deny_unknown_fields);
+    }
+
+    #[test]
+    fn test_extract_rename_all_and_deny_unknown() {
+        let code = r#"
+            #[serde(rename_all = "camelCase", deny_unknown_fields)]
+            struct UserProfile {
+                user_id: i32,
+            }
+        "#;
+        let s = parse_first_struct(code);
+        let info = extract_attributes(s.syntax());
+        assert!(matches!(info.rename_all, Some(RenameRule::CamelCase)));
+        assert!(info.deny_unknown_fields);
     }
 
     #[test]

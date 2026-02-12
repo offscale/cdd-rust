@@ -13,4 +13,5 @@ pub mod models;
 pub use extractors::{extract_model, extract_struct, extract_struct_fields, extract_struct_names};
 pub use models::{
     ParsedEnum, ParsedExternalDocs, ParsedField, ParsedModel, ParsedStruct, ParsedVariant,
+    RenameRule,
 };

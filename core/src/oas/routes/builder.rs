@@ -17,7 +17,7 @@ use crate::oas::routes::naming::{derive_handler_name, to_snake_case};
 use crate::oas::routes::shims::{ShimComponents, ShimOperation, ShimPathItem, ShimSecurityScheme};
 use crate::parser::ParsedExternalDocs;
 use regex::Regex;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use utoipa::openapi::RefOr;
 
 /// Helper to iterate methods in a ShimPathItem and extract all operations as Routes.
@@ -27,9 +27,11 @@ pub fn parse_path_item(
     path_item: &ShimPathItem,
     kind: RouteKind,
     components: Option<&ShimComponents>,
+    is_oas3: bool,
     base_path: Option<String>,
     global_security: Option<&Vec<serde_json::Value>>,
-    operation_ids: &mut HashSet<String>,
+    operation_index: &mut HashMap<String, String>,
+    operation_ids: &mut std::collections::HashSet<String>,
     all_paths: &std::collections::BTreeMap<String, ShimPathItem>,
 ) -> AppResult<()> {
     let mut path_item = path_item.clone();
@@ -37,12 +39,14 @@ pub fn parse_path_item(
         path_item = super::resolve_path_item_ref(&ref_path, components, all_paths)?;
     }
 
+    let path_summary = path_item.summary.clone();
+    let path_description = path_item.description.clone();
     let path_base_path =
         super::resolve_base_path_from_servers(path_item.servers.as_ref()).or(base_path.clone());
 
     // Handle common parameters defined at PathItem level.
     let common_params_list = path_item.parameters.as_deref().unwrap_or(&[]);
-    let common_params = resolve_parameters(common_params_list, components)?;
+    let common_params = resolve_parameters(common_params_list, components, is_oas3)?;
 
     let mut add_op = |method: &str, op: Option<ShimOperation>| -> AppResult<()> {
         if let Some(o) = op {
@@ -53,6 +57,7 @@ pub fn parse_path_item(
                         op_id
                     )));
                 }
+                operation_index.insert(op_id.clone(), path_or_name.to_string());
             }
             routes.push(build_route(
                 path_or_name,
@@ -61,8 +66,12 @@ pub fn parse_path_item(
                 &common_params,
                 kind.clone(),
                 components,
+                is_oas3,
                 path_base_path.clone(),
+                path_summary.clone(),
+                path_description.clone(),
                 global_security,
+                operation_ids,
             )?);
         }
         Ok(())
@@ -80,6 +89,12 @@ pub fn parse_path_item(
 
     if let Some(additional) = &path_item.additional_operations {
         for method in additional.keys() {
+            if !is_http_token(method) {
+                return Err(AppError::General(format!(
+                    "additionalOperations method '{}' must be a valid HTTP token",
+                    method
+                )));
+            }
             if is_reserved_method(method) {
                 return Err(AppError::General(format!(
                     "additionalOperations contains reserved HTTP method '{}'",
@@ -105,11 +120,14 @@ fn build_route(
     common_params: &[RouteParam],
     kind: RouteKind,
     components: Option<&ShimComponents>,
+    is_oas3: bool,
     path_base_path: Option<String>,
+    path_summary: Option<String>,
+    path_description: Option<String>,
     global_security: Option<&Vec<serde_json::Value>>,
+    operation_ids: &mut std::collections::HashSet<String>,
 ) -> AppResult<ParsedRoute> {
-    let base_path =
-        super::resolve_base_path_from_servers(op.servers.as_ref()).or(path_base_path);
+    let base_path = super::resolve_base_path_from_servers(op.servers.as_ref()).or(path_base_path);
     // 1. Handler Name
     let handler_name = if let Some(op_id) = &op.operation_id {
         to_snake_case(op_id)
@@ -119,7 +137,7 @@ fn build_route(
 
     // 2. Parameters
     let op_params_list = op.parameters.as_deref().unwrap_or(&[]);
-    let op_params = resolve_parameters(op_params_list, components)?;
+    let op_params = resolve_parameters(op_params_list, components, is_oas3)?;
 
     let mut params = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -201,6 +219,7 @@ fn build_route(
                     &expression,
                     &path_item,
                     components,
+                    operation_ids,
                 )?;
             }
         }
@@ -212,11 +231,16 @@ fn build_route(
         description: d.description,
     });
 
+    let summary = op.summary.clone().or(path_summary);
+    let description = op.description.clone().or(path_description);
+
     // 8. Tags (Used for module grouping)
     let tags = op.tags.unwrap_or_default();
 
     Ok(ParsedRoute {
         path: path.to_string(),
+        summary,
+        description,
         base_path,
         method: method.to_string(),
         handler_name,
@@ -279,16 +303,110 @@ fn validate_path_parameters(path: &str, params: &[RouteParam]) -> AppResult<()> 
 fn is_reserved_method(method: &str) -> bool {
     matches!(
         method.to_ascii_lowercase().as_str(),
-        "get"
-            | "post"
-            | "put"
-            | "delete"
-            | "patch"
-            | "options"
-            | "head"
-            | "trace"
-            | "query"
+        "get" | "post" | "put" | "delete" | "patch" | "options" | "head" | "trace" | "query"
     )
+}
+
+fn is_http_token(method: &str) -> bool {
+    !method.is_empty() && method.chars().all(is_tchar)
+}
+
+fn is_tchar(c: char) -> bool {
+    c.is_ascii_alphanumeric()
+        || matches!(
+            c,
+            '!' | '#'
+                | '$'
+                | '%'
+                | '&'
+                | '\''
+                | '*'
+                | '+'
+                | '-'
+                | '.'
+                | '^'
+                | '_'
+                | '`'
+                | '|'
+                | '~'
+        )
+}
+
+#[cfg(test)]
+mod additional_tests {
+    use super::*;
+    use crate::oas::routes::shims::{ShimOperation, ShimPathItem};
+    use std::collections::BTreeMap;
+    use utoipa::openapi::Responses;
+
+    fn empty_operation() -> ShimOperation {
+        ShimOperation {
+            operation_id: None,
+            summary: None,
+            description: None,
+            parameters: None,
+            request_body: None,
+            responses: crate::oas::routes::shims::ShimResponses::from(Responses::new()),
+            security: None,
+            callbacks: None,
+            tags: None,
+            deprecated: false,
+            external_docs: None,
+            servers: None,
+            extensions: BTreeMap::new(),
+        }
+    }
+
+    fn empty_path_item() -> ShimPathItem {
+        ShimPathItem {
+            ref_path: None,
+            summary: None,
+            description: None,
+            servers: None,
+            parameters: None,
+            get: None,
+            post: None,
+            put: None,
+            delete: None,
+            patch: None,
+            options: None,
+            head: None,
+            trace: None,
+            query: None,
+            additional_operations: None,
+            extensions: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn test_additional_operations_invalid_method_token_rejected() {
+        let mut path_item = empty_path_item();
+        let mut additional = BTreeMap::new();
+        additional.insert("BAD METHOD".to_string(), empty_operation());
+        path_item.additional_operations = Some(additional);
+
+        let mut routes = Vec::new();
+        let mut operation_index = HashMap::new();
+        let mut operation_ids = std::collections::HashSet::new();
+        let all_paths = BTreeMap::new();
+
+        let err = parse_path_item(
+            &mut routes,
+            "/copy",
+            &path_item,
+            RouteKind::Path,
+            None,
+            true,
+            None,
+            None,
+            &mut operation_index,
+            &mut operation_ids,
+            &all_paths,
+        )
+        .unwrap_err();
+
+        assert!(format!("{err}").contains("must be a valid HTTP token"));
+    }
 }
 
 /// Parses a list of Security Requirement Objects into internal requirements.

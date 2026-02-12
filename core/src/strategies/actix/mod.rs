@@ -51,6 +51,10 @@ impl BackendStrategy for ActixStrategy {
         extractors::query_extractor()
     }
 
+    fn typed_query_extractor(&self, inner_type: &str) -> String {
+        extractors::typed_query_extractor(inner_type)
+    }
+
     fn query_string_extractor(&self, inner_type: &str) -> String {
         extractors::query_string_extractor(inner_type)
     }
@@ -75,6 +79,14 @@ impl BackendStrategy for ActixStrategy {
         extractors::multipart_extractor(body_type)
     }
 
+    fn text_extractor(&self, body_type: &str) -> String {
+        extractors::text_extractor(body_type)
+    }
+
+    fn bytes_extractor(&self, body_type: &str) -> String {
+        extractors::bytes_extractor(body_type)
+    }
+
     fn security_extractor(&self, requirements: &[SecurityRequirement]) -> String {
         extractors::security_extractor(requirements)
     }
@@ -95,8 +107,8 @@ impl BackendStrategy for ActixStrategy {
         testing::test_app_init(app_factory)
     }
 
-    fn test_body_setup_code(&self) -> String {
-        testing::test_body_setup_code()
+    fn test_body_setup_code(&self, body: &crate::oas::RequestBodyDefinition) -> String {
+        testing::test_body_setup_code(body)
     }
 
     fn test_request_builder(&self, method: &str, uri: &str, body_setup: &str) -> String {
@@ -119,7 +131,7 @@ impl BackendStrategy for ActixStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::oas::models::{ParsedLink, RouteKind, RuntimeExpression};
+    use crate::oas::models::{LinkParamValue, ParsedLink, RouteKind, RuntimeExpression};
     use crate::oas::ParsedRoute;
     use std::collections::HashMap;
 
@@ -135,7 +147,10 @@ mod tests {
     fn test_actix_handler_signature_with_links_generated() {
         let s = ActixStrategy;
         let mut params = HashMap::new();
-        params.insert("id".to_string(), RuntimeExpression::new("$request.path.id"));
+        params.insert(
+            "id".to_string(),
+            LinkParamValue::Expression(RuntimeExpression::new("$request.path.id")),
+        );
 
         let links = vec![ParsedLink {
             name: "Self".to_string(),
@@ -143,6 +158,8 @@ mod tests {
             operation_id: None,
             operation_ref: Some("/users/{id}".to_string()),
             parameters: params,
+            request_body: None,
+            server_url: None,
         }];
 
         let code = s.handler_signature(
@@ -161,6 +178,8 @@ mod tests {
         let s = ActixStrategy;
         let route = ParsedRoute {
             path: "/path".into(),
+            summary: None,
+            description: None,
             base_path: None,
             method: "QUERY".into(),
             handler_name: "query_handler".into(),

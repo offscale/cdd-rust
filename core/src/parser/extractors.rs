@@ -119,8 +119,10 @@ fn parse_struct_node(struct_def: ast::Struct, name: &str) -> AppResult<ParsedStr
         name: name.to_string(),
         description: struct_desc,
         rename: struct_attrs.rename,
+        rename_all: struct_attrs.rename_all,
         fields,
         is_deprecated: false, // Not parsed from AST yet
+        deny_unknown_fields: struct_attrs.deny_unknown_fields,
         external_docs: None,
     })
 }
@@ -164,12 +166,14 @@ fn parse_enum_node(enum_def: ast::Enum, name: &str) -> AppResult<ParsedEnum> {
         name: name.to_string(),
         description: desc,
         rename: attrs.rename,
+        rename_all: attrs.rename_all,
         tag: attrs.tag,
         untagged: attrs.untagged,
         variants,
         is_deprecated: false,
         external_docs: None,
         discriminator_mapping: None,
+        discriminator_default_mapping: None,
     })
 }
 

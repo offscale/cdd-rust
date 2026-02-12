@@ -5,10 +5,11 @@
 //! High-level logic for scaffolding or updating handler files.
 
 use crate::error::AppResult;
-use crate::handler_generator::extractors::generate_function;
-use crate::handler_generator::parsing::extract_fn_names;
+use crate::handler_generator::extractors::{generate_function, generate_query_struct};
+use crate::handler_generator::parsing::{extract_fn_names, extract_struct_names};
 use crate::oas::ParsedRoute;
 use crate::strategies::BackendStrategy;
+use std::collections::HashSet;
 
 /// Updates or creates a handler module source code.
 pub fn update_handler_module(
@@ -25,9 +26,19 @@ pub fn update_handler_module(
     }
 
     let existing_fns = extract_fn_names(&new_source);
+    let existing_structs = extract_struct_names(&new_source);
+    let mut added_structs = HashSet::new();
 
     for route in routes {
         if !existing_fns.contains(&route.handler_name) {
+            if let Some(query_struct) = generate_query_struct(route) {
+                if !existing_structs.contains(&query_struct.name)
+                    && added_structs.insert(query_struct.name.clone())
+                {
+                    new_source.push_str(&query_struct.code);
+                    new_source.push('\n');
+                }
+            }
             let code = generate_function(route, strategy)?;
             new_source.push_str(&code);
             new_source.push('\n');
@@ -48,6 +59,8 @@ mod tests {
     fn test_scaffold_new_file() {
         let route = ParsedRoute {
             path: "/users".into(),
+            summary: None,
+            description: None,
             base_path: None,
             method: "GET".into(),
             handler_name: "get_users".into(),
@@ -78,6 +91,8 @@ mod tests {
 
         let route = ParsedRoute {
             path: "/new".into(),
+            summary: None,
+            description: None,
             base_path: None,
             method: "POST".into(),
             handler_name: "new_func".into(),

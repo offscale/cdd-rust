@@ -4,6 +4,8 @@
 //!
 //! Logic for generating integration test code helpers and methods.
 
+use crate::oas::models::{EncodingInfo, ParamStyle};
+
 /// Returns imports for test files.
 pub fn test_imports() -> String {
     let mut code = String::new();
@@ -29,8 +31,426 @@ pub fn test_app_init(app_factory: &str) -> String {
 }
 
 /// Generates body setup stub.
-pub fn test_body_setup_code() -> String {
-    "        .set_json(serde_json::json!({ \"dummy\": \"value\" }))\n".to_string()
+pub fn test_body_setup_code(body: &crate::oas::RequestBodyDefinition) -> String {
+    match body.format {
+        crate::oas::BodyFormat::Json => json_body_setup(body),
+        crate::oas::BodyFormat::Form => form_body_setup(body),
+        crate::oas::BodyFormat::Multipart => multipart_body_setup(body),
+        crate::oas::BodyFormat::Text => text_body_setup(body),
+        crate::oas::BodyFormat::Binary => binary_body_setup(body),
+    }
+}
+
+fn json_body_setup(body: &crate::oas::RequestBodyDefinition) -> String {
+    if let Some(example) = &body.example {
+        let normalized = normalize_media_type(&body.media_type);
+        let json_expr = json_value_expr(example);
+        if normalized == "application/json" {
+            return format!("        .set_json({})\n", json_expr);
+        }
+
+        let payload = json_string_expr(example);
+        return format!(
+            "        .insert_header((\"Content-Type\", \"{}\"))\n        .set_payload({})\n",
+            body.media_type, payload
+        );
+    }
+
+    if normalize_media_type(&body.media_type) == "application/json" {
+        return "        .set_json(serde_json::json!({ \"dummy\": \"value\" }))\n".to_string();
+    }
+
+    let payload = json_payload_for_media_type(&body.media_type);
+    format!(
+        "        .insert_header((\"Content-Type\", \"{}\"))\n        .set_payload({})\n",
+        body.media_type, payload
+    )
+}
+
+fn form_body_setup(body: &crate::oas::RequestBodyDefinition) -> String {
+    if let Some(example) = &body.example {
+        if normalize_media_type(&body.media_type) == "application/x-www-form-urlencoded" {
+            if let Some(map) = example.as_object() {
+                let payload = serialize_form_urlencoded(map, body.encoding.as_ref());
+                let payload_lit = rust_string_literal(&payload);
+                return format!(
+                    "        .insert_header((\"Content-Type\", \"{}\"))\n        .set_payload({})\n",
+                    body.media_type, payload_lit
+                );
+            }
+        }
+
+        let form_expr = json_value_expr(example);
+        return format!("        .set_form(&{})\n", form_expr);
+    }
+
+    if normalize_media_type(&body.media_type) == "application/x-www-form-urlencoded" {
+        return "        .set_form(&serde_json::json!({ \"dummy\": \"value\" }))\n".to_string();
+    }
+
+    format!(
+        "        .insert_header((\"Content-Type\", \"{}\"))\n        .set_payload(\"dummy=value\")\n",
+        body.media_type
+    )
+}
+
+fn multipart_body_setup(body: &crate::oas::RequestBodyDefinition) -> String {
+    let media = if body.media_type.is_empty() {
+        "multipart/form-data"
+    } else {
+        body.media_type.as_str()
+    };
+    format!(
+        "        .insert_header((\"Content-Type\", \"{}; boundary=boundary\"))\n        .set_payload(\"--boundary--\")\n",
+        media
+    )
+}
+
+fn text_body_setup(body: &crate::oas::RequestBodyDefinition) -> String {
+    let media = if body.media_type.is_empty() {
+        "text/plain"
+    } else {
+        body.media_type.as_str()
+    };
+    if let Some(example) = &body.example {
+        let payload = text_string_expr(example);
+        return format!(
+            "        .insert_header((\"Content-Type\", \"{}\"))\n        .set_payload({})\n",
+            media, payload
+        );
+    }
+    format!(
+        "        .insert_header((\"Content-Type\", \"{}\"))\n        .set_payload(\"dummy\")\n",
+        media
+    )
+}
+
+fn binary_body_setup(body: &crate::oas::RequestBodyDefinition) -> String {
+    let media = if body.media_type.is_empty() {
+        "application/octet-stream"
+    } else {
+        body.media_type.as_str()
+    };
+    format!(
+        "        .insert_header((\"Content-Type\", \"{}\"))\n        .set_payload(vec![0u8, 1u8, 2u8, 3u8])\n",
+        media
+    )
+}
+
+fn json_payload_for_media_type(media_type: &str) -> String {
+    if is_sequential_json_media_type(media_type) {
+        "\"{\\\"dummy\\\":\\\"value\\\"}\\n{\\\"dummy\\\":\\\"value\\\"}\"".to_string()
+    } else {
+        "\"{\\\"dummy\\\":\\\"value\\\"}\"".to_string()
+    }
+}
+
+fn json_value_expr(value: &serde_json::Value) -> String {
+    let serialized = serde_json::to_string(value).unwrap_or_else(|_| "null".to_string());
+    let literal = rust_string_literal(&serialized);
+    format!(
+        "serde_json::from_str::<serde_json::Value>({}).unwrap()",
+        literal
+    )
+}
+
+fn json_string_expr(value: &serde_json::Value) -> String {
+    let serialized = serde_json::to_string(value).unwrap_or_else(|_| "null".to_string());
+    rust_string_literal(&serialized)
+}
+
+fn text_string_expr(value: &serde_json::Value) -> String {
+    let payload = match value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Null => "null".to_string(),
+        _ => value.to_string(),
+    };
+    rust_string_literal(&payload)
+}
+
+fn example_to_string(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Null => "null".to_string(),
+        _ => value.to_string(),
+    }
+}
+
+fn rust_string_literal(value: &str) -> String {
+    format!("{:?}", value)
+}
+
+fn is_sequential_json_media_type(media_type: &str) -> bool {
+    let normalized = normalize_media_type(media_type);
+    matches!(
+        normalized.as_str(),
+        "application/jsonl"
+            | "application/x-ndjson"
+            | "application/json-seq"
+            | "application/geo+json-seq"
+    ) || normalized.ends_with("+jsonl")
+        || normalized.ends_with("+ndjson")
+        || normalized.ends_with("+json-seq")
+}
+
+fn normalize_media_type(media_type: &str) -> String {
+    media_type
+        .split(';')
+        .next()
+        .unwrap_or(media_type)
+        .trim()
+        .to_ascii_lowercase()
+}
+
+fn serialize_form_urlencoded(
+    map: &serde_json::Map<String, serde_json::Value>,
+    encoding: Option<&std::collections::HashMap<String, EncodingInfo>>,
+) -> String {
+    let mut pairs = Vec::new();
+
+    for (name, value) in map {
+        let enc = encoding.and_then(|e| e.get(name));
+        let style = enc
+            .and_then(|e| e.style.clone())
+            .unwrap_or(ParamStyle::Form);
+        let explode = enc
+            .and_then(|e| e.explode)
+            .unwrap_or(matches!(style, ParamStyle::Form));
+        let allow_reserved = enc.and_then(|e| e.allow_reserved).unwrap_or(false);
+
+        pairs.extend(serialize_form_param(
+            name,
+            value,
+            &style,
+            explode,
+            allow_reserved,
+        ));
+    }
+
+    pairs.join("&")
+}
+
+fn serialize_form_param(
+    name: &str,
+    value: &serde_json::Value,
+    style: &ParamStyle,
+    explode: bool,
+    allow_reserved: bool,
+) -> Vec<String> {
+    match value {
+        serde_json::Value::Array(items) => {
+            serialize_form_array(name, style, explode, allow_reserved, items)
+        }
+        serde_json::Value::Object(map) => {
+            serialize_form_object(name, style, explode, allow_reserved, map)
+        }
+        _ => vec![format!(
+            "{}={}",
+            encode_form_component(name, allow_reserved),
+            encode_form_component(&example_to_string(value), allow_reserved)
+        )],
+    }
+}
+
+fn serialize_form_array(
+    name: &str,
+    style: &ParamStyle,
+    explode: bool,
+    allow_reserved: bool,
+    items: &[serde_json::Value],
+) -> Vec<String> {
+    if items.is_empty() {
+        return Vec::new();
+    }
+
+    match style {
+        ParamStyle::SpaceDelimited => {
+            let joined = items
+                .iter()
+                .map(|v| encode_form_component(&example_to_string(v), allow_reserved))
+                .collect::<Vec<_>>()
+                .join("%20");
+            vec![format!(
+                "{}={}",
+                encode_form_component(name, allow_reserved),
+                joined
+            )]
+        }
+        ParamStyle::PipeDelimited => {
+            let joined = items
+                .iter()
+                .map(|v| encode_form_component(&example_to_string(v), allow_reserved))
+                .collect::<Vec<_>>()
+                .join("%7C");
+            vec![format!(
+                "{}={}",
+                encode_form_component(name, allow_reserved),
+                joined
+            )]
+        }
+        _ => {
+            if explode {
+                items
+                    .iter()
+                    .map(|v| {
+                        format!(
+                            "{}={}",
+                            encode_form_component(name, allow_reserved),
+                            encode_form_component(&example_to_string(v), allow_reserved)
+                        )
+                    })
+                    .collect()
+            } else {
+                let joined = items
+                    .iter()
+                    .map(|v| encode_form_component(&example_to_string(v), allow_reserved))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                vec![format!(
+                    "{}={}",
+                    encode_form_component(name, allow_reserved),
+                    joined
+                )]
+            }
+        }
+    }
+}
+
+fn serialize_form_object(
+    name: &str,
+    style: &ParamStyle,
+    explode: bool,
+    allow_reserved: bool,
+    map: &serde_json::Map<String, serde_json::Value>,
+) -> Vec<String> {
+    if map.is_empty() {
+        return Vec::new();
+    }
+
+    match style {
+        ParamStyle::DeepObject => map
+            .iter()
+            .map(|(k, v)| {
+                format!(
+                    "{}={}",
+                    encode_form_deep_object_name(name, k, allow_reserved),
+                    encode_form_component(&example_to_string(v), allow_reserved)
+                )
+            })
+            .collect(),
+        ParamStyle::SpaceDelimited => {
+            let joined = map
+                .iter()
+                .flat_map(|(k, v)| {
+                    [
+                        encode_form_component(k, allow_reserved),
+                        encode_form_component(&example_to_string(v), allow_reserved),
+                    ]
+                })
+                .collect::<Vec<_>>()
+                .join("%20");
+            vec![format!(
+                "{}={}",
+                encode_form_component(name, allow_reserved),
+                joined
+            )]
+        }
+        ParamStyle::PipeDelimited => {
+            let joined = map
+                .iter()
+                .flat_map(|(k, v)| {
+                    [
+                        encode_form_component(k, allow_reserved),
+                        encode_form_component(&example_to_string(v), allow_reserved),
+                    ]
+                })
+                .collect::<Vec<_>>()
+                .join("%7C");
+            vec![format!(
+                "{}={}",
+                encode_form_component(name, allow_reserved),
+                joined
+            )]
+        }
+        _ => {
+            if explode {
+                map.iter()
+                    .map(|(k, v)| {
+                        format!(
+                            "{}={}",
+                            encode_form_component(k, allow_reserved),
+                            encode_form_component(&example_to_string(v), allow_reserved)
+                        )
+                    })
+                    .collect()
+            } else {
+                let joined = map
+                    .iter()
+                    .flat_map(|(k, v)| {
+                        [
+                            encode_form_component(k, allow_reserved),
+                            encode_form_component(&example_to_string(v), allow_reserved),
+                        ]
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                vec![format!(
+                    "{}={}",
+                    encode_form_component(name, allow_reserved),
+                    joined
+                )]
+            }
+        }
+    }
+}
+
+fn encode_form_deep_object_name(name: &str, key: &str, allow_reserved: bool) -> String {
+    let name = encode_form_component(name, allow_reserved);
+    let key = encode_form_component(key, allow_reserved);
+    format!("{}%5B{}%5D", name, key)
+}
+
+fn encode_form_component(input: &str, allow_reserved: bool) -> String {
+    let bytes = input.as_bytes();
+    let mut out = String::new();
+    for &b in bytes {
+        match b {
+            b' ' => out.push('+'),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'*' => {
+                out.push(b as char)
+            }
+            _ if allow_reserved && is_reserved(b) => out.push(b as char),
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
+}
+
+fn is_reserved(b: u8) -> bool {
+    matches!(
+        b,
+        b':' | b'/'
+            | b'?'
+            | b'#'
+            | b'['
+            | b']'
+            | b'@'
+            | b'!'
+            | b'$'
+            | b'&'
+            | b'\''
+            | b'('
+            | b')'
+            | b'*'
+            | b'+'
+            | b','
+            | b';'
+            | b'='
+    )
 }
 
 /// Generates request builder chain.
@@ -62,18 +482,326 @@ pub fn test_assertion() -> String {
         .to_string()
 }
 
-/// Generates validation helper function.
+/// Generates validation helper function with status- and content-type-aware response matching.
 pub fn test_validation_helper() -> String {
-    r#"
+    r##"
+fn normalize_media_type(media_type: &str) -> String {
+    media_type
+        .split(';')
+        .next()
+        .unwrap_or(media_type)
+        .trim()
+        .to_ascii_lowercase()
+}
+
+fn is_sequential_json_media_type(media_type: &str) -> bool {
+    matches!(
+        media_type,
+        "application/jsonl"
+            | "application/x-ndjson"
+            | "application/json-seq"
+            | "application/geo+json-seq"
+    ) || media_type.ends_with("+jsonl")
+        || media_type.ends_with("+ndjson")
+        || media_type.ends_with("+json-seq")
+}
+
+fn is_json_media_type(media_type: &str) -> bool {
+    let normalized = normalize_media_type(media_type);
+    normalized == "application/json"
+        || normalized == "application/*+json"
+        || normalized.ends_with("+json")
+        || is_sequential_json_media_type(&normalized)
+}
+
+fn is_text_media_type(media_type: &str) -> bool {
+    let normalized = normalize_media_type(media_type);
+    normalized.starts_with("text/")
+        || normalized == "application/xml"
+        || normalized == "text/xml"
+        || normalized.ends_with("+xml")
+}
+
+fn is_event_stream_media_type(media_type: &str) -> bool {
+    normalize_media_type(media_type) == "text/event-stream"
+}
+
+fn media_type_specificity(pattern: &str, actual: &str) -> Option<i32> {
+    let pattern = normalize_media_type(pattern);
+    let actual = normalize_media_type(actual);
+
+    if pattern == actual {
+        return Some(3);
+    }
+    if pattern == "*/*" {
+        return Some(0);
+    }
+    if let Some(idx) = pattern.find('*') {
+        let (prefix, rest) = pattern.split_at(idx);
+        let suffix = &rest[1..];
+        if !prefix.is_empty() && !actual.starts_with(prefix) {
+            return None;
+        }
+        if !suffix.is_empty() && !actual.ends_with(suffix) {
+            return None;
+        }
+        let score = if !prefix.is_empty() && !suffix.is_empty() { 2 } else { 1 };
+        return Some(score);
+    }
+    None
+}
+
+fn select_media_type_for_response(
+    content: &serde_json::Map<String, serde_json::Value>,
+    content_type: &str,
+) -> Option<(String, &serde_json::Value)> {
+    let mut best: Option<(String, &serde_json::Value, i32)> = None;
+    for (key, value) in content.iter() {
+        if let Some(score) = media_type_specificity(key, content_type) {
+            let replace = match best.as_ref() {
+                Some((_, _, best_score)) => score > *best_score,
+                None => true,
+            };
+            if replace {
+                best = Some((key.clone(), value, score));
+            }
+        }
+    }
+    best.map(|(k, v, _)| (k, v))
+}
+
+fn select_media_type(
+    content: &serde_json::Map<String, serde_json::Value>,
+) -> Option<(String, &serde_json::Value)> {
+    if let Some(media) = content.get("application/json") {
+        return Some(("application/json".to_string(), media));
+    }
+
+    if let Some((key, media)) = content.iter().find(|(k, _)| {
+        let normalized = normalize_media_type(k);
+        normalized.ends_with("+json")
+            || normalized == "application/*+json"
+            || is_sequential_json_media_type(&normalized)
+    }) {
+        return Some((key.clone(), media));
+    }
+
+    if let Some(media) = content.get("text/plain") {
+        return Some(("text/plain".to_string(), media));
+    }
+
+    if let Some((key, media)) = content.iter().find(|(k, _)| is_text_media_type(k)) {
+        return Some((key.clone(), media));
+    }
+
+    if let Some(media) = content.get("application/*") {
+        return Some(("application/*".to_string(), media));
+    }
+
+    if let Some(media) = content.get("*/*") {
+        return Some(("*/*".to_string(), media));
+    }
+
+    content.iter().next().map(|(k, v)| (k.clone(), v))
+}
+
+fn select_response_for_status(
+    responses: &serde_json::Value,
+    status: u16,
+) -> Option<&serde_json::Value> {
+    let map = responses.as_object()?;
+    let status_key = status.to_string();
+    if let Some(resp) = map.get(&status_key) {
+        return Some(resp);
+    }
+    let range_key = format!("{}XX", status / 100);
+    if let Some(resp) = map.get(&range_key) {
+        return Some(resp);
+    }
+    let range_key_lower = format!("{}xx", status / 100);
+    if let Some(resp) = map.get(&range_key_lower) {
+        return Some(resp);
+    }
+    map.get("default")
+}
+
+fn resolve_response_ref(resp_def: &serde_json::Value, openapi: &serde_json::Value) -> serde_json::Value {
+    let Some(ref_str) = resp_def.get("$ref").and_then(|v| v.as_str()) else {
+        return resp_def.clone();
+    };
+
+    let resolved = if let Some(name) = ref_str.strip_prefix("#/components/responses/") {
+        openapi
+            .get("components")
+            .and_then(|c| c.get("responses"))
+            .and_then(|r| r.get(name))
+    } else if let Some(name) = ref_str.strip_prefix("#/responses/") {
+        openapi.get("responses").and_then(|r| r.get(name))
+    } else {
+        None
+    };
+
+    let Some(resolved) = resolved else {
+        return resp_def.clone();
+    };
+
+    let mut merged = resolved.clone();
+    if let serde_json::Value::Object(map) = &mut merged {
+        if let Some(summary) = resp_def.get("summary") {
+            map.insert("summary".to_string(), summary.clone());
+        }
+        if let Some(description) = resp_def.get("description") {
+            map.insert("description".to_string(), description.clone());
+        }
+    }
+    merged
+}
+
+fn resolve_header_ref(header_def: &serde_json::Value, openapi: &serde_json::Value) -> serde_json::Value {
+    let Some(ref_str) = header_def.get("$ref").and_then(|v| v.as_str()) else {
+        return header_def.clone();
+    };
+
+    let resolved = if let Some(name) = ref_str.strip_prefix("#/components/headers/") {
+        openapi
+            .get("components")
+            .and_then(|c| c.get("headers"))
+            .and_then(|h| h.get(name))
+    } else {
+        None
+    };
+
+    let Some(resolved) = resolved else {
+        return header_def.clone();
+    };
+
+    let mut merged = resolved.clone();
+    if let serde_json::Value::Object(map) = &mut merged {
+        if let Some(summary) = header_def.get("summary") {
+            map.insert("summary".to_string(), summary.clone());
+        }
+        if let Some(description) = header_def.get("description") {
+            map.insert("description".to_string(), description.clone());
+        }
+    }
+    merged
+}
+
+fn validate_required_headers(
+    resp_def: &serde_json::Value,
+    headers: &actix_web::http::HeaderMap,
+    openapi: &serde_json::Value,
+) {
+    let Some(header_map) = resp_def.get("headers").and_then(|h| h.as_object()) else {
+        return;
+    };
+
+    for (name, header_def) in header_map.iter() {
+        if name.eq_ignore_ascii_case("content-type") {
+            continue;
+        }
+        let resolved = resolve_header_ref(header_def, openapi);
+        let required = resolved
+            .get("required")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if required && headers.get(name).is_none() {
+            panic!("Required response header '{}' is missing", name);
+        }
+    }
+}
+
+fn parse_sequential_json(body: &str) -> serde_json::Value {
+    let mut items = Vec::new();
+    let chunks: Vec<&str> = if body.contains('\u{1e}') {
+        body.split('\u{1e}').collect()
+    } else {
+        body.lines().collect()
+    };
+
+    for chunk in chunks {
+        let trimmed = chunk.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            items.push(val);
+        }
+    }
+
+    serde_json::Value::Array(items)
+}
+
+fn parse_event_stream(body: &str) -> serde_json::Value {
+    let mut events = Vec::new();
+    let mut data_lines: Vec<String> = Vec::new();
+    let mut event = serde_json::Map::new();
+
+    for raw_line in body.lines() {
+        let line = raw_line.trim_end_matches('\r');
+        if line.is_empty() {
+            if !data_lines.is_empty() {
+                let data = data_lines.join("\n");
+                event.insert("data".to_string(), serde_json::Value::String(data));
+                data_lines.clear();
+            }
+            if !event.is_empty() {
+                events.push(serde_json::Value::Object(std::mem::take(&mut event)));
+            }
+            continue;
+        }
+        if line.starts_with(':') {
+            continue;
+        }
+
+        let mut parts = line.splitn(2, ':');
+        let field = parts.next().unwrap_or("").trim();
+        let mut value = parts.next().unwrap_or("").to_string();
+        if value.starts_with(' ') {
+            value = value[1..].to_string();
+        }
+
+        match field {
+            "data" => data_lines.push(value),
+            "event" | "id" => {
+                event.insert(field.to_string(), serde_json::Value::String(value));
+            }
+            "retry" => {
+                let retry_val = value
+                    .parse::<i64>()
+                    .map(serde_json::Value::from)
+                    .unwrap_or_else(|_| serde_json::Value::String(value));
+                event.insert("retry".to_string(), retry_val);
+            }
+            _ => {}
+        }
+    }
+
+    if !data_lines.is_empty() {
+        let data = data_lines.join("\n");
+        event.insert("data".to_string(), serde_json::Value::String(data));
+    }
+    if !event.is_empty() {
+        events.push(serde_json::Value::Object(event));
+    }
+
+    serde_json::Value::Array(events)
+}
+
 /// Helper to validate response body against OpenAPI schema.
 async fn validate_response(resp: actix_web::dev::ServiceResponse, method: &str, path_template: &str) {
     use actix_web::body::MessageBody;
+    let status = resp.status();
+    let status_code = status.as_u16();
+    let headers = resp.headers().clone();
+    let content_type = headers
+        .get(actix_web::http::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_string());
     let body_bytes = resp.into_body().try_into_bytes().expect("Failed to read response body");
-    let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap_or(serde_json::Value::Null);
     let yaml_content = fs::read_to_string(OPENAPI_PATH).expect("Failed to read openapi.yaml");
     let openapi: serde_json::Value = serde_yaml::from_str(&yaml_content).expect("Failed to parse OpenAPI");
 
-    let status_str = "200";
     let method_key = method.to_lowercase();
     let operation = openapi.get("paths")
         .and_then(|p| p.get(path_template))
@@ -81,14 +809,14 @@ async fn validate_response(resp: actix_web::dev::ServiceResponse, method: &str, 
 
     if let Some(op) = operation {
         let responses = op.get("responses");
-        let response = responses.and_then(|r| r.get(status_str).or_else(|| r.get("default")));
+        let response = responses.and_then(|r| select_response_for_status(r, status_code));
         if let Some(resp_def) = response {
-            let schema_oas3 = resp_def.get("content")
-                .and_then(|c| c.get("application/json"))
-                .and_then(|m| m.get("schema"));
+            let resp_def = resolve_response_ref(resp_def, &openapi);
+            validate_required_headers(&resp_def, &headers, &openapi);
             let schema_swagger2 = resp_def.get("schema");
 
-            if let Some(schema) = schema_oas3.or(schema_swagger2) {
+            if let Some(schema) = schema_swagger2 {
+                let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap_or(serde_json::Value::Null);
                 match JSONSchema::options().compile(schema) {
                     Ok(validator) => {
                         if let Err(errors) = validator.validate(&body_json) {
@@ -98,17 +826,73 @@ async fn validate_response(resp: actix_web::dev::ServiceResponse, method: &str, 
                     }
                     Err(e) => panic!("Failed to compile JSON Schema: {}", e),
                 }
+                return;
+            }
+
+            let content = resp_def.get("content").and_then(|c| c.as_object());
+            if let Some(content_map) = content {
+                let selected = content_type
+                    .as_deref()
+                    .and_then(|ct| select_media_type_for_response(content_map, ct));
+                if let Some((media_type, media_def)) = selected.or_else(|| select_media_type(content_map)) {
+                    let schema_value = media_def.get("schema").cloned().or_else(|| {
+                        let normalized = normalize_media_type(&media_type);
+                        if is_sequential_json_media_type(&normalized)
+                            || is_event_stream_media_type(&normalized)
+                        {
+                            media_def.get("itemSchema").map(|item| {
+                                serde_json::json!({
+                                    "type": "array",
+                                    "items": item.clone()
+                                })
+                            })
+                        } else {
+                            None
+                        }
+                    });
+
+                    if let Some(schema) = schema_value {
+                        let body_json = if is_json_media_type(&media_type) {
+                            let body_str = String::from_utf8_lossy(&body_bytes);
+                            if is_sequential_json_media_type(&normalize_media_type(&media_type)) {
+                                parse_sequential_json(&body_str)
+                            } else {
+                                serde_json::from_slice(&body_bytes).unwrap_or(serde_json::Value::Null)
+                            }
+                        } else if is_event_stream_media_type(&media_type) {
+                            let body_str = String::from_utf8_lossy(&body_bytes);
+                            parse_event_stream(&body_str)
+                        } else if is_text_media_type(&media_type) {
+                            let body_str = String::from_utf8_lossy(&body_bytes).to_string();
+                            serde_json::Value::String(body_str)
+                        } else {
+                            return;
+                        };
+
+                        match JSONSchema::options().compile(&schema) {
+                            Ok(validator) => {
+                                if let Err(errors) = validator.validate(&body_json) {
+                                    let err_msgs: Vec<String> = errors.map(|e| e.to_string()).collect();
+                                    panic!("Response schema validation failed: {}", err_msgs.join("\n"));
+                                }
+                            }
+                            Err(e) => panic!("Failed to compile JSON Schema: {}", e),
+                        }
+                    }
+                }
             }
         }
     }
 }
-"#
+"##
         .to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+    use std::collections::HashMap;
 
     #[test]
     fn test_imports_and_signature() {
@@ -127,7 +911,17 @@ mod tests {
         assert!(init.contains("test::init_service"));
         assert!(init.contains("crate::create_app"));
 
-        let body = test_body_setup_code();
+        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+            ty: "Payload".into(),
+            description: None,
+            media_type: "application/json".into(),
+            format: crate::oas::BodyFormat::Json,
+            required: true,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: None,
+            example: None,
+        });
         assert!(body.contains("set_json"));
     }
 
@@ -139,10 +933,126 @@ mod tests {
         assert!(get_req.contains("TestRequest::get()"));
 
         let query_req = test_request_builder("QUERY", "/search", body);
-        assert!(query_req.contains("method(actix_web::http::Method::from_bytes(b\"QUERY\").unwrap())"));
+        assert!(
+            query_req.contains("method(actix_web::http::Method::from_bytes(b\"QUERY\").unwrap())")
+        );
 
         let custom_req = test_request_builder("PROPFIND", "/files", body);
         assert!(custom_req.contains("from_bytes(b\"PROPFIND\")"));
+    }
+
+    #[test]
+    fn test_body_setup_variants() {
+        let text_body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+            ty: "String".into(),
+            description: None,
+            media_type: "text/plain".into(),
+            format: crate::oas::BodyFormat::Text,
+            required: true,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: None,
+            example: None,
+        });
+        assert!(text_body.contains("text/plain"));
+        assert!(text_body.contains("set_payload(\"dummy\")"));
+
+        let binary_body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+            ty: "Vec<u8>".into(),
+            description: None,
+            media_type: "application/octet-stream".into(),
+            format: crate::oas::BodyFormat::Binary,
+            required: true,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: None,
+            example: None,
+        });
+        assert!(binary_body.contains("application/octet-stream"));
+        assert!(binary_body.contains("set_payload(vec![0u8"));
+    }
+
+    #[test]
+    fn test_body_setup_uses_example_json() {
+        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+            ty: "Payload".into(),
+            description: None,
+            media_type: "application/json".into(),
+            format: crate::oas::BodyFormat::Json,
+            required: true,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: None,
+            example: Some(serde_json::json!({"hello": "world"})),
+        });
+        assert!(body.contains("from_str::<serde_json::Value>"));
+        assert!(body.contains("hello"));
+    }
+
+    #[test]
+    fn test_form_body_setup_urlencoded_example() {
+        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+            ty: "Form".into(),
+            description: None,
+            media_type: "application/x-www-form-urlencoded".into(),
+            format: crate::oas::BodyFormat::Form,
+            required: true,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: None,
+            example: Some(serde_json::json!({"foo": "a + b", "bar": true})),
+        });
+        assert!(body.contains("Content-Type"));
+        assert!(body.contains("foo=a+%2B+b"));
+        assert!(body.contains("bar=true"));
+    }
+
+    #[test]
+    fn test_form_body_setup_urlencoded_allow_reserved() {
+        let mut encoding = HashMap::new();
+        encoding.insert(
+            "path".into(),
+            EncodingInfo {
+                content_type: None,
+                headers: HashMap::new(),
+                style: Some(ParamStyle::Form),
+                explode: Some(true),
+                allow_reserved: Some(true),
+            },
+        );
+        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+            ty: "Form".into(),
+            description: None,
+            media_type: "application/x-www-form-urlencoded".into(),
+            format: crate::oas::BodyFormat::Form,
+            required: true,
+            encoding: Some(encoding),
+            prefix_encoding: None,
+            item_encoding: None,
+            example: Some(serde_json::json!({"path": "a/b"})),
+        });
+        assert!(body.contains("path=a/b"));
+    }
+
+    #[test]
+    fn test_resolve_header_ref_overrides_description() {
+        let openapi = json!({
+            "components": {
+                "headers": {
+                    "Rate": {
+                        "description": "base",
+                        "schema": { "type": "string" }
+                    }
+                }
+            }
+        });
+        let header_def = json!({
+            "$ref": "#/components/headers/Rate",
+            "description": "override"
+        });
+
+        let resolved = resolve_header_ref(&header_def, &openapi);
+        assert_eq!(resolved["description"], "override");
     }
 
     #[test]
@@ -159,5 +1069,12 @@ mod tests {
         let helper = test_validation_helper();
         assert!(helper.contains("validate_response"));
         assert!(helper.contains("JSONSchema::options().compile"));
+        assert!(helper.contains("parse_sequential_json"));
+        assert!(helper.contains("parse_event_stream"));
+        assert!(helper.contains("select_media_type"));
+        assert!(helper.contains("select_media_type_for_response"));
+        assert!(helper.contains("select_response_for_status"));
+        assert!(helper.contains("validate_required_headers"));
+        assert!(helper.contains("resolve_response_ref"));
     }
 }

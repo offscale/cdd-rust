@@ -9,7 +9,7 @@ clap = { version = "^4", features = ["derive"] }
 dsync = "^0.1"
 walkdir = "^2.5"
 derive_more = { version = "^2.1", features = ["from", "display"] }
-serde_json = { version = "^1", features = ["indexmap"] }
+serde_json = { version = "^1", features = ["preserve_order"] }
 serde_yaml = "^0.9"
 
 [dev-dependencies]

@@ -189,15 +189,23 @@ openapi: 3.0.0
 info: {title: Test, version: 1.0}
 paths:
   /users/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
     get:
       tags: [Users]
       operationId: getUser
-      responses: {}
+      responses:
+        '200': { description: OK }
   /posts:
     post:
       tags: [Posts]
       operationId: createPost
-      responses: {}
+      responses:
+        '200': { description: OK }
 "#;
         let mut f = fs::File::create(&openapi_path).unwrap();
         f.write_all(yaml.as_bytes()).unwrap();
@@ -262,7 +270,8 @@ paths:
   /ping:
     get:
       operationId: ping
-      responses: {}
+      responses:
+        '200': { description: OK }
 "#;
         let mut f = fs::File::create(&openapi_path).unwrap();
         f.write_all(yaml.as_bytes()).unwrap();
