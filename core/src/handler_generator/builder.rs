@@ -54,6 +54,7 @@ mod tests {
     use crate::oas::models::RouteKind;
     use crate::oas::ParsedRoute;
     use crate::strategies::ActixStrategy;
+    use std::collections::BTreeMap;
 
     #[test]
     fn test_scaffold_new_file() {
@@ -61,20 +62,47 @@ mod tests {
             path: "/users".into(),
             summary: None,
             description: None,
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
             base_path: None,
+
+            path_servers: None,
+
+            servers_override: None,
             method: "GET".into(),
             handler_name: "get_users".into(),
+            operation_id: None,
             params: vec![],
+
+            path_params: vec![],
+
             request_body: None,
             security: vec![],
+            security_defined: false,
             response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
             tags: vec![],
+            extensions: BTreeMap::new(),
         };
 
         let strategy = ActixStrategy;
@@ -93,20 +121,47 @@ mod tests {
             path: "/new".into(),
             summary: None,
             description: None,
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
             base_path: None,
+
+            path_servers: None,
+
+            servers_override: None,
             method: "POST".into(),
             handler_name: "new_func".into(),
+            operation_id: None,
             params: vec![],
+
+            path_params: vec![],
+
             request_body: None,
             security: vec![],
+            security_defined: false,
             response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
             tags: vec![],
+            extensions: BTreeMap::new(),
         };
 
         let strategy = ActixStrategy;

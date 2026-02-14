@@ -58,22 +58,17 @@ fn collect_fields_recursive(
 
                     // Extract metadata
                     // Note: utoipa::openapi::Object does not currently expose externalDocs
-                    let (description, deprecated) = match field_schema {
-                        RefOr::T(Schema::Object(o)) => (
-                            o.description.clone(),
-                            matches!(o.deprecated, Some(Deprecated::True)),
-                        ),
-                        RefOr::T(Schema::AllOf(a)) => (a.description.clone(), false),
-                        _ => (None, false),
-                    };
+                    let metadata = extract_field_metadata(field_schema, context);
 
                     let field = ParsedField {
                         name: field_name.clone(),
                         ty: rust_type,
-                        description,
+                        description: metadata.description,
                         rename: None,
                         is_skipped: false,
-                        is_deprecated: deprecated,
+                        is_read_only: metadata.read_only,
+                        is_write_only: metadata.write_only,
+                        is_deprecated: metadata.deprecated,
                         external_docs: None, // Not available in current Schema Object model
                     };
 
@@ -100,6 +95,8 @@ fn collect_fields_recursive(
                                 description: Some("Captured additional properties".to_string()),
                                 rename: None,
                                 is_skipped: false,
+                                is_read_only: false,
+                                is_write_only: false,
                                 is_deprecated: false,
                                 external_docs: None,
                             };
@@ -120,6 +117,8 @@ fn collect_fields_recursive(
                                 description: Some("Captured additional properties".to_string()),
                                 rename: None,
                                 is_skipped: false,
+                                is_read_only: false,
+                                is_write_only: false,
                                 is_deprecated: false,
                                 external_docs: None,
                             };
@@ -159,6 +158,37 @@ fn collect_fields_recursive(
         _ => {}
     }
     Ok(())
+}
+
+#[derive(Default)]
+struct FieldMetadata {
+    description: Option<String>,
+    deprecated: bool,
+    read_only: bool,
+    write_only: bool,
+}
+
+fn extract_field_metadata(schema: &RefOr<Schema>, context: &ResolutionContext) -> FieldMetadata {
+    let resolved = match schema {
+        RefOr::T(s) => Some(s),
+        RefOr::Ref(r) => resolve_ref_name(&r.ref_location, context),
+    };
+
+    match resolved {
+        Some(Schema::Object(obj)) => FieldMetadata {
+            description: obj.description.clone(),
+            deprecated: matches!(obj.deprecated, Some(Deprecated::True)),
+            read_only: obj.read_only.unwrap_or(false),
+            write_only: obj.write_only.unwrap_or(false),
+        },
+        Some(Schema::AllOf(all_of)) => FieldMetadata {
+            description: all_of.description.clone(),
+            deprecated: false,
+            read_only: false,
+            write_only: false,
+        },
+        _ => FieldMetadata::default(),
+    }
 }
 
 #[cfg(test)]
@@ -235,5 +265,53 @@ components:
         let note = fields.iter().find(|f| f.name == "note").unwrap();
         assert_eq!(id.ty, "i32");
         assert_eq!(note.ty, "Option<String>");
+    }
+
+    #[test]
+    fn test_field_metadata_read_write_only_and_ref_description() {
+        let yaml = r#"
+openapi: 3.1.0
+info: {title: T, version: 1.0}
+paths: {}
+components:
+  schemas:
+    Status:
+      type: string
+      description: Status description
+      deprecated: true
+      readOnly: true
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          readOnly: true
+        password:
+          type: string
+          writeOnly: true
+        status:
+          $ref: '#/components/schemas/Status'
+"#;
+        let openapi: OpenApi = serde_yaml::from_str(yaml).unwrap();
+        let components = openapi.components.as_ref().unwrap();
+        let ctx = ResolutionContext::new(None, components);
+
+        let schema = match components.schemas.get("User").unwrap() {
+            RefOr::T(s) => s,
+            RefOr::Ref(_) => panic!("Expected inline schema"),
+        };
+
+        let fields = flatten_schema_fields(schema, &ctx).unwrap();
+        let id = fields.iter().find(|f| f.name == "id").unwrap();
+        let password = fields.iter().find(|f| f.name == "password").unwrap();
+        let status = fields.iter().find(|f| f.name == "status").unwrap();
+
+        assert!(id.is_read_only);
+        assert!(!id.is_write_only);
+        assert!(password.is_write_only);
+        assert!(!password.is_read_only);
+        assert_eq!(status.description.as_deref(), Some("Status description"));
+        assert!(status.is_deprecated);
+        assert!(status.is_read_only);
     }
 }

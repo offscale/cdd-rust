@@ -13,6 +13,8 @@ use percent_encoding::percent_decode_str;
 use std::path::Path;
 use url::Url;
 
+const DUMMY_BASE: &str = "http://example.invalid/";
+
 /// Normalizes a `$ref` to a local JSON Pointer (e.g. `#/components/...`) if it targets the
 /// current document as identified by `$self`.
 ///
@@ -95,10 +97,17 @@ fn ref_doc_matches_self(ref_doc: &str, self_uri: &str) -> bool {
 
     // Fallback: compare raw relative paths.
     if !self_uri.contains("://") && !ref_doc.contains("://") {
-        return Path::new(ref_doc) == Path::new(self_uri);
+        let self_norm = normalize_relative_path(self_uri).unwrap_or_else(|| self_uri.to_string());
+        let ref_norm = normalize_relative_path(ref_doc).unwrap_or_else(|| ref_doc.to_string());
+        return Path::new(&ref_norm) == Path::new(&self_norm);
     }
 
     false
+}
+
+fn normalize_relative_path(path: &str) -> Option<String> {
+    let base = Url::parse(DUMMY_BASE).ok()?;
+    base.join(path).ok().map(|url| url.path().to_string())
 }
 
 #[cfg(test)]
@@ -123,6 +132,22 @@ mod tests {
     fn test_normalize_ref_self_path_match() {
         let self_uri = Some("/api/openapi.yaml");
         let ref_str = "https://example.com/api/openapi.yaml#/components/schemas/User";
+        let normalized = normalize_ref_to_local(ref_str, self_uri).unwrap();
+        assert_eq!(normalized, "#/components/schemas/User");
+    }
+
+    #[test]
+    fn test_normalize_ref_self_relative_match() {
+        let self_uri = Some("./openapi.yaml");
+        let ref_str = "openapi.yaml#/components/schemas/User";
+        let normalized = normalize_ref_to_local(ref_str, self_uri).unwrap();
+        assert_eq!(normalized, "#/components/schemas/User");
+    }
+
+    #[test]
+    fn test_normalize_ref_self_relative_dot_segments() {
+        let self_uri = Some("specs/openapi.yaml");
+        let ref_str = "./specs/../specs/openapi.yaml#/components/schemas/User";
         let normalized = normalize_ref_to_local(ref_str, self_uri).unwrap();
         assert_eq!(normalized, "#/components/schemas/User");
     }

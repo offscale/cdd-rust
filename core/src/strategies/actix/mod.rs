@@ -12,7 +12,7 @@ pub mod scaffolding;
 pub mod testing;
 pub mod utils;
 
-use crate::oas::models::{ParsedLink, ResponseHeader, SecurityRequirement};
+use crate::oas::models::{ParsedLink, ResponseHeader};
 use crate::oas::ParsedRoute;
 use crate::strategies::BackendStrategy;
 
@@ -55,8 +55,12 @@ impl BackendStrategy for ActixStrategy {
         extractors::typed_query_extractor(inner_type)
     }
 
-    fn query_string_extractor(&self, inner_type: &str) -> String {
-        extractors::query_string_extractor(inner_type)
+    fn query_string_extractor(
+        &self,
+        inner_type: &str,
+        content_media_type: Option<&crate::oas::models::ContentMediaType>,
+    ) -> String {
+        extractors::query_string_extractor(inner_type, content_media_type)
     }
 
     fn header_extractor(&self, inner_type: &str) -> String {
@@ -87,7 +91,10 @@ impl BackendStrategy for ActixStrategy {
         extractors::bytes_extractor(body_type)
     }
 
-    fn security_extractor(&self, requirements: &[SecurityRequirement]) -> String {
+    fn security_extractor(
+        &self,
+        requirements: &[crate::oas::models::SecurityRequirementGroup],
+    ) -> String {
         extractors::security_extractor(requirements)
     }
 
@@ -133,7 +140,7 @@ mod tests {
     use super::*;
     use crate::oas::models::{LinkParamValue, ParsedLink, RouteKind, RuntimeExpression};
     use crate::oas::ParsedRoute;
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
 
     #[test]
     fn test_actix_handler_imports() {
@@ -157,8 +164,10 @@ mod tests {
             description: None,
             operation_id: None,
             operation_ref: Some("/users/{id}".to_string()),
+            resolved_operation_ref: None,
             parameters: params,
             request_body: None,
+            server: None,
             server_url: None,
         }];
 
@@ -180,20 +189,47 @@ mod tests {
             path: "/path".into(),
             summary: None,
             description: None,
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
             base_path: None,
+
+            path_servers: None,
+
+            servers_override: None,
             method: "QUERY".into(),
             handler_name: "query_handler".into(),
+            operation_id: None,
             params: vec![],
+
+            path_params: vec![],
+
             request_body: None,
             security: vec![],
+            security_defined: false,
             response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
             tags: vec![],
+            extensions: BTreeMap::new(),
         };
         let code = s.route_registration_statement(&route, "mod::qh");
         assert!(code.contains(
@@ -205,6 +241,8 @@ mod tests {
     fn test_actix_test_generation_components() {
         let s = ActixStrategy;
         assert!(s.test_imports().contains("use actix_web"));
-        assert!(s.test_imports().contains("use jsonschema::JSONSchema;"));
+        assert!(s
+            .test_imports()
+            .contains("use jsonschema::{Draft, JSONSchema};"));
     }
 }

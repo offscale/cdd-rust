@@ -5,7 +5,7 @@
 //! Defines the interface required to generate code for a specific web framework
 //! (e.g. Actix, Axum, Poem, etc.).
 
-use crate::oas::models::{ParsedLink, ResponseHeader, SecurityRequirement};
+use crate::oas::models::{ContentMediaType, ParsedLink, ResponseHeader};
 use crate::oas::ParsedRoute;
 use crate::oas::RequestBodyDefinition;
 
@@ -63,7 +63,12 @@ pub trait BackendStrategy {
     /// # Arguments
     ///
     /// * `inner_type` - The specific type the entire query string should map to.
-    fn query_string_extractor(&self, inner_type: &str) -> String;
+    /// * `content_media_type` - Media type used to serialize the query string (if known).
+    fn query_string_extractor(
+        &self,
+        inner_type: &str,
+        content_media_type: Option<&ContentMediaType>,
+    ) -> String;
 
     /// Generates the type string for Header parameter extraction.
     fn header_extractor(&self, inner_type: &str) -> String;
@@ -107,10 +112,13 @@ pub trait BackendStrategy {
     fn bytes_extractor(&self, body_type: &str) -> String;
 
     /// Generates the type string for a Security extraction/Guard.
-    /// Used when `security: [{...}]` is present.
+    /// Used when `security: [{...}]` is present (OR groups).
     /// Expects a placeholder type name (e.g. `UserPrincipal` or generic `Auth`)
     /// based on scheme.
-    fn security_extractor(&self, requirements: &[SecurityRequirement]) -> String;
+    fn security_extractor(
+        &self,
+        requirements: &[crate::oas::models::SecurityRequirementGroup],
+    ) -> String;
 
     /// Generates the route registration code statement.
     ///

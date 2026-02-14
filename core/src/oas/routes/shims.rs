@@ -10,11 +10,117 @@
 
 use crate::oas::resolver::ShimParameter;
 use serde::de::Error as DeError;
+use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use utoipa::openapi::request_body::RequestBody;
 use utoipa::openapi::{RefOr, Responses};
+
+/// Represents the Paths Object with support for specification extensions.
+#[derive(Clone, Default)]
+pub struct ShimPaths {
+    /// Parsed path items keyed by path template.
+    pub items: BTreeMap<String, ShimPathItem>,
+    /// Spec extensions attached to the Paths Object (x-...).
+    pub extensions: BTreeMap<String, Value>,
+}
+
+impl ShimPaths {
+    /// Returns true when no concrete path items are present.
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+}
+
+impl<'de> Deserialize<'de> for ShimPaths {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = BTreeMap::<String, Value>::deserialize(deserializer)?;
+        let mut items = BTreeMap::new();
+        let mut extensions = BTreeMap::new();
+
+        for (key, value) in raw {
+            if key.starts_with("x-") {
+                extensions.insert(key, value);
+                continue;
+            }
+            let path_item = serde_json::from_value::<ShimPathItem>(value).map_err(|e| {
+                DeError::custom(format!("Failed to parse path item '{}': {}", key, e))
+            })?;
+            items.insert(key, path_item);
+        }
+
+        Ok(Self { items, extensions })
+    }
+}
+
+impl Serialize for ShimPaths {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(self.items.len() + self.extensions.len()))?;
+        for (key, value) in &self.items {
+            map.serialize_entry(key, value)?;
+        }
+        for (key, value) in &self.extensions {
+            map.serialize_entry(key, value)?;
+        }
+        map.end()
+    }
+}
+
+/// Represents the Webhooks Object with support for specification extensions.
+#[derive(Clone, Default)]
+pub struct ShimWebhooks {
+    /// Parsed webhook path items keyed by name.
+    pub items: BTreeMap<String, RefOr<ShimPathItem>>,
+    /// Spec extensions attached to the Webhooks Object (x-...).
+    pub extensions: BTreeMap<String, Value>,
+}
+
+impl<'de> Deserialize<'de> for ShimWebhooks {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = BTreeMap::<String, Value>::deserialize(deserializer)?;
+        let mut items = BTreeMap::new();
+        let mut extensions = BTreeMap::new();
+
+        for (key, value) in raw {
+            if key.starts_with("x-") {
+                extensions.insert(key, value);
+                continue;
+            }
+            let item = serde_json::from_value::<RefOr<ShimPathItem>>(value).map_err(|e| {
+                DeError::custom(format!("Failed to parse webhook '{}': {}", key, e))
+            })?;
+            items.insert(key, item);
+        }
+
+        Ok(Self { items, extensions })
+    }
+}
+
+impl Serialize for ShimWebhooks {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(self.items.len() + self.extensions.len()))?;
+        for (key, value) in &self.items {
+            map.serialize_entry(key, value)?;
+        }
+        for (key, value) in &self.extensions {
+            map.serialize_entry(key, value)?;
+        }
+        map.end()
+    }
+}
 
 /// Schema for the root document (Paths and Webhooks).
 #[derive(Deserialize, Serialize)]
@@ -58,12 +164,10 @@ pub struct ShimOpenApi {
     pub base_path: Option<String>,
 
     /// Path items.
-    #[serde(default)]
-    pub paths: BTreeMap<String, ShimPathItem>,
+    pub paths: Option<ShimPaths>,
 
     /// Webhook items.
-    #[serde(default)]
-    pub webhooks: Option<BTreeMap<String, RefOr<ShimPathItem>>>,
+    pub webhooks: Option<ShimWebhooks>,
 
     /// Global security requirements.
     #[serde(default)]
@@ -139,6 +243,9 @@ pub struct ShimApiKey {
     pub in_loc: String,
     /// Description.
     pub description: Option<String>,
+    /// Whether this security scheme is deprecated.
+    #[serde(default)]
+    pub deprecated: bool,
     /// Extensions.
     #[serde(flatten)]
     pub extensions: BTreeMap<String, Value>,
@@ -154,6 +261,9 @@ pub struct ShimHttpAuth {
     pub bearer_format: Option<String>,
     /// Description.
     pub description: Option<String>,
+    /// Whether this security scheme is deprecated.
+    #[serde(default)]
+    pub deprecated: bool,
     /// Extensions.
     #[serde(flatten)]
     pub extensions: BTreeMap<String, Value>,
@@ -167,6 +277,9 @@ pub struct ShimOpenIdConnect {
     pub open_id_connect_url: String,
     /// Description.
     pub description: Option<String>,
+    /// Whether this security scheme is deprecated.
+    #[serde(default)]
+    pub deprecated: bool,
     /// Extensions.
     #[serde(flatten)]
     pub extensions: BTreeMap<String, Value>,
@@ -177,6 +290,9 @@ pub struct ShimOpenIdConnect {
 pub struct ShimMutualTls {
     /// Description.
     pub description: Option<String>,
+    /// Whether this security scheme is deprecated.
+    #[serde(default)]
+    pub deprecated: bool,
     /// Extensions.
     #[serde(flatten)]
     pub extensions: BTreeMap<String, Value>,
@@ -187,6 +303,9 @@ pub struct ShimMutualTls {
 pub struct ShimOAuth2 {
     /// Description.
     pub description: Option<String>,
+    /// Whether this security scheme is deprecated.
+    #[serde(default)]
+    pub deprecated: bool,
     /// Supported flows.
     pub flows: Option<ShimOAuthFlows>,
     /// URL to OAuth2 authorization server metadata (RFC8414).
@@ -602,6 +721,14 @@ fn normalize_response_headers(value: &mut Value) {
         let Value::Object(obj) = header else {
             continue;
         };
+        if let Some(schema_val) = obj.get("schema") {
+            if schema_val.is_boolean() {
+                obj.remove("schema");
+                let mut schema = Map::new();
+                schema.insert("type".to_string(), Value::String("string".to_string()));
+                obj.insert("schema".to_string(), Value::Object(schema));
+            }
+        }
         if obj.contains_key("$ref") {
             obj.clear();
             let mut schema = Map::new();
@@ -866,6 +993,32 @@ paths: {}
     }
 
     #[test]
+    fn test_shim_security_scheme_deprecated() {
+        let yaml = r#"
+openapi: 3.2.0
+info:
+  title: Deprecated Scheme
+  version: 1.0
+components:
+  securitySchemes:
+    legacyKey:
+      type: apiKey
+      name: X-LEGACY
+      in: header
+      deprecated: true
+paths: {}
+"#;
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
+        let comps = openapi.components.unwrap();
+        let schemes = comps.security_schemes.unwrap();
+        let legacy = match schemes.get("legacyKey").unwrap() {
+            RefOr::T(ShimSecurityScheme::ApiKey(k)) => k,
+            _ => panic!("Expected apiKey scheme"),
+        };
+        assert!(legacy.deprecated);
+    }
+
+    #[test]
     fn test_shim_security_schemes_parsing() {
         let yaml = r#"
 openapi: 3.0.0
@@ -976,11 +1129,50 @@ x-global-config:
         );
 
         // Operation extension
-        let path_item = openapi.paths.get("/foo").unwrap();
+        let path_item = openapi
+            .paths
+            .as_ref()
+            .and_then(|paths| paths.items.get("/foo"))
+            .unwrap();
         let op = path_item.get.as_ref().unwrap();
         assert_eq!(
             op.extensions.get("x-controller").unwrap(),
             &Value::String("FooController".to_string())
         );
+    }
+
+    #[test]
+    fn test_paths_and_webhooks_extensions_captured() {
+        let yaml = r#"
+openapi: 3.2.0
+info:
+  title: Paths Ext
+  version: 1.0
+paths:
+  x-paths-meta: true
+  /health:
+    get:
+      responses:
+        '200': { description: OK }
+webhooks:
+  x-webhooks-meta:
+    enabled: true
+  onEvent:
+    post:
+      responses:
+        '200': { description: OK }
+"#;
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
+
+        let paths = openapi.paths.as_ref().unwrap();
+        assert_eq!(
+            paths.extensions.get("x-paths-meta"),
+            Some(&Value::Bool(true))
+        );
+        assert!(paths.items.contains_key("/health"));
+
+        let webhooks = openapi.webhooks.as_ref().unwrap();
+        assert!(webhooks.extensions.contains_key("x-webhooks-meta"));
+        assert!(webhooks.items.contains_key("onEvent"));
     }
 }

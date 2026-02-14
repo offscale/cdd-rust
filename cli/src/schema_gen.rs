@@ -82,6 +82,10 @@ pub struct SchemaGenArgs {
     /// Optional OpenAPI info.license.identifier override.
     #[clap(long)]
     pub info_license_identifier: Option<String>,
+
+    /// Optional OpenAPI `$self` URI for the document base.
+    #[clap(long)]
+    pub self_uri: Option<String>,
 }
 
 /// Executes the schema generation.
@@ -158,6 +162,9 @@ pub fn execute(args: &SchemaGenArgs) -> AppResult<()> {
                 license = license.with_url(url.clone());
             }
             info = info.with_license(license);
+        }
+        if let Some(self_uri) = &args.self_uri {
+            info = info.with_self_uri(self_uri.clone());
         }
         generate_openapi_document(&model, args.dialect.as_deref(), &info)?
     } else {
@@ -246,6 +253,7 @@ mod tests {
             info_license_name: None,
             info_license_url: None,
             info_license_identifier: None,
+            self_uri: None,
         };
 
         execute(&args).unwrap();
@@ -292,6 +300,7 @@ mod tests {
             info_license_name: None,
             info_license_url: None,
             info_license_identifier: None,
+            self_uri: None,
         };
 
         execute(&args).unwrap();
@@ -336,6 +345,7 @@ mod tests {
             info_license_name: None,
             info_license_url: None,
             info_license_identifier: None,
+            self_uri: None,
         };
 
         execute(&args).unwrap();
@@ -371,6 +381,7 @@ mod tests {
             info_license_name: None,
             info_license_url: None,
             info_license_identifier: None,
+            self_uri: None,
         };
 
         let result = execute(&args);
@@ -407,6 +418,7 @@ mod tests {
             info_license_name: None,
             info_license_url: Some("https://example.com/license".to_string()),
             info_license_identifier: None,
+            self_uri: None,
         };
 
         let result = execute(&args);

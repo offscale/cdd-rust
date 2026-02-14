@@ -176,6 +176,14 @@ fn generate_dto_body(dto: &ParsedStruct) -> String {
         if field.is_skipped {
             attrs.push("skip".to_string());
         }
+        if !field.is_skipped {
+            if field.is_read_only {
+                attrs.push("skip_deserializing".to_string());
+            }
+            if field.is_write_only {
+                attrs.push("skip_serializing".to_string());
+            }
+        }
 
         // Handle Map Flattening
         if field.name == "additional_properties" && field.ty.contains("HashMap") {
@@ -319,6 +327,8 @@ mod tests {
             description: None,
             rename: None,
             is_skipped: false,
+            is_read_only: false,
+            is_write_only: false,
             is_deprecated: false,
             external_docs: None,
         }
@@ -361,6 +371,8 @@ mod tests {
                 description: None,
                 rename: None,
                 is_skipped: false,
+                is_read_only: false,
+                is_write_only: false,
                 is_deprecated: true,
                 external_docs: None,
             }],
@@ -377,6 +389,48 @@ mod tests {
         // Check field deprecation
         assert!(code.contains("    #[deprecated]"));
         assert!(code.contains("    pub f: i32"));
+    }
+
+    #[test]
+    fn test_generate_dto_read_write_only_fields() {
+        let dto = ParsedStruct {
+            name: "Access".into(),
+            description: None,
+            rename: None,
+            rename_all: None,
+            fields: vec![
+                ParsedField {
+                    name: "id".into(),
+                    ty: "Uuid".into(),
+                    description: None,
+                    rename: None,
+                    is_skipped: false,
+                    is_read_only: true,
+                    is_write_only: false,
+                    is_deprecated: false,
+                    external_docs: None,
+                },
+                ParsedField {
+                    name: "password".into(),
+                    ty: "String".into(),
+                    description: None,
+                    rename: None,
+                    is_skipped: false,
+                    is_read_only: false,
+                    is_write_only: true,
+                    is_deprecated: false,
+                    external_docs: None,
+                },
+            ],
+            is_deprecated: false,
+            deny_unknown_fields: false,
+            external_docs: None,
+        };
+
+        let code = generate_dto(&dto);
+        assert!(code.contains("pub struct Access"));
+        assert!(code.contains("#[serde(skip_deserializing)]"));
+        assert!(code.contains("#[serde(skip_serializing)]"));
     }
 
     #[test]
@@ -521,6 +575,8 @@ mod tests {
                     description: Some("Props".into()),
                     rename: None,
                     is_skipped: false,
+                    is_read_only: false,
+                    is_write_only: false,
                     is_deprecated: false,
                     external_docs: None,
                 },

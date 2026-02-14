@@ -84,12 +84,20 @@ fn parse_struct_node(struct_def: ast::Struct, name: &str) -> AppResult<ParsedStr
                 for field in list.fields() {
                     if let (Some(fname), Some(ty)) = (field.name(), field.ty()) {
                         let attrs = extract_attributes(field.syntax());
+                        let is_read_only = !attrs.is_skipped
+                            && attrs.skip_deserializing
+                            && !attrs.skip_serializing;
+                        let is_write_only = !attrs.is_skipped
+                            && attrs.skip_serializing
+                            && !attrs.skip_deserializing;
                         fields.push(ParsedField {
                             name: fname.text().to_string(),
                             ty: ty.syntax().text().to_string(),
                             description: extract_doc_comment(field.syntax()),
                             rename: attrs.rename,
                             is_skipped: attrs.is_skipped,
+                            is_read_only,
+                            is_write_only,
                             is_deprecated: false, // Not parsed from AST yet
                             external_docs: None,
                         });
@@ -100,12 +108,20 @@ fn parse_struct_node(struct_def: ast::Struct, name: &str) -> AppResult<ParsedStr
                 for (i, field) in list.fields().enumerate() {
                     if let Some(ty) = field.ty() {
                         let attrs = extract_attributes(field.syntax());
+                        let is_read_only = !attrs.is_skipped
+                            && attrs.skip_deserializing
+                            && !attrs.skip_serializing;
+                        let is_write_only = !attrs.is_skipped
+                            && attrs.skip_serializing
+                            && !attrs.skip_deserializing;
                         fields.push(ParsedField {
                             name: i.to_string(),
                             ty: (ty as ra_ap_syntax::ast::Type).syntax().text().to_string(),
                             description: extract_doc_comment(field.syntax()),
                             rename: attrs.rename,
                             is_skipped: attrs.is_skipped,
+                            is_read_only,
+                            is_write_only,
                             is_deprecated: false,
                             external_docs: None,
                         });

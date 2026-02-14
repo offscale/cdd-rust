@@ -5,40 +5,68 @@
 //! Logic for extracting and resolving Callback objects (Outgoing Webhooks).
 
 use crate::error::{AppError, AppResult};
-use crate::oas::models::{ParsedCallback, RuntimeExpression};
+use crate::oas::models::{ParamSource, ParsedCallback, RouteParam, RuntimeExpression};
 use crate::oas::ref_utils::extract_component_name;
-use crate::oas::resolver::extract_request_body_type;
-use crate::oas::resolver::responses::extract_response_details;
+use crate::oas::registry::DocumentRegistry;
+use crate::oas::resolver::body::extract_request_body_type_with_registry;
+use crate::oas::resolver::resolve_parameters_with_registry;
+use crate::oas::resolver::responses::extract_response_details_with_registry;
+use crate::oas::routes::builder::parse_security_requirements;
 use crate::oas::routes::shims::{ShimComponents, ShimOperation, ShimPathItem};
 use std::collections::{BTreeMap, HashSet};
+use url::Url;
 use utoipa::openapi::RefOr;
 
 /// Resolves a Callback object which can be an inline map or a Reference.
 pub fn resolve_callback_object(
     cb_ref: &RefOr<BTreeMap<String, ShimPathItem>>,
     components: Option<&ShimComponents>,
-) -> AppResult<BTreeMap<String, ShimPathItem>> {
+    registry: Option<&DocumentRegistry>,
+    base_uri: Option<&Url>,
+) -> AppResult<(
+    BTreeMap<String, ShimPathItem>,
+    Option<ShimComponents>,
+    Option<Url>,
+)> {
     match cb_ref {
-        RefOr::T(map) => Ok(map.clone()),
+        RefOr::T(map) => Ok((map.clone(), None, None)),
         RefOr::Ref(r) => {
-            let (comps, self_uri) = components
-                .map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))
-                .ok_or_else(|| {
-                    AppError::General(format!("Callback reference not found: {}", r.ref_location))
-                })?;
+            if let Some((comps, self_uri)) =
+                components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))
+            {
+                if let Some(ref_name) =
+                    extract_component_name(&r.ref_location, self_uri, "callbacks")
+                {
+                    if let Some(cb_json) =
+                        comps.extra.get("callbacks").and_then(|c| c.get(&ref_name))
+                    {
+                        let map = serde_json::from_value::<BTreeMap<String, ShimPathItem>>(
+                            cb_json.clone(),
+                        )
+                        .map_err(|e| {
+                            AppError::General(format!(
+                                "Failed to parse resolved callback '{}': {}",
+                                ref_name, e
+                            ))
+                        })?;
+                        return Ok((map, None, None));
+                    }
+                }
+            }
 
-            let ref_name = extract_component_name(&r.ref_location, self_uri, "callbacks")
-                .unwrap_or_else(|| "Unknown".to_string());
-
-            if let Some(cb_json) = comps.extra.get("callbacks").and_then(|c| c.get(&ref_name)) {
-                let map = serde_json::from_value::<BTreeMap<String, ShimPathItem>>(cb_json.clone())
-                    .map_err(|e| {
-                        AppError::General(format!(
-                            "Failed to parse resolved callback '{}': {}",
-                            ref_name, e
-                        ))
-                    })?;
-                return Ok(map);
+            if let Some(registry) = registry {
+                if let Some((raw, comps_override, base_override)) = registry
+                    .resolve_component_ref_with_components(&r.ref_location, base_uri, "callbacks")
+                {
+                    let map = serde_json::from_value::<BTreeMap<String, ShimPathItem>>(raw)
+                        .map_err(|e| {
+                            AppError::General(format!(
+                                "Failed to parse resolved callback '{}': {}",
+                                r.ref_location, e
+                            ))
+                        })?;
+                    return Ok((map, comps_override, base_override));
+                }
             }
             Err(AppError::General(format!(
                 "Callback reference not found: {}",
@@ -56,14 +84,39 @@ pub fn extract_callback_operations(
     path_item: &ShimPathItem,
     components: Option<&ShimComponents>,
     operation_ids: &mut HashSet<String>,
+    registry: Option<&DocumentRegistry>,
+    base_uri: Option<&Url>,
+    global_security: Option<&Vec<serde_json::Value>>,
 ) -> AppResult<()> {
     let mut path_item = path_item.clone();
+    let mut override_components: Option<ShimComponents> = None;
+    let mut override_base: Option<Url> = None;
     if let Some(ref_path) = path_item.ref_path.as_deref() {
         let empty_paths = BTreeMap::new();
-        path_item = super::resolve_path_item_ref(ref_path, components, &empty_paths)?;
+        let (resolved, comps_override, base_override) = super::resolve_path_item_ref_with_context(
+            ref_path,
+            components,
+            &empty_paths,
+            registry,
+            base_uri,
+        )?;
+        path_item = resolved;
+        override_components = comps_override;
+        override_base = base_override;
     }
 
+    let components_ctx = override_components.as_ref().or(components);
+    let base_ctx = override_base.as_ref().or(base_uri);
+
     let parsed_expression = RuntimeExpression::parse_expression(expression)?;
+    let common_params_list = path_item.parameters.as_deref().unwrap_or(&[]);
+    let common_params = resolve_parameters_with_registry(
+        common_params_list,
+        components_ctx,
+        true,
+        registry,
+        base_ctx,
+    )?;
 
     let mut add_cb_op = |method: &str, op: Option<&ShimOperation>| -> AppResult<()> {
         if let Some(o) = op {
@@ -75,27 +128,81 @@ pub fn extract_callback_operations(
                     )));
                 }
             }
+            let op_params_list = o.parameters.as_deref().unwrap_or(&[]);
+            let op_params = resolve_parameters_with_registry(
+                op_params_list,
+                components_ctx,
+                true,
+                registry,
+                base_ctx,
+            )?;
+            let params = merge_callback_params(&op_params, &common_params, method)?;
+
             let mut req_body = None;
             if let Some(rb) = &o.request_body {
-                if let Some(def) = extract_request_body_type(rb, components)? {
+                if let Some(def) =
+                    extract_request_body_type_with_registry(rb, components_ctx, registry, base_ctx)?
+                {
                     req_body = Some(def);
                 }
             }
 
-            let (resp_type, resp_headers) =
-                if let Some(details) = extract_response_details(&o.responses, components)? {
-                    (details.body_type, details.headers)
+            let security_defined = o.security.is_some();
+            let security = if let Some(requirements) = o.security.as_ref() {
+                if requirements.is_empty() {
+                    Vec::new()
                 } else {
-                    (None, Vec::new())
-                };
+                    parse_security_requirements(requirements, components_ctx, registry, base_ctx)
+                }
+            } else if let Some(global) = global_security {
+                parse_security_requirements(global, components_ctx, registry, base_ctx)
+            } else {
+                Vec::new()
+            };
+
+            let (
+                resp_type,
+                resp_status,
+                resp_summary,
+                resp_description,
+                resp_media_type,
+                resp_example,
+                resp_headers,
+            ) = if let Some(details) = extract_response_details_with_registry(
+                &o.responses,
+                components_ctx,
+                registry,
+                base_ctx,
+            )? {
+                (
+                    details.body_type,
+                    details.status_code,
+                    details.summary,
+                    details.description,
+                    details.media_type,
+                    details.example,
+                    details.headers,
+                )
+            } else {
+                (None, None, None, None, None, None, Vec::new())
+            };
 
             callbacks.push(ParsedCallback {
                 name: name.to_string(),
                 expression: parsed_expression.clone(),
                 method: method.to_string(),
+                params,
+                path_params: common_params.clone(),
                 request_body: req_body,
                 response_type: resp_type,
+                response_status: resp_status,
+                response_summary: resp_summary,
+                response_description: resp_description,
+                response_media_type: resp_media_type,
+                response_example: resp_example,
                 response_headers: resp_headers,
+                security,
+                security_defined,
             });
         }
         Ok(())
@@ -120,14 +227,55 @@ pub fn extract_callback_operations(
     Ok(())
 }
 
+fn merge_callback_params(
+    op_params: &[RouteParam],
+    common_params: &[RouteParam],
+    method: &str,
+) -> AppResult<Vec<RouteParam>> {
+    let mut params = Vec::new();
+    let mut seen = HashSet::new();
+
+    for param in op_params {
+        seen.insert((param.name.clone(), param.source.clone()));
+        params.push(param.clone());
+    }
+    for param in common_params {
+        if !seen.contains(&(param.name.clone(), param.source.clone())) {
+            params.push(param.clone());
+        }
+    }
+
+    let querystring_count = params
+        .iter()
+        .filter(|p| p.source == ParamSource::QueryString)
+        .count();
+    if querystring_count > 1 {
+        return Err(AppError::General(format!(
+            "Callback operation '{}' defines multiple querystring parameters",
+            method
+        )));
+    }
+    if querystring_count == 1 && params.iter().any(|p| p.source == ParamSource::Query) {
+        return Err(AppError::General(format!(
+            "Callback operation '{}' mixes 'querystring' and 'query' parameters",
+            method
+        )));
+    }
+
+    Ok(params)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::oas::models::BodyFormat;
+    use crate::oas::resolver::params::SchemaOrBool;
+    use crate::oas::resolver::ShimParameter;
     use crate::oas::routes::shims::{ShimComponents, ShimOperation, ShimPathItem};
     use serde_json::json;
     use std::collections::BTreeMap;
     use utoipa::openapi::request_body::RequestBodyBuilder;
+    use utoipa::openapi::schema::{ObjectBuilder, Schema, Type};
     use utoipa::openapi::ResponseBuilder;
     use utoipa::openapi::{Content, Ref, RefOr, Responses};
 
@@ -170,11 +318,40 @@ mod tests {
         }
     }
 
+    fn string_param(name: &str, location: &str) -> ShimParameter {
+        let schema = ObjectBuilder::new().schema_type(Type::String).build();
+        ShimParameter {
+            name: name.to_string(),
+            description: None,
+            parameter_in: location.to_string(),
+            schema_type: None,
+            format: None,
+            items: None,
+            required: false,
+            deprecated: false,
+            schema: Some(SchemaOrBool::from(Schema::Object(schema))),
+            content: None,
+            style: None,
+            explode: None,
+            allow_reserved: None,
+            allow_empty_value: None,
+            collection_format: None,
+            example: None,
+            examples: None,
+            raw: json!({
+                "name": name,
+                "in": location,
+                "schema": { "type": "string" }
+            }),
+        }
+    }
+
     #[test]
     fn test_resolve_callback_object_inline() {
         let mut map = BTreeMap::new();
         map.insert("/hook".to_string(), empty_path_item());
-        let resolved = resolve_callback_object(&RefOr::T(map.clone()), None).unwrap();
+        let (resolved, _, _) =
+            resolve_callback_object(&RefOr::T(map.clone()), None, None, None).unwrap();
         assert_eq!(resolved.len(), 1);
         assert!(resolved.contains_key("/hook"));
     }
@@ -200,14 +377,15 @@ mod tests {
         );
 
         let cb_ref = RefOr::Ref(Ref::new("#/components/callbacks/OnEvent"));
-        let resolved = resolve_callback_object(&cb_ref, Some(&components)).unwrap();
+        let (resolved, _, _) =
+            resolve_callback_object(&cb_ref, Some(&components), None, None).unwrap();
         assert!(resolved.contains_key("/event"));
     }
 
     #[test]
     fn test_resolve_callback_object_missing_ref() {
         let cb_ref = RefOr::Ref(Ref::new("#/components/callbacks/Missing"));
-        let err = resolve_callback_object(&cb_ref, None)
+        let err = resolve_callback_object(&cb_ref, None, None, None)
             .err()
             .expect("expected missing callback error");
         assert!(format!("{}", err).contains("Callback reference not found"));
@@ -252,6 +430,9 @@ mod tests {
             &path_item,
             None,
             &mut HashSet::new(),
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -278,6 +459,9 @@ mod tests {
             &path_item,
             None,
             &mut HashSet::new(),
+            None,
+            None,
+            None,
         )
         .unwrap_err();
 
@@ -298,12 +482,45 @@ mod tests {
             &path_item,
             None,
             &mut HashSet::new(),
+            None,
+            None,
+            None,
         )
         .unwrap();
 
         assert_eq!(callbacks.len(), 1);
         assert_eq!(callbacks[0].expression.as_str(), expr);
         assert!(callbacks[0].expression.is_expression());
+    }
+
+    #[test]
+    fn test_extract_callback_security_inherits_global() {
+        let mut path_item = empty_path_item();
+        let mut op = empty_operation();
+        op.responses = crate::oas::routes::shims::ShimResponses::from(Responses::new());
+        path_item.post = Some(op);
+
+        let mut callbacks = Vec::new();
+        let global_security = vec![json!({ "ApiKeyAuth": [] })];
+
+        extract_callback_operations(
+            &mut callbacks,
+            "OnSecure",
+            "$request.body#/url",
+            &path_item,
+            None,
+            &mut HashSet::new(),
+            None,
+            None,
+            Some(&global_security),
+        )
+        .unwrap();
+
+        assert_eq!(callbacks.len(), 1);
+        let cb = &callbacks[0];
+        assert!(!cb.security_defined);
+        assert_eq!(cb.security.len(), 1);
+        assert_eq!(cb.security[0].schemes[0].scheme_name, "ApiKeyAuth");
     }
 
     #[test]
@@ -326,6 +543,9 @@ mod tests {
             &path_item,
             None,
             &mut HashSet::new(),
+            None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -333,6 +553,37 @@ mod tests {
         let methods: Vec<_> = callbacks.iter().map(|c| c.method.as_str()).collect();
         assert!(methods.contains(&"QUERY"));
         assert!(methods.contains(&"CUSTOM"));
+    }
+
+    #[test]
+    fn test_extract_callback_parameters_merge() {
+        let mut path_item = empty_path_item();
+        path_item.parameters = Some(vec![RefOr::T(string_param("limit", "query"))]);
+
+        let mut op = empty_operation();
+        op.parameters = Some(vec![RefOr::T(string_param("offset", "query"))]);
+        path_item.post = Some(op);
+
+        let mut callbacks = Vec::new();
+        extract_callback_operations(
+            &mut callbacks,
+            "OnEvent",
+            "$request.body#/url",
+            &path_item,
+            None,
+            &mut HashSet::new(),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(callbacks.len(), 1);
+        let cb = &callbacks[0];
+        assert_eq!(cb.path_params.len(), 1);
+        assert_eq!(cb.params.len(), 2);
+        assert!(cb.params.iter().any(|p| p.name == "limit"));
+        assert!(cb.params.iter().any(|p| p.name == "offset"));
     }
 
     #[test]
@@ -361,6 +612,9 @@ mod tests {
             &path_item,
             Some(&components),
             &mut HashSet::new(),
+            None,
+            None,
+            None,
         )
         .unwrap();
 
