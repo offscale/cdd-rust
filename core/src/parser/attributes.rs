@@ -17,6 +17,10 @@ pub struct AttrInfo {
     pub rename_all: Option<RenameRule>,
     /// Whether the skip flag was found.
     pub is_skipped: bool,
+    /// Whether the field is skipped during serialization.
+    pub skip_serializing: bool,
+    /// Whether the field is skipped during deserialization.
+    pub skip_deserializing: bool,
     /// The tag value (for enums) if present.
     pub tag: Option<String>,
     /// Whether the untagged flag was found (for enums).
@@ -60,6 +64,12 @@ fn parse_attribute_content(content: &str, info: &mut AttrInfo) {
 
     static SKIP_RE: OnceLock<Regex> = OnceLock::new();
     let skip_re = SKIP_RE.get_or_init(|| Regex::new(r#"\bskip\b"#).expect("Invalid regex"));
+    static SKIP_SERIALIZING_RE: OnceLock<Regex> = OnceLock::new();
+    let skip_serializing_re = SKIP_SERIALIZING_RE
+        .get_or_init(|| Regex::new(r#"\bskip_serializing\b"#).expect("Invalid regex"));
+    static SKIP_DESERIALIZING_RE: OnceLock<Regex> = OnceLock::new();
+    let skip_deserializing_re = SKIP_DESERIALIZING_RE
+        .get_or_init(|| Regex::new(r#"\bskip_deserializing\b"#).expect("Invalid regex"));
 
     static TAG_RE: OnceLock<Regex> = OnceLock::new();
     let tag_re =
@@ -91,6 +101,16 @@ fn parse_attribute_content(content: &str, info: &mut AttrInfo) {
 
     if skip_re.is_match(content) {
         info.is_skipped = true;
+        info.skip_serializing = true;
+        info.skip_deserializing = true;
+    }
+
+    if skip_serializing_re.is_match(content) {
+        info.skip_serializing = true;
+    }
+
+    if skip_deserializing_re.is_match(content) {
+        info.skip_deserializing = true;
     }
 
     if let Some(caps) = tag_re.captures(content) {
@@ -144,6 +164,8 @@ mod tests {
         let info = extract_attributes(s.syntax());
         assert_eq!(info.rename.as_deref(), Some("UserModel"));
         assert!(!info.is_skipped);
+        assert!(!info.skip_serializing);
+        assert!(!info.skip_deserializing);
         assert!(info.tag.is_none());
         assert!(!info.untagged);
         assert!(info.rename_all.is_none());
@@ -163,6 +185,8 @@ mod tests {
         let info = extract_attributes(e.syntax());
         assert_eq!(info.tag.as_deref(), Some("kind"));
         assert!(info.untagged);
+        assert!(!info.skip_serializing);
+        assert!(!info.skip_deserializing);
         assert!(info.rename_all.is_none());
         assert!(!info.deny_unknown_fields);
     }
@@ -179,6 +203,8 @@ mod tests {
         let info = extract_attributes(s.syntax());
         assert!(matches!(info.rename_all, Some(RenameRule::CamelCase)));
         assert!(info.deny_unknown_fields);
+        assert!(!info.skip_serializing);
+        assert!(!info.skip_deserializing);
     }
 
     #[test]
@@ -199,6 +225,52 @@ mod tests {
             .expect("field missing");
         let info = extract_attributes(field.syntax());
         assert!(info.is_skipped);
+        assert!(info.skip_serializing);
+        assert!(info.skip_deserializing);
+    }
+
+    #[test]
+    fn test_extract_field_skip_serializing() {
+        let code = r#"
+            struct Secret {
+                #[serde(skip_serializing)]
+                token: String,
+            }
+        "#;
+        let s = parse_first_struct(code);
+        let field = s
+            .field_list()
+            .and_then(|list| match list {
+                ast::FieldList::RecordFieldList(list) => list.fields().next(),
+                _ => None,
+            })
+            .expect("field missing");
+        let info = extract_attributes(field.syntax());
+        assert!(!info.is_skipped);
+        assert!(info.skip_serializing);
+        assert!(!info.skip_deserializing);
+    }
+
+    #[test]
+    fn test_extract_field_skip_deserializing() {
+        let code = r#"
+            struct Secret {
+                #[serde(skip_deserializing)]
+                token: String,
+            }
+        "#;
+        let s = parse_first_struct(code);
+        let field = s
+            .field_list()
+            .and_then(|list| match list {
+                ast::FieldList::RecordFieldList(list) => list.fields().next(),
+                _ => None,
+            })
+            .expect("field missing");
+        let info = extract_attributes(field.syntax());
+        assert!(!info.is_skipped);
+        assert!(!info.skip_serializing);
+        assert!(info.skip_deserializing);
     }
 
     #[test]

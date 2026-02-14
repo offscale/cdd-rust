@@ -46,8 +46,10 @@ pub use diff::{calculate_diff, Diff};
 pub use error::{AppError, AppResult};
 pub use handler_generator::update_handler_module;
 pub use oas::{
-    parse_openapi_routes, parse_openapi_spec, BodyFormat, ParamSource, ParsedRoute,
-    RequestBodyDefinition, RouteParam,
+    parse_openapi_document, parse_openapi_document_with_registry, parse_openapi_routes,
+    parse_openapi_routes_with_registry, parse_openapi_spec, parse_openapi_spec_with_registry,
+    BodyFormat, DocumentRegistry, ParamSource, ParsedOpenApi, ParsedRoute, RequestBodyDefinition,
+    RouteParam,
 };
 pub use parser::{
     extract_struct, extract_struct_fields, extract_struct_names, ParsedField, ParsedStruct,

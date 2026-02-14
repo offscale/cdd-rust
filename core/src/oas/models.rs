@@ -10,7 +10,7 @@
 use crate::error::{AppError, AppResult};
 use crate::parser::models::ParsedExternalDocs;
 use serde_json::Value as JsonValue;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
 /// Distinguishes between standard paths and event-driven webhooks.
@@ -20,6 +20,30 @@ pub enum RouteKind {
     Path,
     /// An event receiver defined in `webhooks`.
     Webhook,
+}
+
+/// A server variable definition for an OpenAPI Server Object.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedServerVariable {
+    /// Optional enumeration of allowed values.
+    pub enum_values: Option<Vec<String>>,
+    /// Default value used for substitution.
+    pub default: String,
+    /// Optional description of the server variable.
+    pub description: Option<String>,
+}
+
+/// A parsed OpenAPI Server Object.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedServer {
+    /// A URL to the target host (may include variables).
+    pub url: String,
+    /// Optional description of the server.
+    pub description: Option<String>,
+    /// Optional unique name for the server.
+    pub name: Option<String>,
+    /// Optional map of server variables.
+    pub variables: BTreeMap<String, ParsedServerVariable>,
 }
 
 /// Represents a validated Runtime Expression or template (OAS 3.2 ABNF).
@@ -120,30 +144,81 @@ pub struct ParsedRoute {
     /// The URL path (e.g. "/users/{id}") or Webhook Name (e.g. "userCreated").
     pub path: String,
     /// A short summary of what the operation does.
+    ///
+    /// This is the effective summary used for docs, with the path-level summary
+    /// as a fallback when the operation summary is absent.
     pub summary: Option<String>,
     /// A verbose description of the operation behavior.
+    ///
+    /// This is the effective description used for docs, with the path-level
+    /// description as a fallback when the operation description is absent.
     pub description: Option<String>,
+    /// Optional path-level summary from the Path Item Object.
+    pub path_summary: Option<String>,
+    /// Optional path-level description from the Path Item Object.
+    pub path_description: Option<String>,
+    /// Optional operation-level summary from the Operation Object.
+    pub operation_summary: Option<String>,
+    /// Optional operation-level description from the Operation Object.
+    pub operation_description: Option<String>,
+    /// Specification extensions (`x-...`) attached to the Path Item Object.
+    pub path_extensions: BTreeMap<String, JsonValue>,
     /// The base URL path derived from the `servers` block (e.g. "/api/v1").
     pub base_path: Option<String>,
+    /// Optional path-level server overrides (full Server Objects).
+    pub path_servers: Option<Vec<ParsedServer>>,
+    /// Optional per-operation server overrides (full Server Objects).
+    pub servers_override: Option<Vec<ParsedServer>>,
     /// HTTP Method: "GET", "POST", etc.
     pub method: String,
     /// Rust handler name, typically snake_case of operationId
     pub handler_name: String,
+    /// Original operationId value (case-sensitive) when provided in the OpenAPI document.
+    pub operation_id: Option<String>,
     /// Route parameters (path, query, header, cookie)
     pub params: Vec<RouteParam>,
+    /// Parameters defined at the Path Item level.
+    ///
+    /// These are preserved separately for OpenAPI round-tripping and may be
+    /// overridden by operation-level parameters with the same name+location.
+    pub path_params: Vec<RouteParam>,
     /// Request body definition (if any).
     pub request_body: Option<RequestBodyDefinition>,
-    /// Security requirements.
-    pub security: Vec<SecurityRequirement>,
+    /// Raw request body payload from the OpenAPI document, for round-trip preservation.
+    ///
+    /// This stores the full `requestBody` object (including all media types and examples)
+    /// when parsing OpenAPI 3.x documents. It is omitted for Swagger 2.0 inputs.
+    pub raw_request_body: Option<JsonValue>,
+    /// Security requirements grouped by alternative sets (OR semantics).
+    pub security: Vec<SecurityRequirementGroup>,
+    /// Whether the Operation Object explicitly declared `security` (including an empty array).
+    ///
+    /// When false, `security` may still be populated from a top-level default.
+    pub security_defined: bool,
     /// The classification of this route.
     pub kind: RouteKind,
     /// Tags associated with the operation (used for grouping/module organization).
     pub tags: Vec<String>,
-    /// The Rust type name of the success response (e.g. `UserResponse`, `Vec<User>`).
-    /// Only present if a 200/201 response with application/json content is defined inline.
+    /// The Rust type name of the selected success response (e.g. `UserResponse`, `Vec<User>`).
+    /// Only present if a concrete response body schema is defined inline.
     pub response_type: Option<String>,
+    /// The response status code or range selected for this route (e.g. "200", "201", "2XX", "default").
+    pub response_status: Option<String>,
+    /// The response summary associated with the selected response.
+    pub response_summary: Option<String>,
+    /// The description associated with the selected response.
+    pub response_description: Option<String>,
+    /// The media type selected for the response body (e.g. "application/json", "text/plain").
+    pub response_media_type: Option<String>,
+    /// Example payload for the selected response (data or serialized).
+    pub response_example: Option<ExampleValue>,
     /// Response headers defined in the operation.
     pub response_headers: Vec<ResponseHeader>,
+    /// Raw responses map from the OpenAPI document, for round-trip preservation.
+    ///
+    /// This stores the full `responses` object (including all status codes and media types)
+    /// when parsing OpenAPI 3.x documents. It is omitted for Swagger 2.0 inputs.
+    pub raw_responses: Option<JsonValue>,
     /// Response links defined in the operation (HATEOAS).
     pub response_links: Option<Vec<ParsedLink>>,
     /// Callback definitions attached to this route (OAS 3.0+).
@@ -152,6 +227,8 @@ pub struct ParsedRoute {
     pub deprecated: bool,
     /// External documentation link.
     pub external_docs: Option<ParsedExternalDocs>,
+    /// Specification extensions (`x-...`) attached to the Operation Object.
+    pub extensions: BTreeMap<String, JsonValue>,
 }
 
 /// Represents a header returned in the response.
@@ -161,8 +238,24 @@ pub struct ResponseHeader {
     pub name: String,
     /// Description of the header.
     pub description: Option<String>,
+    /// Whether this header is required.
+    pub required: bool,
+    /// Whether this header is deprecated.
+    pub deprecated: bool,
+    /// Serialization style for schema-based headers (must be `simple` when set).
+    pub style: Option<ParamStyle>,
+    /// Explicit explode setting for schema-based headers.
+    pub explode: Option<bool>,
     /// Rust type of the header value (e.g., "i32", "String").
     pub ty: String,
+    /// Media type used when this header is defined via `content`.
+    ///
+    /// When set, OpenAPI generation will emit `content` instead of `schema`.
+    pub content_media_type: Option<String>,
+    /// Optional example value for the header.
+    pub example: Option<ExampleValue>,
+    /// Specification extensions (`x-...`) attached to the Header Object.
+    pub extensions: BTreeMap<String, JsonValue>,
 }
 
 /// Represents a static link relationship defined in the response.
@@ -176,12 +269,19 @@ pub struct ParsedLink {
     pub operation_id: Option<String>,
     /// A relative or absolute URI reference to an OAS operation.
     pub operation_ref: Option<String>,
+    /// Resolved operation reference path for code generation.
+    ///
+    /// This is derived from `operationId` or `operationRef` during parsing and
+    /// must not be emitted back into OpenAPI, preserving the original link definition.
+    pub resolved_operation_ref: Option<String>,
     /// Parameters to pass to the linked operation.
     /// Key: Parameter name, Value: literal or runtime expression.
     pub parameters: HashMap<String, LinkParamValue>,
     /// Optional request body to pass to the linked operation.
     pub request_body: Option<LinkRequestBody>,
     /// Optional server URL override for the linked operation.
+    pub server: Option<ParsedServer>,
+    /// Optional resolved server URL (variables substituted).
     pub server_url: Option<String>,
 }
 
@@ -194,10 +294,36 @@ pub struct ParsedCallback {
     pub expression: RuntimeExpression,
     /// The HTTP method for the callback request.
     pub method: String,
+    /// Parameters applicable to this callback operation.
+    ///
+    /// This list includes operation-level parameters plus any path-item parameters
+    /// not overridden at the operation level.
+    pub params: Vec<RouteParam>,
+    /// Parameters defined at the callback Path Item level.
+    ///
+    /// These are preserved separately for OpenAPI round-tripping and may be
+    /// overridden by operation-level parameters with the same name+location.
+    pub path_params: Vec<RouteParam>,
+    /// Security requirements for this callback operation (OR semantics across groups).
+    ///
+    /// When empty, security may still be inherited from a top-level default.
+    pub security: Vec<SecurityRequirementGroup>,
+    /// Whether the callback Operation Object explicitly declared `security`.
+    pub security_defined: bool,
     /// The expected body sent in the callback (if any).
     pub request_body: Option<RequestBodyDefinition>,
     /// The expected response type from the callback receiver.
     pub response_type: Option<String>,
+    /// The response status code or range selected for this callback (e.g. "200", "202", "default").
+    pub response_status: Option<String>,
+    /// The summary associated with the selected callback response.
+    pub response_summary: Option<String>,
+    /// The description associated with the selected callback response.
+    pub response_description: Option<String>,
+    /// The media type selected for the callback response body.
+    pub response_media_type: Option<String>,
+    /// Example payload for the callback response (data or serialized).
+    pub response_example: Option<ExampleValue>,
     /// Headers expected in the callback receiver's response.
     pub response_headers: Vec<ResponseHeader>,
 }
@@ -221,16 +347,59 @@ pub enum LinkRequestBody {
 }
 
 /// Detailed information about a Security Scheme.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SecuritySchemeInfo {
     /// The type of scheme (ApiKey, Http, etc.).
     pub kind: SecuritySchemeKind,
     /// The description provided in the spec.
     pub description: Option<String>,
+    /// Whether this security scheme is deprecated.
+    pub deprecated: bool,
+}
+
+/// OAuth2 flow definition (OAS 3.x).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OAuthFlow {
+    /// Authorization URL (implicit, authorizationCode).
+    pub authorization_url: Option<String>,
+    /// Device authorization URL (deviceAuthorization).
+    pub device_authorization_url: Option<String>,
+    /// Token URL (password, clientCredentials, authorizationCode, deviceAuthorization).
+    pub token_url: Option<String>,
+    /// Refresh URL (optional).
+    pub refresh_url: Option<String>,
+    /// Available scopes and their descriptions.
+    pub scopes: BTreeMap<String, String>,
+}
+
+/// Container for OAuth2 flows (OAS 3.x).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OAuthFlows {
+    /// Implicit flow.
+    pub implicit: Option<OAuthFlow>,
+    /// Resource owner password flow.
+    pub password: Option<OAuthFlow>,
+    /// Client credentials flow.
+    pub client_credentials: Option<OAuthFlow>,
+    /// Authorization code flow.
+    pub authorization_code: Option<OAuthFlow>,
+    /// Device authorization flow (RFC8628).
+    pub device_authorization: Option<OAuthFlow>,
+}
+
+impl OAuthFlows {
+    /// Returns true if no flows are defined.
+    pub fn is_empty(&self) -> bool {
+        self.implicit.is_none()
+            && self.password.is_none()
+            && self.client_credentials.is_none()
+            && self.authorization_code.is_none()
+            && self.device_authorization.is_none()
+    }
 }
 
 /// Classification of the security scheme logic.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SecuritySchemeKind {
     /// API Key (Header, Query, Cookie).
     ApiKey {
@@ -247,15 +416,23 @@ pub enum SecuritySchemeKind {
         bearer_format: Option<String>,
     },
     /// OAuth2 Flows.
-    OAuth2,
+    OAuth2 {
+        /// OAuth2 flow definitions.
+        flows: OAuthFlows,
+        /// Optional OAuth2 authorization server metadata URL (RFC8414).
+        oauth2_metadata_url: Option<String>,
+    },
     /// OpenID Connect.
-    OpenIdConnect,
+    OpenIdConnect {
+        /// OpenID Connect discovery URL.
+        open_id_connect_url: String,
+    },
     /// Mutual TLS.
     MutualTls,
 }
 
-/// A single security requirement (AND logic).
-#[derive(Debug, Clone, PartialEq)]
+/// A single security scheme requirement (AND logic within a group).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SecurityRequirement {
     /// Name of the security scheme in components.
     pub scheme_name: String,
@@ -263,6 +440,27 @@ pub struct SecurityRequirement {
     pub scopes: Vec<String>,
     /// Resolved scheme details (if available).
     pub scheme: Option<SecuritySchemeInfo>,
+}
+
+/// A grouped security requirement object (OR semantics across groups).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SecurityRequirementGroup {
+    /// Schemes required together for this alternative.
+    pub schemes: Vec<SecurityRequirement>,
+}
+
+impl SecurityRequirementGroup {
+    /// Creates an empty (anonymous) requirement object: `{}`.
+    pub fn anonymous() -> Self {
+        Self {
+            schemes: Vec::new(),
+        }
+    }
+
+    /// Returns true if this group represents anonymous access.
+    pub fn is_anonymous(&self) -> bool {
+        self.schemes.is_empty()
+    }
 }
 
 /// Definition of a request body type and format.
@@ -285,7 +483,7 @@ pub struct RequestBodyDefinition {
     /// Positional encoding for remaining multipart items.
     pub item_encoding: Option<EncodingInfo>,
     /// Optional example payload for the request body.
-    pub example: Option<JsonValue>,
+    pub example: Option<ExampleValue>,
 }
 
 /// Encoding details for a specific property.
@@ -301,6 +499,12 @@ pub struct EncodingInfo {
     pub explode: Option<bool>,
     /// Allow reserved characters (RFC3986) without percent-encoding.
     pub allow_reserved: Option<bool>,
+    /// Nested encoding definitions keyed by property name.
+    pub encoding: Option<HashMap<String, EncodingInfo>>,
+    /// Positional encoding definitions for multipart sequences.
+    pub prefix_encoding: Option<Vec<EncodingInfo>>,
+    /// Encoding definition for remaining multipart items.
+    pub item_encoding: Option<Box<EncodingInfo>>,
 }
 
 /// Supported body content types.
@@ -327,6 +531,110 @@ pub enum ContentMediaType {
     Json,
     /// Any other media type (stored as provided).
     Other(String),
+}
+
+/// Indicates whether an example is raw data or already serialized.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExampleKind {
+    /// Example represents data that still needs serialization.
+    Data,
+    /// Example is already serialized (e.g., `serializedValue`).
+    Serialized,
+    /// Example is stored externally via `externalValue`.
+    External,
+}
+
+/// Example payload with explicit serialization semantics.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExampleValue {
+    /// Whether the example is data or already serialized.
+    pub kind: ExampleKind,
+    /// The example payload value.
+    pub value: JsonValue,
+    /// Optional short summary of the example.
+    pub summary: Option<String>,
+    /// Optional long description of the example.
+    pub description: Option<String>,
+}
+
+impl ExampleValue {
+    fn new(
+        kind: ExampleKind,
+        value: JsonValue,
+        summary: Option<String>,
+        description: Option<String>,
+    ) -> Self {
+        Self {
+            kind,
+            value,
+            summary,
+            description,
+        }
+    }
+
+    /// Creates a data example.
+    pub fn data(value: JsonValue) -> Self {
+        Self::new(ExampleKind::Data, value, None, None)
+    }
+
+    /// Creates a serialized example.
+    pub fn serialized(value: JsonValue) -> Self {
+        Self::new(ExampleKind::Serialized, value, None, None)
+    }
+
+    /// Creates an external example.
+    pub fn external(value: JsonValue) -> Self {
+        Self::new(ExampleKind::External, value, None, None)
+    }
+
+    /// Creates a data example with optional summary/description metadata.
+    pub fn data_with_meta(
+        value: JsonValue,
+        summary: Option<String>,
+        description: Option<String>,
+    ) -> Self {
+        Self::new(ExampleKind::Data, value, summary, description)
+    }
+
+    /// Creates a serialized example with optional summary/description metadata.
+    pub fn serialized_with_meta(
+        value: JsonValue,
+        summary: Option<String>,
+        description: Option<String>,
+    ) -> Self {
+        Self::new(ExampleKind::Serialized, value, summary, description)
+    }
+
+    /// Creates an external example with optional summary/description metadata.
+    pub fn external_with_meta(
+        value: JsonValue,
+        summary: Option<String>,
+        description: Option<String>,
+    ) -> Self {
+        Self::new(ExampleKind::External, value, summary, description)
+    }
+
+    /// Applies Reference Object summary/description overrides, replacing existing metadata
+    /// when provided.
+    pub fn with_overrides(mut self, summary: Option<String>, description: Option<String>) -> Self {
+        if summary.is_some() {
+            self.summary = summary;
+        }
+        if description.is_some() {
+            self.description = description;
+        }
+        self
+    }
+
+    /// Returns true if the example is already serialized.
+    pub fn is_serialized(&self) -> bool {
+        matches!(self.kind, ExampleKind::Serialized | ExampleKind::External)
+    }
+
+    /// Returns true if the example uses `externalValue`.
+    pub fn is_external(&self) -> bool {
+        matches!(self.kind, ExampleKind::External)
+    }
 }
 
 impl ContentMediaType {
@@ -411,7 +719,13 @@ pub struct RouteParam {
     /// This is only valid for `in: query` parameters (deprecated in OAS 3.2).
     pub allow_empty_value: bool,
     /// Optional example value for this parameter.
-    pub example: Option<JsonValue>,
+    pub example: Option<ExampleValue>,
+    /// Raw schema object for lossless keyword passthrough (OAS 3.1+).
+    ///
+    /// When present, unknown JSON Schema keywords are merged into the generated schema.
+    pub raw_schema: Option<JsonValue>,
+    /// Specification extensions (`x-...`) attached to the Parameter Object.
+    pub extensions: BTreeMap<String, JsonValue>,
 }
 
 #[cfg(test)]

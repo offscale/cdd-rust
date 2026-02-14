@@ -12,10 +12,13 @@ pub mod shims;
 
 use crate::error::{AppError, AppResult};
 use crate::oas::models::{ParsedRoute, RouteKind};
+use crate::oas::normalization::{normalize_boolean_schemas, normalize_nullable_schemas};
 use crate::oas::ref_utils::normalize_ref_to_local;
+use crate::oas::registry::DocumentRegistry;
 use crate::oas::routes::builder::parse_path_item;
 use crate::oas::routes::shims::{ShimComponents, ShimOpenApi, ShimPathItem, ShimServer};
-use crate::oas::validation::{validate_component_keys, validate_openapi_root, validate_paths};
+use crate::oas::schemas::refs::compute_base_uri;
+use crate::oas::validation::{validate_component_keys, validate_openapi_root};
 use serde_json::json;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use url::Url;
@@ -26,13 +29,32 @@ use utoipa::openapi::RefOr;
 /// This function verifies the presence of a valid `openapi` (3.x) or `swagger` (2.0) version field
 /// before processing the routes.
 pub fn parse_openapi_routes(yaml_content: &str) -> AppResult<Vec<ParsedRoute>> {
+    parse_openapi_routes_with_registry(yaml_content, None, None)
+}
+
+/// Parses routes with an optional document registry for external references.
+pub fn parse_openapi_routes_with_registry(
+    yaml_content: &str,
+    registry: Option<&DocumentRegistry>,
+    retrieval_uri: Option<&str>,
+) -> AppResult<Vec<ParsedRoute>> {
     let mut json_val: serde_json::Value = serde_yaml::from_str(yaml_content)
         .map_err(|e| AppError::General(format!("Failed to parse OpenAPI YAML: {}", e)))?;
-    coerce_version_strings(&mut json_val);
-    normalize_link_objects(&mut json_val);
-    normalize_example_objects(&mut json_val);
-    normalize_component_refs(&mut json_val)?;
-    let openapi: ShimOpenApi = serde_json::from_value(json_val)
+    parse_openapi_routes_from_value(&mut json_val, registry, retrieval_uri)
+}
+
+fn parse_openapi_routes_from_value(
+    json_val: &mut serde_json::Value,
+    registry: Option<&DocumentRegistry>,
+    retrieval_uri: Option<&str>,
+) -> AppResult<Vec<ParsedRoute>> {
+    coerce_version_strings(json_val);
+    normalize_link_objects(json_val);
+    normalize_example_objects(json_val);
+    normalize_nullable_schemas(json_val);
+    normalize_boolean_schemas(json_val);
+    normalize_component_refs(json_val)?;
+    let openapi: ShimOpenApi = serde_json::from_value(json_val.clone())
         .map_err(|e| AppError::General(format!("Failed to parse OpenAPI YAML: {}", e)))?;
 
     // Version Validation
@@ -60,12 +82,18 @@ pub fn parse_openapi_routes(yaml_content: &str) -> AppResult<Vec<ParsedRoute>> {
     if let Some(components) = openapi.components.as_ref() {
         validate_component_keys(components)?;
     }
-    validate_paths(&openapi.paths)?;
 
-    let base_path = resolve_base_path(&openapi);
+    let base_path = resolve_base_path(&openapi, retrieval_uri);
+    let base_uri = resolve_entry_base_uri(&openapi, retrieval_uri);
     let is_oas3 = openapi.openapi.is_some();
     let mut routes = Vec::new();
     let mut owned_components = openapi.components.clone();
+    let empty_paths = BTreeMap::new();
+    let paths = openapi
+        .paths
+        .as_ref()
+        .map(|p| &p.items)
+        .unwrap_or(&empty_paths);
     if let (Some(self_uri), Some(comps)) = (openapi.self_uri.as_deref(), owned_components.as_mut())
     {
         comps.extra.insert(
@@ -79,7 +107,7 @@ pub fn parse_openapi_routes(yaml_content: &str) -> AppResult<Vec<ParsedRoute>> {
     let mut operation_ids: HashSet<String> = HashSet::new();
 
     // 1. Parse standard Paths
-    for (path_str, path_item) in &openapi.paths {
+    for (path_str, path_item) in paths {
         parse_path_item(
             &mut routes,
             path_str,
@@ -91,18 +119,26 @@ pub fn parse_openapi_routes(yaml_content: &str) -> AppResult<Vec<ParsedRoute>> {
             global_security,
             &mut operation_index,
             &mut operation_ids,
-            &openapi.paths,
+            paths,
+            registry,
+            base_uri.as_ref(),
         )?;
     }
 
     // 2. Parse Webhooks
     if let Some(webhooks) = &openapi.webhooks {
-        for (name, path_item_or_ref) in webhooks {
+        for (name, path_item_or_ref) in &webhooks.items {
             let resolved = match path_item_or_ref {
                 RefOr::T(path_item) => path_item.clone(),
-                RefOr::Ref(r) => {
-                    resolve_path_item_ref(&r.ref_location, components, &openapi.paths)?
-                }
+                RefOr::Ref(r) => serde_json::from_value::<ShimPathItem>(serde_json::json!({
+                    "$ref": r.ref_location.clone()
+                }))
+                .map_err(|e| {
+                    AppError::General(format!(
+                        "Failed to parse webhook reference '{}': {}",
+                        r.ref_location, e
+                    ))
+                })?,
             };
 
             parse_path_item(
@@ -116,7 +152,9 @@ pub fn parse_openapi_routes(yaml_content: &str) -> AppResult<Vec<ParsedRoute>> {
                 global_security,
                 &mut operation_index,
                 &mut operation_ids,
-                &openapi.paths,
+                paths,
+                registry,
+                base_uri.as_ref(),
             )?;
         }
     }
@@ -125,11 +163,33 @@ pub fn parse_openapi_routes(yaml_content: &str) -> AppResult<Vec<ParsedRoute>> {
         &mut routes,
         &operation_index,
         openapi.self_uri.as_deref(),
-        &openapi.paths,
+        paths,
+        openapi.webhooks.as_ref().map(|w| &w.items),
+        openapi.components.as_ref(),
+        registry,
+        base_uri.as_ref(),
     )?;
     validate_link_operation_ids(&routes)?;
 
     Ok(routes)
+}
+
+fn resolve_entry_base_uri(openapi: &ShimOpenApi, retrieval_uri: Option<&str>) -> Option<Url> {
+    let base_str = match (retrieval_uri, openapi.self_uri.as_deref()) {
+        (Some(retrieval), Some(self_val)) => Some(compute_base_uri(retrieval, Some(self_val))),
+        (Some(retrieval), None) => Some(retrieval.to_string()),
+        (None, Some(self_val)) => Some(self_val.to_string()),
+        (None, None) => None,
+    }?;
+
+    if let Ok(url) = Url::parse(&base_str) {
+        return Some(url);
+    }
+    let dummy = Url::parse("http://example.invalid/").ok()?;
+    if base_str.starts_with('/') {
+        return dummy.join(&base_str).ok();
+    }
+    dummy.join(&base_str).ok()
 }
 
 fn resolve_response_link_targets(
@@ -137,6 +197,10 @@ fn resolve_response_link_targets(
     operation_index: &HashMap<String, String>,
     self_uri: Option<&str>,
     paths: &BTreeMap<String, ShimPathItem>,
+    webhooks: Option<&BTreeMap<String, RefOr<ShimPathItem>>>,
+    components: Option<&ShimComponents>,
+    registry: Option<&DocumentRegistry>,
+    base_uri: Option<&Url>,
 ) -> AppResult<()> {
     for route in routes.iter_mut() {
         let Some(links) = route.response_links.as_mut() else {
@@ -145,8 +209,12 @@ fn resolve_response_link_targets(
 
         for link in links.iter_mut() {
             if let Some(op_ref) = link.operation_ref.as_ref() {
-                if let Some(resolved) = resolve_operation_ref_to_path(op_ref, self_uri, paths) {
-                    link.operation_ref = Some(resolved);
+                if let Some(resolved) = resolve_operation_ref_to_path(
+                    op_ref, self_uri, paths, webhooks, components, registry, base_uri,
+                ) {
+                    link.resolved_operation_ref = Some(resolved);
+                } else if is_absolute_uri(op_ref) {
+                    link.resolved_operation_ref = Some(op_ref.clone());
                 } else if normalize_ref_to_local(op_ref, self_uri).is_some() {
                     return Err(AppError::General(format!(
                         "Link '{}' operationRef '{}' does not resolve to a known Operation Object",
@@ -158,7 +226,7 @@ fn resolve_response_link_targets(
 
             if let Some(op_id) = link.operation_id.as_ref() {
                 if let Some(path) = operation_index.get(op_id) {
-                    link.operation_ref = Some(path.clone());
+                    link.resolved_operation_ref = Some(path.clone());
                 }
             }
         }
@@ -174,7 +242,7 @@ fn validate_link_operation_ids(routes: &[ParsedRoute]) -> AppResult<()> {
         };
 
         for link in links {
-            if link.operation_id.is_some() && link.operation_ref.is_none() {
+            if link.operation_id.is_some() && link.resolved_operation_ref.is_none() {
                 return Err(AppError::General(format!(
                     "Link '{}' references unknown operationId '{}'",
                     link.name,
@@ -187,10 +255,18 @@ fn validate_link_operation_ids(routes: &[ParsedRoute]) -> AppResult<()> {
     Ok(())
 }
 
+fn is_absolute_uri(value: &str) -> bool {
+    Url::parse(value).is_ok()
+}
+
 fn resolve_operation_ref_to_path(
     operation_ref: &str,
     self_uri: Option<&str>,
     paths: &BTreeMap<String, ShimPathItem>,
+    webhooks: Option<&BTreeMap<String, RefOr<ShimPathItem>>>,
+    components: Option<&ShimComponents>,
+    registry: Option<&DocumentRegistry>,
+    base_uri: Option<&Url>,
 ) -> Option<String> {
     if operation_ref.starts_with('/') {
         return Some(operation_ref.to_string());
@@ -200,25 +276,138 @@ fn resolve_operation_ref_to_path(
     let pointer = local.trim_start_matches('#').trim_start_matches('/');
     let mut segments = pointer.split('/');
     let first = segments.next()?;
-    if first != "paths" {
-        return None;
-    }
+    let (key, path_item) = match first {
+        "paths" | "webhooks" => {
+            let path_segment = segments.next()?;
+            let key = crate::oas::ref_utils::decode_pointer_segment(path_segment);
+            let path_item = if first == "paths" {
+                let raw = paths.get(&key)?;
+                if let Some(ref_path) = raw.ref_path.as_deref() {
+                    resolve_path_item_ref(ref_path, components, paths, registry, base_uri).ok()?
+                } else {
+                    raw.clone()
+                }
+            } else {
+                let wh_map = webhooks?;
+                let raw = wh_map.get(&key)?;
+                match raw {
+                    RefOr::T(item) => item.clone(),
+                    RefOr::Ref(r) => resolve_path_item_ref(
+                        &r.ref_location,
+                        components,
+                        paths,
+                        registry,
+                        base_uri,
+                    )
+                    .ok()?,
+                }
+            };
+            (key, path_item)
+        }
+        "components" => {
+            let section = segments.next()?;
+            if section != "pathItems" {
+                return None;
+            }
+            let name_seg = segments.next()?;
+            let name = crate::oas::ref_utils::decode_pointer_segment(name_seg);
+            let method_segment = segments.next();
+            if segments.next().is_some() {
+                return None;
+            }
 
-    let path_segment = segments.next()?;
-    let path_key = crate::oas::ref_utils::decode_pointer_segment(path_segment);
-    let path_item = paths.get(&path_key)?;
+            let ref_str = format!("#/components/pathItems/{}", name_seg);
+            let path_item =
+                resolve_path_item_ref(&ref_str, components, paths, registry, base_uri).ok()?;
+
+            if let Some(method_seg) = method_segment {
+                let method = crate::oas::ref_utils::decode_pointer_segment(method_seg);
+                if !path_item_supports_method(&path_item, &method) {
+                    return None;
+                }
+            }
+
+            let key = resolve_component_path_item_target(&name, self_uri, paths, webhooks)?;
+            (key, path_item)
+        }
+        _ => return None,
+    };
 
     if let Some(method_segment) = segments.next() {
         if segments.next().is_some() {
             return None;
         }
         let method = crate::oas::ref_utils::decode_pointer_segment(method_segment);
-        if !path_item_supports_method(path_item, &method) {
+        if !path_item_supports_method(&path_item, &method) {
             return None;
         }
     }
 
-    Some(path_key)
+    Some(key)
+}
+
+fn resolve_component_path_item_target(
+    target_name: &str,
+    self_uri: Option<&str>,
+    paths: &BTreeMap<String, ShimPathItem>,
+    webhooks: Option<&BTreeMap<String, RefOr<ShimPathItem>>>,
+) -> Option<String> {
+    let mut matches = Vec::new();
+
+    for (path, item) in paths {
+        if let Some(ref_path) = item.ref_path.as_deref() {
+            if path_item_ref_matches(ref_path, self_uri, target_name) {
+                matches.push(path.clone());
+            }
+        }
+    }
+
+    if let Some(webhooks) = webhooks {
+        for (name, item_or_ref) in webhooks {
+            match item_or_ref {
+                RefOr::Ref(r) => {
+                    if path_item_ref_matches(&r.ref_location, self_uri, target_name) {
+                        matches.push(name.clone());
+                    }
+                }
+                RefOr::T(item) => {
+                    if let Some(ref_path) = item.ref_path.as_deref() {
+                        if path_item_ref_matches(ref_path, self_uri, target_name) {
+                            matches.push(name.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if matches.len() == 1 {
+        Some(matches.remove(0))
+    } else {
+        None
+    }
+}
+
+fn path_item_ref_matches(ref_str: &str, self_uri: Option<&str>, target_name: &str) -> bool {
+    let Some(local) = normalize_ref_to_local(ref_str, self_uri) else {
+        return false;
+    };
+    let pointer = local.trim_start_matches('#').trim_start_matches('/');
+    let mut segments = pointer.split('/');
+    if segments.next() != Some("components") {
+        return false;
+    }
+    if segments.next() != Some("pathItems") {
+        return false;
+    }
+    let name_seg = match segments.next() {
+        Some(seg) => seg,
+        None => return false,
+    };
+    if segments.next().is_some() {
+        return false;
+    }
+    crate::oas::ref_utils::decode_pointer_segment(name_seg) == target_name
 }
 
 fn path_item_supports_method(path_item: &ShimPathItem, method: &str) -> bool {
@@ -439,31 +628,42 @@ impl ComponentRefResolver {
 
         self.resolve_media_type_map(content_val)?;
 
-        let serde_json::Value::Object(content_map) = content_val else {
-            return Err(AppError::General(format!(
-                "Header '{}' content must be a map of media types",
-                header_name
-            )));
+        let (schema_val, content_clone) = {
+            let serde_json::Value::Object(content_map) = content_val else {
+                return Err(AppError::General(format!(
+                    "Header '{}' content must be a map of media types",
+                    header_name
+                )));
+            };
+
+            if content_map.len() != 1 {
+                return Err(AppError::General(format!(
+                    "Header '{}' content must define exactly one media type",
+                    header_name
+                )));
+            }
+
+            let schema_val = content_map
+                .values()
+                .next()
+                .and_then(|media_val| {
+                    if let serde_json::Value::Object(media_obj) = media_val {
+                        media_obj.get("schema").cloned()
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| json!({ "type": "string" }));
+
+            (schema_val, content_map.clone())
         };
 
-        if content_map.len() != 1 {
-            return Err(AppError::General(format!(
-                "Header '{}' content must define exactly one media type",
-                header_name
-            )));
+        if !obj.contains_key(CDD_HEADER_CONTENT_KEY) {
+            obj.insert(
+                CDD_HEADER_CONTENT_KEY.to_string(),
+                serde_json::Value::Object(content_clone),
+            );
         }
-
-        let schema_val = content_map
-            .values()
-            .next()
-            .and_then(|media_val| {
-                if let serde_json::Value::Object(media_obj) = media_val {
-                    media_obj.get("schema").cloned()
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_else(|| json!({ "type": "string" }));
 
         obj.insert("schema".to_string(), schema_val);
         obj.remove("content");
@@ -661,13 +861,16 @@ fn normalize_link_map(value: &mut serde_json::Value) {
     }
 }
 
+const CDD_HEADER_CONTENT_KEY: &str = "x-cdd-content";
+
 /// Resolves the base URL path from `servers` (OAS 3) or `basePath` (Swagger 2).
 ///
 /// For servers:
 /// - Takes the first server.
 /// - Resolves variables with `default` values.
+/// - Resolves relative URLs against the retrieval URI (when available).
 /// - Extracts the path component.
-fn resolve_base_path(openapi: &ShimOpenApi) -> Option<String> {
+fn resolve_base_path(openapi: &ShimOpenApi, retrieval_uri: Option<&str>) -> Option<String> {
     // 1. Swagger 2.0 basePath
     if let Some(bp) = &openapi.base_path {
         let trimmed = bp.trim_end_matches('/');
@@ -677,11 +880,14 @@ fn resolve_base_path(openapi: &ShimOpenApi) -> Option<String> {
     }
 
     // 2. OpenAPI 3.x servers
-    resolve_base_path_from_servers(openapi.servers.as_ref())
+    resolve_base_path_from_servers(openapi.servers.as_ref(), retrieval_uri)
 }
 
 /// Resolves a base path from an OAS `servers` array.
-fn resolve_base_path_from_servers(servers: Option<&Vec<ShimServer>>) -> Option<String> {
+fn resolve_base_path_from_servers(
+    servers: Option<&Vec<ShimServer>>,
+    retrieval_uri: Option<&str>,
+) -> Option<String> {
     let servers = servers?;
     let server = servers.first()?;
     let mut url = server.url.clone();
@@ -694,10 +900,10 @@ fn resolve_base_path_from_servers(servers: Option<&Vec<ShimServer>>) -> Option<S
         }
     }
 
-    extract_base_path_from_url(&url)
+    extract_base_path_from_url(&url, retrieval_uri)
 }
 
-fn extract_base_path_from_url(url: &str) -> Option<String> {
+fn extract_base_path_from_url(url: &str, retrieval_uri: Option<&str>) -> Option<String> {
     let trimmed = url.trim();
     if trimmed.is_empty() {
         return None;
@@ -705,6 +911,15 @@ fn extract_base_path_from_url(url: &str) -> Option<String> {
 
     if let Ok(parsed) = Url::parse(trimmed) {
         return normalize_base_path(parsed.path());
+    }
+
+    // If we have a retrieval URI, resolve relative servers against it (RFC3986).
+    if let Some(retrieval) = retrieval_uri {
+        if let Ok(base) = Url::parse(retrieval) {
+            if let Ok(resolved) = base.join(trimmed) {
+                return normalize_base_path(resolved.path());
+            }
+        }
     }
 
     // Handle relative or absolute-path server URLs by resolving against a dummy base.
@@ -738,19 +953,41 @@ fn normalize_base_path(path: &str) -> Option<String> {
 }
 
 /// Resolves a `$ref` pointing to a Path Item from components or local paths.
-fn resolve_path_item_ref(
+pub(crate) fn resolve_path_item_ref(
     ref_str: &str,
     components: Option<&ShimComponents>,
     paths: &BTreeMap<String, ShimPathItem>,
+    registry: Option<&DocumentRegistry>,
+    base_uri: Option<&Url>,
 ) -> AppResult<ShimPathItem> {
     let mut visited = HashSet::new();
-    resolve_path_item_ref_inner(ref_str, components, paths, &mut visited)
+    resolve_path_item_ref_inner(ref_str, components, paths, registry, base_uri, &mut visited)
+}
+
+pub(crate) fn resolve_path_item_ref_with_context(
+    ref_str: &str,
+    components: Option<&ShimComponents>,
+    paths: &BTreeMap<String, ShimPathItem>,
+    registry: Option<&DocumentRegistry>,
+    base_uri: Option<&Url>,
+) -> AppResult<(ShimPathItem, Option<ShimComponents>, Option<Url>)> {
+    let mut visited = HashSet::new();
+    resolve_path_item_ref_with_context_inner(
+        ref_str,
+        components,
+        paths,
+        registry,
+        base_uri,
+        &mut visited,
+    )
 }
 
 fn resolve_path_item_ref_inner(
     ref_str: &str,
     components: Option<&ShimComponents>,
     paths: &BTreeMap<String, ShimPathItem>,
+    registry: Option<&DocumentRegistry>,
+    base_uri: Option<&Url>,
     visited: &mut HashSet<String>,
 ) -> AppResult<ShimPathItem> {
     let mut normalized = ref_str.to_string();
@@ -767,6 +1004,14 @@ fn resolve_path_item_ref_inner(
             "PathItem reference cycle detected at {}",
             normalized
         )));
+    }
+
+    if !normalized.starts_with("#/") {
+        if let Some(registry) = registry {
+            if let Some(item) = registry.resolve_path_item_ref(&normalized, base_uri) {
+                return Ok(item);
+            }
+        }
     }
 
     if let Some(pointer) = normalized.strip_prefix("#/") {
@@ -792,8 +1037,10 @@ fn resolve_path_item_ref_inner(
                                     &r.ref_location,
                                     components,
                                     paths,
+                                    registry,
+                                    base_uri,
                                     visited,
-                                )
+                                );
                             }
                         }
                     }
@@ -809,7 +1056,7 @@ fn resolve_path_item_ref_inner(
                             })?;
                         if let Some(next_ref) = parsed.ref_path.as_deref() {
                             return resolve_path_item_ref_inner(
-                                next_ref, components, paths, visited,
+                                next_ref, components, paths, registry, base_uri, visited,
                             );
                         }
                         return Ok(parsed);
@@ -835,9 +1082,147 @@ fn resolve_path_item_ref_inner(
             let path_key = crate::oas::ref_utils::decode_pointer_segment(name_seg);
             if let Some(pi) = paths.get(&path_key) {
                 if let Some(next_ref) = pi.ref_path.as_deref() {
-                    return resolve_path_item_ref_inner(next_ref, components, paths, visited);
+                    return resolve_path_item_ref_inner(
+                        next_ref, components, paths, registry, base_uri, visited,
+                    );
                 }
                 return Ok(pi.clone());
+            }
+            return Err(AppError::General(format!(
+                "Path reference not found: {}",
+                ref_str
+            )));
+        }
+    }
+
+    Err(AppError::General(format!(
+        "Unsupported PathItem reference: {}",
+        ref_str
+    )))
+}
+
+fn resolve_path_item_ref_with_context_inner(
+    ref_str: &str,
+    components: Option<&ShimComponents>,
+    paths: &BTreeMap<String, ShimPathItem>,
+    registry: Option<&DocumentRegistry>,
+    base_uri: Option<&Url>,
+    visited: &mut HashSet<String>,
+) -> AppResult<(ShimPathItem, Option<ShimComponents>, Option<Url>)> {
+    let mut normalized = ref_str.to_string();
+    if let Some(comps) = components {
+        if let Some(self_uri) = comps.extra.get("__self").and_then(|v| v.as_str()) {
+            if let Some(local) = normalize_ref_to_local(ref_str, Some(self_uri)) {
+                normalized = local;
+            }
+        }
+    }
+
+    let visit_key = if let Some(base) = base_uri {
+        format!("{}|{}", base, normalized)
+    } else {
+        normalized.clone()
+    };
+    if !visited.insert(visit_key) {
+        return Err(AppError::General(format!(
+            "PathItem reference cycle detected at {}",
+            normalized
+        )));
+    }
+
+    if let Some(registry) = registry {
+        if let Some((item, comps_override, base_override)) =
+            registry.resolve_path_item_ref_with_components(&normalized, base_uri)
+        {
+            let next_components = comps_override.as_ref().or(components);
+            let next_base = base_override.as_ref().or(base_uri);
+            if let Some(next_ref) = item.ref_path.as_deref() {
+                return resolve_path_item_ref_with_context_inner(
+                    next_ref,
+                    next_components,
+                    paths,
+                    Some(registry),
+                    next_base,
+                    visited,
+                );
+            }
+            return Ok((item, comps_override, base_override));
+        }
+    }
+
+    if let Some(pointer) = normalized.strip_prefix("#/") {
+        let segments: Vec<&str> = pointer.split('/').collect();
+        if segments.get(0) == Some(&"components") && segments.get(1) == Some(&"pathItems") {
+            let name_seg = segments
+                .get(2)
+                .ok_or_else(|| AppError::General("PathItem reference missing name".into()))?;
+            if segments.len() > 3 {
+                return Err(AppError::General(format!(
+                    "Unsupported PathItem reference depth: {}",
+                    ref_str
+                )));
+            }
+            let name = crate::oas::ref_utils::decode_pointer_segment(name_seg);
+            if let Some(comps) = components {
+                if let Some(map) = &comps.path_items {
+                    if let Some(ref_or) = map.get(&name) {
+                        match ref_or {
+                            RefOr::T(pi) => return Ok((pi.clone(), None, None)),
+                            RefOr::Ref(r) => {
+                                return resolve_path_item_ref_with_context_inner(
+                                    &r.ref_location,
+                                    components,
+                                    paths,
+                                    registry,
+                                    base_uri,
+                                    visited,
+                                );
+                            }
+                        }
+                    }
+                }
+                if let Some(path_items_val) = comps.extra.get("pathItems") {
+                    if let Some(item_val) = path_items_val.get(&name) {
+                        let parsed = serde_json::from_value::<ShimPathItem>(item_val.clone())
+                            .map_err(|e| {
+                                AppError::General(format!(
+                                    "Failed to parse PathItem '{}': {}",
+                                    name, e
+                                ))
+                            })?;
+                        if let Some(next_ref) = parsed.ref_path.as_deref() {
+                            return resolve_path_item_ref_with_context_inner(
+                                next_ref, components, paths, registry, base_uri, visited,
+                            );
+                        }
+                        return Ok((parsed, None, None));
+                    }
+                }
+            }
+            return Err(AppError::General(format!(
+                "PathItem reference not found: {}",
+                ref_str
+            )));
+        }
+
+        if segments.get(0) == Some(&"paths") {
+            let name_seg = segments
+                .get(1)
+                .ok_or_else(|| AppError::General("Path reference missing name".into()))?;
+            if segments.len() > 2 {
+                return Err(AppError::General(format!(
+                    "Unsupported Path reference depth: {}",
+                    ref_str
+                )));
+            }
+            let path_key = crate::oas::ref_utils::decode_pointer_segment(name_seg);
+            if let Some(pi) = paths.get(&path_key) {
+                if let Some(next_ref) = pi.ref_path.as_deref() {
+                    return resolve_path_item_ref_with_context_inner(
+                        next_ref, components, paths, registry, base_uri, visited,
+                    );
+                }
+                return Ok((pi.clone(), None, None));
             }
             return Err(AppError::General(format!(
                 "Path reference not found: {}",
@@ -855,7 +1240,7 @@ fn resolve_path_item_ref_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::oas::models::{ParamSource, RuntimeExpression};
+    use crate::oas::models::{ParamSource, RuntimeExpression, SecuritySchemeKind};
     use crate::oas::routes::shims::ShimOpenApi;
     use std::collections::BTreeMap;
 
@@ -914,6 +1299,29 @@ paths:
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].path, "/ping");
         assert_eq!(routes[0].base_path.as_deref(), Some("/v1"));
+    }
+
+    #[test]
+    fn test_parse_response_header_content_preserved() {
+        let yaml = r#"
+openapi: 3.2.0
+info: {title: Headers, version: 1.0}
+paths:
+  /ping:
+    get:
+      responses:
+        '200':
+          description: OK
+          headers:
+            X-Token:
+              content:
+                text/plain:
+                  schema: { type: string }
+"#;
+        let routes = parse_openapi_routes(yaml).unwrap();
+        let header = routes[0].response_headers.first().expect("expected header");
+        assert_eq!(header.name, "X-Token");
+        assert_eq!(header.content_media_type.as_deref(), Some("text/plain"));
     }
 
     #[test]
@@ -1001,6 +1409,50 @@ paths:
 "#;
         let routes = parse_openapi_routes(yaml).unwrap();
         assert_eq!(routes[0].base_path.as_deref(), Some("/v1"));
+    }
+
+    #[test]
+    fn test_server_relative_url_uses_retrieval_uri_dot() {
+        let yaml = r#"
+openapi: 3.2.0
+info: {title: S, version: 1}
+servers:
+  - url: .
+paths:
+  /ping:
+    get:
+      responses:
+        '200': { description: OK }
+"#;
+        let routes = parse_openapi_routes_with_registry(
+            yaml,
+            None,
+            Some("https://example.com/api/openapi.yaml"),
+        )
+        .unwrap();
+        assert_eq!(routes[0].base_path.as_deref(), Some("/api"));
+    }
+
+    #[test]
+    fn test_server_relative_url_uses_retrieval_uri_dot_slash() {
+        let yaml = r#"
+openapi: 3.2.0
+info: {title: S, version: 1}
+servers:
+  - url: ./v1
+paths:
+  /ping:
+    get:
+      responses:
+        '200': { description: OK }
+"#;
+        let routes = parse_openapi_routes_with_registry(
+            yaml,
+            None,
+            Some("https://example.com/api/openapi.yaml"),
+        )
+        .unwrap();
+        assert_eq!(routes[0].base_path.as_deref(), Some("/api/v1"));
     }
 
     #[test]
@@ -1135,6 +1587,33 @@ paths:
     }
 
     #[test]
+    fn test_nullable_param_maps_to_option() {
+        let yaml = r#"
+openapi: 3.0.0
+info: {title: Nullable, version: 1.0}
+paths:
+  /items:
+    get:
+      parameters:
+        - name: filter
+          in: query
+          required: true
+          schema:
+            type: string
+            nullable: true
+      responses:
+        '200': { description: OK }
+"#;
+        let routes = parse_openapi_routes(yaml).unwrap();
+        let param = routes[0]
+            .params
+            .iter()
+            .find(|p| p.name == "filter")
+            .expect("filter param missing");
+        assert_eq!(param.ty, "Option<String>");
+    }
+
+    #[test]
     fn test_global_security_applies() {
         let yaml = r#"
 openapi: 3.2.0
@@ -1155,7 +1634,7 @@ paths:
         let routes = parse_openapi_routes(yaml).unwrap();
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].security.len(), 1);
-        assert_eq!(routes[0].security[0].scheme_name, "api_key");
+        assert_eq!(routes[0].security[0].schemes[0].scheme_name, "api_key");
     }
 
     #[test]
@@ -1187,8 +1666,8 @@ paths:
         let routes = parse_openapi_routes(yaml).unwrap();
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].security.len(), 1);
-        assert_eq!(routes[0].security[0].scheme_name, "oauth");
-        assert_eq!(routes[0].security[0].scopes, vec!["read"]);
+        assert_eq!(routes[0].security[0].schemes[0].scheme_name, "oauth");
+        assert_eq!(routes[0].security[0].schemes[0].scopes, vec!["read"]);
     }
 
     #[test]
@@ -1213,6 +1692,60 @@ paths:
         let routes = parse_openapi_routes(yaml).unwrap();
         assert_eq!(routes.len(), 1);
         assert!(routes[0].security.is_empty());
+    }
+
+    #[test]
+    fn test_external_security_scheme_resolution_with_registry() {
+        let shared = r#"
+openapi: 3.2.0
+$self: https://example.com/shared.yaml
+info: {title: Shared, version: "1.0"}
+paths: {}
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      name: X-API-Key
+      in: header
+"#;
+        let mut registry = DocumentRegistry::new();
+        registry
+            .register_openapi_yaml("https://example.com/shared.yaml", shared)
+            .unwrap();
+
+        let entry = r#"
+openapi: 3.2.0
+$self: https://example.com/openapi.yaml
+info: {title: Entry, version: "1.0"}
+paths:
+  /secure:
+    get:
+      security:
+        - https://example.com/shared.yaml#/components/securitySchemes/ApiKeyAuth: []
+      responses: { '200': {description: OK} }
+"#;
+
+        let routes = parse_openapi_routes_with_registry(
+            entry,
+            Some(&registry),
+            Some("https://example.com/openapi.yaml"),
+        )
+        .unwrap();
+
+        assert_eq!(routes.len(), 1);
+        let scheme = routes[0].security[0]
+            .schemes
+            .get(0)
+            .and_then(|s| s.scheme.as_ref())
+            .expect("security scheme missing");
+
+        match &scheme.kind {
+            SecuritySchemeKind::ApiKey { name, in_loc } => {
+                assert_eq!(name, "X-API-Key");
+                assert_eq!(in_loc, &ParamSource::Header);
+            }
+            other => panic!("expected api key scheme, got {:?}", other),
+        }
     }
 
     #[test]
@@ -1275,7 +1808,7 @@ paths:
       responses: { '200': {description: OK} }
 "#;
         let err = parse_openapi_routes(yaml).unwrap_err();
-        assert!(format!("{err}").contains("missing path parameter definition for 'id'"));
+        assert!(format!("{err}").contains("missing path parameter '{id}'"));
     }
 
     #[test]
@@ -1313,7 +1846,7 @@ paths:
       responses: { '200': {description: OK} }
 "#;
         let err = parse_openapi_routes(yaml).unwrap_err();
-        assert!(format!("{err}").contains("contains duplicate path parameter 'id'"));
+        assert!(format!("{err}").contains("contains duplicate parameter '{id}'"));
     }
 
     #[test]
@@ -1414,7 +1947,9 @@ paths:
         responses: { '200': {description: OK} }
 "#;
         let err = parse_openapi_routes(yaml).unwrap_err();
-        assert!(format!("{err}").contains("additionalOperations contains reserved HTTP method"));
+        let msg = format!("{err}");
+        assert!(msg.contains("additionalOperations"));
+        assert!(msg.contains("GET"));
     }
 
     #[test]
@@ -1436,6 +1971,80 @@ paths:
         let routes = parse_openapi_routes(yaml).unwrap();
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].base_path.as_deref(), Some("/v3"));
+        let op_servers = routes[0]
+            .servers_override
+            .as_ref()
+            .expect("expected operation servers");
+        assert_eq!(op_servers[0].url, "https://api.example.com/v3");
+        let path_servers = routes[0]
+            .path_servers
+            .as_ref()
+            .expect("expected path servers");
+        assert_eq!(path_servers[0].url, "https://api.example.com/v2");
+    }
+
+    #[test]
+    fn test_path_item_metadata_and_params_preserved() {
+        let yaml = r#"
+openapi: 3.2.0
+info: {title: PathItem, version: 1.0}
+paths:
+  /items/{id}:
+    summary: Path summary
+    description: Path description
+    x-path-meta:
+      owner: api
+    servers:
+      - url: https://api.example.com/v2
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Op summary
+      description: Op description
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+      responses: { '200': {description: OK} }
+"#;
+        let routes = parse_openapi_routes(yaml).unwrap();
+        assert_eq!(routes.len(), 1);
+        let route = &routes[0];
+        assert_eq!(route.path_summary.as_deref(), Some("Path summary"));
+        assert_eq!(route.path_description.as_deref(), Some("Path description"));
+        assert_eq!(route.operation_summary.as_deref(), Some("Op summary"));
+        assert_eq!(
+            route.operation_description.as_deref(),
+            Some("Op description")
+        );
+        assert!(
+            route
+                .path_extensions
+                .get("x-path-meta")
+                .and_then(|v| v.get("owner"))
+                .and_then(|v| v.as_str())
+                == Some("api")
+        );
+        assert_eq!(route.path_params.len(), 1);
+        assert_eq!(route.path_params[0].name, "id");
+        assert!(route.path_params[0].source == crate::oas::models::ParamSource::Path);
+        assert!(
+            route.path_servers.as_ref().map(|s| s[0].url.as_str())
+                == Some("https://api.example.com/v2")
+        );
+        assert!(route
+            .params
+            .iter()
+            .any(|p| p.name == "id" && p.source == crate::oas::models::ParamSource::Path));
+        assert!(route
+            .params
+            .iter()
+            .any(|p| p.name == "q" && p.source == crate::oas::models::ParamSource::Query));
     }
 
     #[test]
@@ -1499,9 +2108,19 @@ info: {title: PathConflict, version: 1.0}
 paths:
   /pets/{petId}:
     get:
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema: { type: string }
       responses: { '200': {description: OK} }
   /pets/{name}:
     get:
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
       responses: { '200': {description: OK} }
 "#;
         let err = parse_openapi_routes(yaml).unwrap_err();
@@ -1549,6 +2168,28 @@ paths:
     }
 
     #[test]
+    fn test_operation_id_preserved_in_route() {
+        let yaml = r#"
+openapi: 3.2.0
+info: {title: OpIdPreserve, version: 1.0}
+paths:
+  /users/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: GetUserById
+      responses: { '200': {description: OK} }
+"#;
+        let routes = parse_openapi_routes(yaml).unwrap();
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].operation_id.as_deref(), Some("GetUserById"));
+        assert_eq!(routes[0].handler_name, "get_user_by_id");
+    }
+
+    #[test]
     fn test_components_key_regex_enforced() {
         let yaml = r#"
 openapi: 3.2.0
@@ -1577,6 +2218,43 @@ info: {title: MissingEverything, version: 1.0}
     }
 
     #[test]
+    fn test_openapi_allows_empty_paths_object() {
+        let yaml = r#"
+openapi: 3.2.0
+info: {title: EmptyPaths, version: 1.0}
+paths: {}
+"#;
+        let routes = parse_openapi_routes(yaml).unwrap();
+        assert!(routes.is_empty());
+    }
+
+    #[test]
+    fn test_paths_and_webhooks_extensions_are_ignored() {
+        let yaml = r#"
+openapi: 3.2.0
+info: {title: Extensions, version: 1.0}
+paths:
+  x-paths-meta: true
+  /ping:
+    get:
+      responses: { '200': { description: OK } }
+webhooks:
+  x-webhooks-meta: true
+  onEvent:
+    post:
+      responses: { '200': { description: OK } }
+"#;
+        let routes = parse_openapi_routes(yaml).unwrap();
+        assert_eq!(routes.len(), 2);
+        assert!(routes
+            .iter()
+            .any(|r| r.path == "/ping" && r.kind == RouteKind::Path));
+        assert!(routes
+            .iter()
+            .any(|r| r.path == "onEvent" && r.kind == RouteKind::Webhook));
+    }
+
+    #[test]
     fn test_path_item_ref_from_components_extra() {
         let mut components = ShimComponents {
             security_schemes: None,
@@ -1597,9 +2275,84 @@ info: {title: MissingEverything, version: 1.0}
             "#/components/pathItems/ExtraItem",
             Some(&components),
             &paths,
+            None,
+            None,
         )
         .unwrap();
         assert!(resolved.get.is_some());
+    }
+
+    #[test]
+    fn test_external_path_item_ref_with_registry() {
+        let shared = r#"
+openapi: 3.2.0
+$self: https://example.com/shared.yaml
+info: {title: Shared, version: "1.0"}
+components:
+  schemas:
+    SharedPayload:
+      type: object
+  parameters:
+    limitParam:
+      name: limit
+      in: query
+      schema: { type: integer }
+  requestBodies:
+    SharedBody:
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SharedPayload'
+  responses:
+    SharedResponse:
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: string
+  pathItems:
+    PetsPath:
+      post:
+        parameters:
+          - $ref: '#/components/parameters/limitParam'
+        requestBody:
+          $ref: '#/components/requestBodies/SharedBody'
+        responses:
+          '200':
+            $ref: '#/components/responses/SharedResponse'
+"#;
+
+        let mut registry = DocumentRegistry::new();
+        registry
+            .register_openapi_yaml("https://example.com/shared.yaml", shared)
+            .unwrap();
+
+        let entry = r#"
+openapi: 3.2.0
+$self: https://example.com/openapi.yaml
+info: {title: Entry, version: "1.0"}
+paths:
+  /pets:
+    $ref: shared.yaml#/components/pathItems/PetsPath
+"#;
+
+        let routes = parse_openapi_routes_with_registry(
+            entry,
+            Some(&registry),
+            Some("https://example.com/openapi.yaml"),
+        )
+        .unwrap();
+
+        assert_eq!(routes.len(), 1);
+        let route = &routes[0];
+        assert_eq!(route.path, "/pets");
+        assert_eq!(route.method, "POST");
+        assert!(route.params.iter().any(|p| p.name == "limit"));
+        assert_eq!(
+            route.request_body.as_ref().map(|b| b.ty.as_str()),
+            Some("SharedPayload")
+        );
+        assert_eq!(route.response_type.as_deref(), Some("String"));
     }
 
     #[test]
@@ -1691,7 +2444,11 @@ paths:
 "#;
         let routes = parse_openapi_routes(yaml).unwrap();
         let links = routes[0].response_links.as_ref().unwrap();
-        assert_eq!(links[0].operation_ref.as_deref(), Some("/users/{id}"));
+        assert!(links[0].operation_ref.is_none());
+        assert_eq!(
+            links[0].resolved_operation_ref.as_deref(),
+            Some("/users/{id}")
+        );
     }
 
     #[test]
@@ -1719,7 +2476,111 @@ paths:
 "#;
         let routes = parse_openapi_routes(yaml).unwrap();
         let links = routes[0].response_links.as_ref().unwrap();
-        assert_eq!(links[0].operation_ref.as_deref(), Some("/users/{id}"));
+        assert_eq!(
+            links[0].operation_ref.as_deref(),
+            Some("#/paths/~1users~1%7Bid%7D/get")
+        );
+        assert_eq!(
+            links[0].resolved_operation_ref.as_deref(),
+            Some("/users/{id}")
+        );
+    }
+
+    #[test]
+    fn test_link_operation_ref_webhook_resolves() {
+        let yaml = r#"
+openapi: 3.2.0
+info: {title: Links, version: 1.0}
+webhooks:
+  onEvent:
+    post:
+      responses:
+        '200': {description: ok}
+paths:
+  /trigger:
+    post:
+      responses:
+        '200':
+          description: ok
+          links:
+            Callback:
+              operationRef: '#/webhooks/onEvent/post'
+"#;
+        let routes = parse_openapi_routes(yaml).unwrap();
+        let links = routes[0].response_links.as_ref().unwrap();
+        assert_eq!(
+            links[0].operation_ref.as_deref(),
+            Some("#/webhooks/onEvent/post")
+        );
+        assert_eq!(links[0].resolved_operation_ref.as_deref(), Some("onEvent"));
+    }
+
+    #[test]
+    fn test_link_operation_ref_component_path_item_resolves() {
+        let yaml = r#"
+openapi: 3.2.0
+info: {title: Links, version: 1.0}
+components:
+  pathItems:
+    UserItem:
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      get:
+        responses:
+          '200':
+            description: ok
+            links:
+              Self:
+                operationRef: '#/components/pathItems/UserItem/get'
+paths:
+  /users/{id}:
+    $ref: '#/components/pathItems/UserItem'
+"#;
+        let routes = parse_openapi_routes(yaml).unwrap();
+        let links = routes[0].response_links.as_ref().unwrap();
+        assert_eq!(
+            links[0].operation_ref.as_deref(),
+            Some("#/components/pathItems/UserItem/get")
+        );
+        assert_eq!(
+            links[0].resolved_operation_ref.as_deref(),
+            Some("/users/{id}")
+        );
+    }
+
+    #[test]
+    fn test_link_operation_ref_component_path_item_ambiguous_rejected() {
+        let yaml = r#"
+openapi: 3.2.0
+info: {title: Links, version: 1.0}
+components:
+  pathItems:
+    UserItem:
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      get:
+        responses:
+          '200':
+            description: ok
+            links:
+              Self:
+                operationRef: '#/components/pathItems/UserItem/get'
+paths:
+  /users/{id}:
+    $ref: '#/components/pathItems/UserItem'
+  /accounts/{id}:
+    $ref: '#/components/pathItems/UserItem'
+"#;
+        let err = parse_openapi_routes(yaml).unwrap_err();
+        assert!(format!("{err}").contains("operationRef"));
     }
 
     #[test]
@@ -1759,7 +2620,11 @@ paths:
 "#;
         let routes = parse_openapi_routes(yaml).unwrap();
         let links = routes[0].response_links.as_ref().unwrap();
-        assert_eq!(links[0].operation_ref.as_deref(), Some("/files"));
+        assert_eq!(
+            links[0].operation_ref.as_deref(),
+            Some("#/paths/~1files/COPY")
+        );
+        assert_eq!(links[0].resolved_operation_ref.as_deref(), Some("/files"));
     }
 
     #[test]

@@ -7,23 +7,115 @@
 //! type-aware style validation for OAS 3.x parameters.
 
 use crate::error::{AppError, AppResult};
-use crate::oas::models::{ContentMediaType, ParamSource, ParamStyle, RouteParam};
+use crate::oas::models::{ContentMediaType, ExampleValue, ParamSource, ParamStyle, RouteParam};
 use crate::oas::ref_utils::extract_component_name;
-use crate::oas::resolver::types::map_schema_to_rust_type;
+use crate::oas::registry::DocumentRegistry;
+use crate::oas::resolver::types::{map_schema_to_rust_type, map_schema_to_rust_type_with_raw};
 use crate::oas::routes::shims::ShimComponents;
-use serde::{Deserialize, Serialize};
+use crate::oas::validation::validate_example_object_value;
+use serde::de::Error as DeError;
+use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{json, Value as JsonValue};
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
+use url::Url;
 use utoipa::openapi::content::Content;
 use utoipa::openapi::example::Example;
 use utoipa::openapi::schema::{Schema, SchemaType, Type};
 use utoipa::openapi::RefOr;
 
+/// Wrapper for schema values that can be either a Schema Object or a boolean.
+///
+/// OpenAPI 3.1+ allows `schema: true/false` in places where Schema Objects are accepted.
+/// We preserve the boolean so we can apply correct parameter/header semantics.
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum SchemaOrBool {
+    /// A standard Schema Object (or $ref).
+    Schema(RefOr<Schema>),
+    /// Boolean Schema (`true` allows any instance, `false` allows none).
+    Bool(bool),
+}
+
+impl SchemaOrBool {
+    fn as_schema(&self) -> Option<&RefOr<Schema>> {
+        match self {
+            SchemaOrBool::Schema(schema) => Some(schema),
+            SchemaOrBool::Bool(_) => None,
+        }
+    }
+
+    fn is_false(&self) -> bool {
+        matches!(self, SchemaOrBool::Bool(false))
+    }
+}
+
+impl From<RefOr<Schema>> for SchemaOrBool {
+    fn from(value: RefOr<Schema>) -> Self {
+        SchemaOrBool::Schema(value)
+    }
+}
+
+impl From<Schema> for SchemaOrBool {
+    fn from(value: Schema) -> Self {
+        SchemaOrBool::Schema(RefOr::T(value))
+    }
+}
+
 /// A local shim for Parameter to ensure robust parsing of fields.
 /// Includes OAS 3.x style fields and OAS 2.0 `collectionFormat`.
-#[derive(Clone, Serialize, Deserialize, PartialEq)]
+///
+/// Note: we retain the raw JSON to preserve `content`-level OAS 3.2 fields
+/// (e.g. `itemSchema`, `serializedValue`) that are not modeled by `utoipa`.
+#[derive(Clone, PartialEq)]
 pub struct ShimParameter {
+    /// Name of the parameter.
+    pub name: String,
+    /// A brief description of the parameter.
+    pub description: Option<String>,
+    /// Location of the parameter (query, path, header, cookie, querystring).
+    pub parameter_in: String,
+    /// Legacy Swagger 2.0 primitive type (e.g. string, integer).
+    pub schema_type: Option<String>,
+    /// Legacy Swagger 2.0 format modifier (e.g. int64, date-time).
+    pub format: Option<String>,
+    /// Legacy Swagger 2.0 array item schema.
+    pub items: Option<Box<ShimParameterItems>>,
+    /// Whether the parameter is required.
+    pub required: bool,
+    /// Whether the parameter is deprecated.
+    pub deprecated: bool,
+    /// Schema definition (Schema Object or boolean).
+    pub schema: Option<SchemaOrBool>,
+    /// Content map (OAS 3.x complex parameter serialization).
+    /// Mutually exclusive with `schema`.
+    pub content: Option<BTreeMap<String, Content>>,
+    /// Serialization style (OAS 3.x).
+    pub style: Option<String>,
+    /// Explode modifier (OAS 3.x).
+    pub explode: Option<bool>,
+    /// Allow reserved characters (OAS 3.x).
+    pub allow_reserved: Option<bool>,
+    /// Allow empty values for query parameters (deprecated).
+    pub allow_empty_value: Option<bool>,
+    /// Collection format (OAS 2.0 compatibility).
+    pub collection_format: Option<String>,
+    /// Single example value for the parameter.
+    pub example: Option<JsonValue>,
+    /// Multiple example values for the parameter.
+    pub examples: Option<BTreeMap<String, JsonValue>>,
+    /// Raw JSON parameter object for accessing unmodeled OAS 3.2 fields.
+    pub raw: JsonValue,
+}
+
+struct ResolvedParameter {
+    param: ShimParameter,
+    components: Option<ShimComponents>,
+    base_uri: Option<Url>,
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Default)]
+struct ShimParameterData {
     /// Name of the parameter.
     pub name: String,
     /// A brief description of the parameter.
@@ -44,8 +136,8 @@ pub struct ShimParameter {
     /// Whether the parameter is deprecated.
     #[serde(default)]
     pub deprecated: bool,
-    /// Schema definition.
-    pub schema: Option<RefOr<Schema>>,
+    /// Schema definition (Schema Object or boolean).
+    pub schema: Option<SchemaOrBool>,
     /// Content map (OAS 3.x complex parameter serialization).
     /// Mutually exclusive with `schema`.
     pub content: Option<BTreeMap<String, Content>>,
@@ -68,6 +160,91 @@ pub struct ShimParameter {
     /// Multiple example values for the parameter.
     #[serde(default)]
     pub examples: Option<BTreeMap<String, JsonValue>>,
+}
+
+impl Default for ShimParameter {
+    fn default() -> Self {
+        let data = ShimParameterData::default();
+        Self {
+            name: data.name,
+            description: data.description,
+            parameter_in: data.parameter_in,
+            schema_type: data.schema_type,
+            format: data.format,
+            items: data.items,
+            required: data.required,
+            deprecated: data.deprecated,
+            schema: data.schema,
+            content: data.content,
+            style: data.style,
+            explode: data.explode,
+            allow_reserved: data.allow_reserved,
+            allow_empty_value: data.allow_empty_value,
+            collection_format: data.collection_format,
+            example: data.example,
+            examples: data.examples,
+            raw: JsonValue::Null,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ShimParameter {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = JsonValue::deserialize(deserializer)?;
+        let data = serde_json::from_value::<ShimParameterData>(raw.clone())
+            .map_err(|e| DeError::custom(format!("Failed to parse Parameter object: {}", e)))?;
+        Ok(Self {
+            name: data.name,
+            description: data.description,
+            parameter_in: data.parameter_in,
+            schema_type: data.schema_type,
+            format: data.format,
+            items: data.items,
+            required: data.required,
+            deprecated: data.deprecated,
+            schema: data.schema,
+            content: data.content,
+            style: data.style,
+            explode: data.explode,
+            allow_reserved: data.allow_reserved,
+            allow_empty_value: data.allow_empty_value,
+            collection_format: data.collection_format,
+            example: data.example,
+            examples: data.examples,
+            raw,
+        })
+    }
+}
+
+impl Serialize for ShimParameter {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let data = ShimParameterData {
+            name: self.name.clone(),
+            description: self.description.clone(),
+            parameter_in: self.parameter_in.clone(),
+            schema_type: self.schema_type.clone(),
+            format: self.format.clone(),
+            items: self.items.clone(),
+            required: self.required,
+            deprecated: self.deprecated,
+            schema: self.schema.clone(),
+            content: self.content.clone(),
+            style: self.style.clone(),
+            explode: self.explode,
+            allow_reserved: self.allow_reserved,
+            allow_empty_value: self.allow_empty_value,
+            collection_format: self.collection_format.clone(),
+            example: self.example.clone(),
+            examples: self.examples.clone(),
+        };
+        data.serialize(serializer)
+    }
 }
 
 /// Legacy Swagger 2.0 array item schema for parameters.
@@ -112,15 +289,40 @@ pub fn resolve_parameters(
     components: Option<&ShimComponents>,
     is_oas3: bool,
 ) -> AppResult<Vec<RouteParam>> {
+    resolve_parameters_with_registry(params, components, is_oas3, None, None)
+}
+
+/// Resolves parameters with optional external reference resolution.
+pub fn resolve_parameters_with_registry(
+    params: &[RefOr<ShimParameter>],
+    components: Option<&ShimComponents>,
+    is_oas3: bool,
+    registry: Option<&DocumentRegistry>,
+    base_uri: Option<&Url>,
+) -> AppResult<Vec<RouteParam>> {
     let mut result = Vec::new();
     let mut seen = HashSet::new();
     for param_or_ref in params {
+        let mut override_components = None;
+        let mut override_base = None;
         let (param_opt, ref_description) = match param_or_ref {
             RefOr::T(param) => (Some(param.clone()), None),
-            RefOr::Ref(r) => (
-                resolve_parameter_ref(r, components),
-                (!r.description.is_empty()).then(|| r.description.clone()),
-            ),
+            RefOr::Ref(r) => {
+                let resolved = resolve_parameter_ref(r, components, registry, base_uri);
+                if let Some(resolved) = resolved {
+                    override_components = resolved.components;
+                    override_base = resolved.base_uri;
+                    (
+                        Some(resolved.param),
+                        (!r.description.is_empty()).then(|| r.description.clone()),
+                    )
+                } else {
+                    (
+                        None,
+                        (!r.description.is_empty()).then(|| r.description.clone()),
+                    )
+                }
+            }
         };
 
         if let Some(mut param) = param_opt {
@@ -130,14 +332,28 @@ pub fn resolve_parameters(
             if should_ignore_header_param(&param) {
                 continue;
             }
-            let key = (param.name.clone(), param.parameter_in.clone());
+            let location_key = param.parameter_in.to_ascii_lowercase();
+            let name_key = if location_key == "header" {
+                param.name.to_ascii_lowercase()
+            } else {
+                param.name.clone()
+            };
+            let key = (name_key, location_key);
             if !seen.insert(key.clone()) {
                 return Err(AppError::General(format!(
                     "Duplicate parameter '{}' in location '{}'",
-                    key.0, key.1
+                    param.name, param.parameter_in
                 )));
             }
-            let route_param = process_parameter(&param, components, is_oas3)?;
+            let components_ctx = override_components.as_ref().or(components);
+            let base_ctx = override_base.as_ref().or(base_uri);
+            let route_param = process_parameter_with_registry(
+                &param,
+                components_ctx,
+                is_oas3,
+                registry,
+                base_ctx,
+            )?;
             result.push(route_param);
         }
     }
@@ -160,16 +376,39 @@ fn should_ignore_header_param(param: &ShimParameter) -> bool {
 fn resolve_parameter_ref(
     r: &utoipa::openapi::Ref,
     components: Option<&ShimComponents>,
-) -> Option<ShimParameter> {
-    let (comps, self_uri) =
-        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))?;
-    let ref_name = extract_component_name(&r.ref_location, self_uri, "parameters")?;
-    // Note: Generic components are now in `extra`.
-    if let Some(param_json) = comps.extra.get("parameters").and_then(|p| p.get(&ref_name)) {
-        if let Ok(param) = serde_json::from_value::<ShimParameter>(param_json.clone()) {
-            return Some(param);
+    registry: Option<&DocumentRegistry>,
+    base_uri: Option<&Url>,
+) -> Option<ResolvedParameter> {
+    if let Some((comps, self_uri)) =
+        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))
+    {
+        if let Some(ref_name) = extract_component_name(&r.ref_location, self_uri, "parameters") {
+            if let Some(param_json) = comps.extra.get("parameters").and_then(|p| p.get(&ref_name)) {
+                if let Ok(param) = serde_json::from_value::<ShimParameter>(param_json.clone()) {
+                    return Some(ResolvedParameter {
+                        param,
+                        components: None,
+                        base_uri: None,
+                    });
+                }
+            }
         }
     }
+
+    if let Some(registry) = registry {
+        if let Some((raw, comps_override, base_override)) =
+            registry.resolve_component_ref_with_components(&r.ref_location, base_uri, "parameters")
+        {
+            if let Ok(param) = serde_json::from_value::<ShimParameter>(raw) {
+                return Some(ResolvedParameter {
+                    param,
+                    components: comps_override,
+                    base_uri: base_override,
+                });
+            }
+        }
+    }
+
     None
 }
 
@@ -180,12 +419,43 @@ fn process_parameter(
     components: Option<&ShimComponents>,
     is_oas3: bool,
 ) -> AppResult<RouteParam> {
+    process_parameter_with_registry(param, components, is_oas3, None, None)
+}
+
+fn filter_extensions(raw: &JsonValue) -> BTreeMap<String, JsonValue> {
+    raw.as_object()
+        .map(|obj| {
+            obj.iter()
+                .filter(|(key, _)| key.starts_with("x-"))
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn process_parameter_with_registry(
+    param: &ShimParameter,
+    components: Option<&ShimComponents>,
+    is_oas3: bool,
+    registry: Option<&DocumentRegistry>,
+    base_uri: Option<&Url>,
+) -> AppResult<RouteParam> {
     let name = param.name.clone();
     if is_oas3 && param.example.is_some() && param.examples.is_some() {
         return Err(AppError::General(format!(
             "Parameter '{}' must not define both 'example' and 'examples'",
             name
         )));
+    }
+    if is_oas3 {
+        if let Some(examples) = &param.examples {
+            for (example_name, example_val) in examples {
+                validate_example_object_value(
+                    example_val,
+                    &format!("parameter '{}'.examples.{}", name, example_name),
+                )?;
+            }
+        }
     }
     if param.schema.is_some() && param.content.is_some() {
         return Err(AppError::General(format!(
@@ -200,7 +470,7 @@ fn process_parameter(
             || param.collection_format.is_some())
     {
         return Err(AppError::General(format!(
-            "Parameter '{}' uses 'content' and must not define style/explode/allowReserved/collectionFormat",
+            "Parameter '{}' uses 'content' and must not define style/explode/allowReserved/collectionFormat", 
             name
         )));
     }
@@ -275,13 +545,46 @@ fn process_parameter(
     let explode = resolve_explode(param.explode, &style);
 
     // Resolve type from `schema` OR `content` OR legacy Swagger 2.0 fields.
+    let raw_schema_json = param.raw.get("schema");
     let (ty, content_media_type) = if let Some(schema_ref) = &param.schema {
-        (map_schema_to_rust_type(schema_ref, required)?, None)
+        if schema_ref.is_false() {
+            return Err(AppError::General(format!(
+                "Parameter '{}' schema is 'false' and cannot be satisfied",
+                name
+            )));
+        }
+        let ty = match schema_ref {
+            SchemaOrBool::Schema(schema) => {
+                map_schema_to_rust_type_with_raw(schema, required, raw_schema_json)?
+            }
+            SchemaOrBool::Bool(true) => "String".to_string(),
+            SchemaOrBool::Bool(false) => unreachable!("handled above"),
+        };
+        (ty, None)
     } else if let Some(content) = &param.content {
         // OAS 3.x: "The map MUST only contain one entry."
         if let Some((media_type, media_obj)) = content.iter().next() {
+            let raw_media = raw_media_for_type(
+                param.raw.get("content").and_then(|v| v.as_object()),
+                media_type,
+                components,
+                registry,
+                base_uri,
+            );
+            let raw_schema_json = raw_media.as_ref().and_then(|m| m.get("schema"));
+            let raw_schema = raw_media.as_ref().and_then(extract_media_schema);
+            let item_schema = raw_media.as_ref().and_then(extract_item_schema);
             let ty = if let Some(s) = &media_obj.schema {
-                map_schema_to_rust_type(s, required)?
+                map_schema_to_rust_type_with_raw(s, required, raw_schema_json)?
+            } else if let Some(schema_ref) = raw_schema.as_ref() {
+                map_schema_to_rust_type_with_raw(schema_ref, required, raw_schema_json)?
+            } else if let Some(item_schema) = item_schema {
+                let inner = map_schema_to_rust_type(&RefOr::T(item_schema), true)?;
+                if is_sequential_media_type(media_type) {
+                    format!("Vec<{}>", inner)
+                } else {
+                    inner
+                }
             } else {
                 "serde_json::Value".to_string()
             };
@@ -305,7 +608,22 @@ fn process_parameter(
         )));
     };
 
-    let example = extract_param_example(param, components);
+    let example = extract_param_example(param, components, registry, base_uri);
+
+    let raw_schema = if param.schema.is_some() {
+        param.raw.get("schema").cloned()
+    } else if param.content.is_some() {
+        raw_media_for_first_entry(
+            param.raw.get("content"),
+            param.content.as_ref(),
+            components,
+            registry,
+            base_uri,
+        )
+        .and_then(|media| media.get("schema").cloned())
+    } else {
+        None
+    };
 
     Ok(RouteParam {
         name,
@@ -319,6 +637,8 @@ fn process_parameter(
         deprecated: param.deprecated,
         allow_empty_value,
         example,
+        raw_schema,
+        extensions: filter_extensions(&param.raw),
     })
 }
 
@@ -326,40 +646,59 @@ fn process_parameter(
 fn extract_param_example(
     param: &ShimParameter,
     components: Option<&ShimComponents>,
-) -> Option<JsonValue> {
+    registry: Option<&DocumentRegistry>,
+    base_uri: Option<&Url>,
+) -> Option<ExampleValue> {
     if let Some(example) = &param.example {
-        return Some(example.clone());
+        return Some(ExampleValue::data(example.clone()));
     }
 
     if let Some(examples) = param.examples.as_ref() {
         for value in examples.values() {
-            if let Some(extracted) =
-                extract_example_value(value, components, &mut std::collections::HashSet::new())
-            {
+            if let Some(extracted) = extract_example_value_with_ref_overrides(value, components) {
                 return Some(extracted);
             }
         }
     }
 
     if let Some(schema_ref) = &param.schema {
-        if let Some(schema_example) = extract_schema_example(schema_ref, components) {
-            return Some(schema_example);
+        if let Some(schema) = schema_ref.as_schema() {
+            if let Some(schema_example) = extract_schema_example(schema, components) {
+                return Some(ExampleValue::data(schema_example));
+            }
         }
     }
 
-    extract_content_example(param.content.as_ref(), components)
+    extract_content_example(
+        param.content.as_ref(),
+        param.raw.get("content"),
+        components,
+        registry,
+        base_uri,
+    )
 }
 
 /// Extracts an example from a content map (media type object), if present.
 fn extract_content_example(
     content: Option<&BTreeMap<String, Content>>,
+    raw_content: Option<&JsonValue>,
     components: Option<&ShimComponents>,
-) -> Option<JsonValue> {
+    registry: Option<&DocumentRegistry>,
+    base_uri: Option<&Url>,
+) -> Option<ExampleValue> {
+    if let Some(raw_media) =
+        raw_media_for_first_entry(raw_content, content, components, registry, base_uri)
+    {
+        if let Some(example) = extract_raw_media_example(&raw_media, components) {
+            return Some(example);
+        }
+    }
+
     let content = content?;
     let (_, media) = content.iter().next()?;
 
     if let Some(example) = &media.example {
-        return Some(example.clone());
+        return Some(ExampleValue::data(example.clone()));
     }
 
     for example_ref in media.examples.values() {
@@ -371,52 +710,157 @@ fn extract_content_example(
     None
 }
 
+fn raw_media_for_first_entry(
+    raw_content: Option<&JsonValue>,
+    content: Option<&BTreeMap<String, Content>>,
+    components: Option<&ShimComponents>,
+    registry: Option<&DocumentRegistry>,
+    base_uri: Option<&Url>,
+) -> Option<JsonValue> {
+    let raw_map = raw_content.and_then(|v| v.as_object())?;
+    let key = content
+        .and_then(|map| map.keys().next().cloned())
+        .or_else(|| raw_map.keys().next().cloned())?;
+    raw_media_for_type(Some(raw_map), &key, components, registry, base_uri)
+}
+
+fn extract_raw_media_example(
+    raw_media: &JsonValue,
+    components: Option<&ShimComponents>,
+) -> Option<ExampleValue> {
+    if let Some(example) = raw_media.get("example") {
+        return Some(ExampleValue::data(example.clone()));
+    }
+    if let Some(examples) = raw_media.get("examples").and_then(|v| v.as_object()) {
+        for value in examples.values() {
+            if let Some(extracted) = extract_example_value_with_ref_overrides(value, components) {
+                return Some(extracted);
+            }
+        }
+    }
+    None
+}
+
 /// Extracts a concrete example value from a media-type Example ref or inline object.
 fn extract_content_example_ref_or(
     example_ref: &RefOr<Example>,
     components: Option<&ShimComponents>,
-) -> Option<JsonValue> {
+) -> Option<ExampleValue> {
     match example_ref {
-        RefOr::T(example) => example.value.clone().or_else(|| {
-            (!example.external_value.is_empty()).then(|| json!(example.external_value.clone()))
-        }),
-        RefOr::Ref(r) => resolve_example_ref(
-            &r.ref_location,
-            components,
-            &mut std::collections::HashSet::new(),
-        ),
+        RefOr::T(example) => {
+            let summary = (!example.summary.is_empty()).then(|| example.summary.clone());
+            let description =
+                (!example.description.is_empty()).then(|| example.description.clone());
+            example
+                .value
+                .clone()
+                .map(|val| ExampleValue::data_with_meta(val, summary.clone(), description.clone()))
+                .or_else(|| {
+                    (!example.external_value.is_empty()).then(|| {
+                        ExampleValue::external_with_meta(
+                            json!(example.external_value.clone()),
+                            summary.clone(),
+                            description.clone(),
+                        )
+                    })
+                })
+        }
+        RefOr::Ref(r) => {
+            let summary = (!r.summary.is_empty()).then(|| r.summary.clone());
+            let description = (!r.description.is_empty()).then(|| r.description.clone());
+            resolve_example_ref(
+                &r.ref_location,
+                components,
+                &mut std::collections::HashSet::new(),
+            )
+            .map(|example| example.with_overrides(summary, description))
+        }
     }
+}
+
+fn extract_example_value_with_ref_overrides(
+    value: &JsonValue,
+    components: Option<&ShimComponents>,
+) -> Option<ExampleValue> {
+    if let Some(obj) = value.as_object() {
+        let summary = obj
+            .get("summary")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let description = obj
+            .get("description")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        if let Some(ref_str) = obj.get("$ref").and_then(|v| v.as_str()) {
+            let mut visiting = std::collections::HashSet::new();
+            return resolve_example_ref(ref_str, components, &mut visiting)
+                .map(|example| example.with_overrides(summary, description));
+        }
+    }
+
+    extract_example_value(value, components, &mut std::collections::HashSet::new())
 }
 
 fn extract_example_value(
     value: &JsonValue,
     components: Option<&ShimComponents>,
     visiting: &mut std::collections::HashSet<String>,
-) -> Option<JsonValue> {
+) -> Option<ExampleValue> {
     if let Some(obj) = value.as_object() {
+        let (summary, description) = example_meta_from_obj(obj);
         if let Some(ref_str) = obj.get("$ref").and_then(|v| v.as_str()) {
             return resolve_example_ref(ref_str, components, visiting);
         }
-        if let Some(val) = obj.get("value") {
-            return Some(val.clone());
-        }
         if let Some(val) = obj.get("dataValue") {
-            return Some(val.clone());
+            return Some(ExampleValue::data_with_meta(
+                val.clone(),
+                summary,
+                description,
+            ));
         }
         if let Some(val) = obj.get("serializedValue") {
-            return Some(val.clone());
+            return Some(ExampleValue::serialized_with_meta(
+                val.clone(),
+                summary,
+                description,
+            ));
         }
         if let Some(val) = obj.get("externalValue") {
-            return Some(val.clone());
+            return Some(ExampleValue::external_with_meta(
+                val.clone(),
+                summary,
+                description,
+            ));
+        }
+        if let Some(val) = obj.get("value") {
+            return Some(ExampleValue::data_with_meta(
+                val.clone(),
+                summary,
+                description,
+            ));
         }
         return None;
     }
 
     if !value.is_null() {
-        return Some(value.clone());
+        return Some(ExampleValue::data(value.clone()));
     }
 
     None
+}
+
+fn example_meta_from_obj(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> (Option<String>, Option<String>) {
+    let summary = obj
+        .get("summary")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let description = obj
+        .get("description")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    (summary, description)
 }
 
 fn extract_schema_example(
@@ -476,11 +920,118 @@ fn extract_schema_example_from_value(value: &JsonValue) -> Option<JsonValue> {
         .and_then(|arr| arr.first().cloned())
 }
 
+fn raw_media_for_type(
+    content: Option<&serde_json::Map<String, JsonValue>>,
+    media_type: &str,
+    components: Option<&ShimComponents>,
+    registry: Option<&DocumentRegistry>,
+    base_uri: Option<&Url>,
+) -> Option<JsonValue> {
+    let map = content?;
+    let media = map.get(media_type)?;
+    resolve_media_type_ref(media, components, registry, base_uri, &mut HashSet::new()).or_else(
+        || {
+            if media.as_object().is_some() {
+                Some(media.clone())
+            } else {
+                None
+            }
+        },
+    )
+}
+
+fn resolve_media_type_ref(
+    raw_media: &JsonValue,
+    components: Option<&ShimComponents>,
+    registry: Option<&DocumentRegistry>,
+    base_uri: Option<&Url>,
+    visiting: &mut HashSet<String>,
+) -> Option<JsonValue> {
+    let obj = raw_media.as_object()?;
+    let ref_str = obj.get("$ref")?.as_str()?;
+    if !visiting.insert(ref_str.to_string()) {
+        return None;
+    }
+
+    if let Some((comps, self_uri)) =
+        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))
+    {
+        if let Some(name) = extract_component_name(ref_str, self_uri, "mediaTypes") {
+            if let Some(media_types) = comps.extra.get("mediaTypes").and_then(|v| v.as_object()) {
+                if let Some(resolved) = media_types.get(&name) {
+                    let value =
+                        resolve_media_type_ref(resolved, components, registry, base_uri, visiting)
+                            .unwrap_or_else(|| resolved.clone());
+                    visiting.remove(ref_str);
+                    return Some(value);
+                }
+            }
+        }
+    }
+
+    if let Some(registry) = registry {
+        if let Some((resolved, comps_override, base_override)) =
+            registry.resolve_component_ref_with_components(ref_str, base_uri, "mediaTypes")
+        {
+            let next_components = comps_override.as_ref().or(components);
+            let next_base = base_override.as_ref().or(base_uri);
+            let value = resolve_media_type_ref(
+                &resolved,
+                next_components,
+                Some(registry),
+                next_base,
+                visiting,
+            )
+            .unwrap_or_else(|| resolved.clone());
+            visiting.remove(ref_str);
+            return Some(value);
+        }
+    }
+
+    visiting.remove(ref_str);
+    None
+}
+
+fn extract_item_schema(raw_media: &JsonValue) -> Option<Schema> {
+    let item_schema = raw_media.get("itemSchema")?;
+    serde_json::from_value::<Schema>(item_schema.clone()).ok()
+}
+
+fn extract_media_schema(raw_media: &JsonValue) -> Option<RefOr<Schema>> {
+    let schema_val = raw_media.get("schema")?;
+    serde_json::from_value::<RefOr<Schema>>(schema_val.clone()).ok()
+}
+
+fn normalize_media_type(media_type: &str) -> String {
+    media_type
+        .split(';')
+        .next()
+        .unwrap_or(media_type)
+        .trim()
+        .to_ascii_lowercase()
+}
+
+fn is_sequential_media_type(media_type: &str) -> bool {
+    let normalized = normalize_media_type(media_type);
+    matches!(
+        normalized.as_str(),
+        "application/jsonl"
+            | "application/x-ndjson"
+            | "application/json-seq"
+            | "application/geo+json-seq"
+            | "text/event-stream"
+            | "multipart/mixed"
+            | "multipart/byteranges"
+    ) || normalized.ends_with("+jsonl")
+        || normalized.ends_with("+ndjson")
+        || normalized.ends_with("+json-seq")
+}
+
 fn resolve_example_ref(
     ref_str: &str,
     components: Option<&ShimComponents>,
     visiting: &mut std::collections::HashSet<String>,
-) -> Option<JsonValue> {
+) -> Option<ExampleValue> {
     let (comps, self_uri) =
         components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))?;
     let name = extract_component_name(ref_str, self_uri, "examples")?;
@@ -664,7 +1215,10 @@ enum ParamValueKind {
 
 fn infer_param_value_kind(param: &ShimParameter) -> ParamValueKind {
     if let Some(schema_ref) = &param.schema {
-        return infer_param_kind_from_schema(schema_ref);
+        return match schema_ref {
+            SchemaOrBool::Schema(schema) => infer_param_kind_from_schema(schema),
+            SchemaOrBool::Bool(_) => ParamValueKind::Unknown,
+        };
     }
 
     if let Some(content) = &param.content {
@@ -784,26 +1338,20 @@ fn allowed_style_names(source: &ParamSource) -> &'static [&'static str] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::oas::models::{ParamSource, ParamStyle};
+    use crate::oas::models::{ExampleValue, ParamSource, ParamStyle};
     use utoipa::openapi::schema::{Schema, Type};
     use utoipa::openapi::{ContentBuilder, ObjectBuilder, Ref};
 
-    fn string_schema() -> Option<RefOr<Schema>> {
-        Some(RefOr::T(Schema::Object(
-            ObjectBuilder::new().schema_type(Type::String).build(),
-        )))
+    fn string_schema() -> Option<SchemaOrBool> {
+        Some(Schema::Object(ObjectBuilder::new().schema_type(Type::String).build()).into())
     }
 
-    fn object_schema() -> Option<RefOr<Schema>> {
-        Some(RefOr::T(Schema::Object(
-            ObjectBuilder::new().schema_type(Type::Object).build(),
-        )))
+    fn object_schema() -> Option<SchemaOrBool> {
+        Some(Schema::Object(ObjectBuilder::new().schema_type(Type::Object).build()).into())
     }
 
-    fn array_schema() -> Option<RefOr<Schema>> {
-        Some(RefOr::T(Schema::Object(
-            ObjectBuilder::new().schema_type(Type::Array).build(),
-        )))
+    fn array_schema() -> Option<SchemaOrBool> {
+        Some(Schema::Object(ObjectBuilder::new().schema_type(Type::Array).build()).into())
     }
 
     #[test]
@@ -817,7 +1365,7 @@ mod tests {
             schema_type: None,
             format: None,
             items: None,
-            required: false,
+            required: true,
             deprecated: false,
             schema: string_schema(),
             content: None,
@@ -828,6 +1376,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let processed = process_parameter(&param, None, true).unwrap();
@@ -845,7 +1394,7 @@ mod tests {
             schema_type: None,
             format: None,
             items: None,
-            required: false,
+            required: true,
             deprecated: false,
             schema: None,
             content: None,
@@ -856,6 +1405,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let err = process_parameter(&param, None, true).unwrap_err();
@@ -873,7 +1423,7 @@ mod tests {
             schema_type: None,
             format: None,
             items: None,
-            required: false,
+            required: true,
             deprecated: false,
             schema: string_schema(),
             content: None,
@@ -884,6 +1434,7 @@ mod tests {
             collection_format: None,
             example: Some(serde_json::json!("one")),
             examples: Some(examples),
+            ..Default::default()
         };
 
         let err = process_parameter(&param, None, true).unwrap_err();
@@ -899,7 +1450,7 @@ mod tests {
             schema_type: Some("integer".to_string()),
             format: Some("int64".to_string()),
             items: None,
-            required: false,
+            required: true,
             deprecated: false,
             schema: None,
             content: None,
@@ -910,10 +1461,11 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let processed = process_parameter(&param, None, false).unwrap();
-        assert_eq!(processed.ty, "Option<i64>");
+        assert_eq!(processed.ty, "i64");
     }
 
     #[test]
@@ -942,6 +1494,7 @@ mod tests {
             collection_format: Some("csv".to_string()),
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let processed = process_parameter(&param, None, false).unwrap();
@@ -979,6 +1532,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let processed = process_parameter(&param, None, true).unwrap();
@@ -1021,6 +1575,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let processed = process_parameter(&param, None, true).unwrap();
@@ -1050,7 +1605,7 @@ mod tests {
             schema_type: None,
             format: None,
             items: None,
-            required: false,
+            required: true,
             deprecated: false,
             schema: None,
             content: Some(content_map),
@@ -1061,13 +1616,79 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let processed = process_parameter(&param, None, true).unwrap();
         assert_eq!(
             processed.example,
-            Some(serde_json::json!({"filter": "active"}))
+            Some(ExampleValue::data(serde_json::json!({"filter": "active"})))
         );
+    }
+
+    #[test]
+    fn test_resolve_parameters_example_metadata() {
+        let mut examples = BTreeMap::new();
+        examples.insert(
+            "meta".to_string(),
+            serde_json::json!({
+                "summary": "Short summary",
+                "description": "Longer description",
+                "dataValue": "active"
+            }),
+        );
+
+        let param = ShimParameter {
+            name: "status".to_string(),
+            description: None,
+            parameter_in: "query".to_string(),
+            schema_type: None,
+            format: None,
+            items: None,
+            required: true,
+            deprecated: false,
+            schema: string_schema(),
+            content: None,
+            style: None,
+            explode: None,
+            allow_empty_value: None,
+            allow_reserved: None,
+            collection_format: None,
+            example: None,
+            examples: Some(examples),
+            ..Default::default()
+        };
+
+        let processed = process_parameter(&param, None, true).unwrap();
+        let example = processed.example.expect("example missing");
+        assert_eq!(example.summary.as_deref(), Some("Short summary"));
+        assert_eq!(example.description.as_deref(), Some("Longer description"));
+        assert_eq!(example.value, serde_json::json!("active"));
+    }
+
+    #[test]
+    fn test_resolve_parameters_content_schema_mapping() {
+        let raw = serde_json::json!({
+            "name": "filter",
+            "in": "query",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "string",
+                        "contentMediaType": "application/json",
+                        "contentSchema": {
+                            "type": "integer",
+                            "format": "int32"
+                        }
+                    }
+                }
+            }
+        });
+        let param: ShimParameter = serde_json::from_value(raw).unwrap();
+        let params = vec![RefOr::T(param)];
+
+        let resolved = resolve_parameters(&params, None, true).unwrap();
+        assert_eq!(resolved[0].ty, "Option<i32>");
     }
 
     #[test]
@@ -1105,7 +1726,7 @@ mod tests {
             schema_type: None,
             format: None,
             items: None,
-            required: false,
+            required: true,
             deprecated: false,
             schema: None,
             content: Some(content_map),
@@ -1116,12 +1737,13 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let processed = process_parameter(&param, Some(&components), true).unwrap();
         assert_eq!(
             processed.example,
-            Some(serde_json::json!({"status": "open"}))
+            Some(ExampleValue::data(serde_json::json!({"status": "open"})))
         );
     }
 
@@ -1147,6 +1769,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let processed = process_parameter(&param, None, true).unwrap();
@@ -1175,6 +1798,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let processed = process_parameter(&param, None, true).unwrap();
@@ -1203,6 +1827,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let err = process_parameter(&param, None, true).unwrap_err();
@@ -1230,6 +1855,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let err = process_parameter(&param, None, true).unwrap_err();
@@ -1257,6 +1883,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let err = process_parameter(&param, None, true).unwrap_err();
@@ -1284,6 +1911,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let err = process_parameter(&param, None, true).unwrap_err();
@@ -1311,6 +1939,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let err = process_parameter(&param, None, true).unwrap_err();
@@ -1338,6 +1967,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let processed = process_parameter(&param, None, true).unwrap();
@@ -1364,6 +1994,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let err = process_parameter(&param, None, true).unwrap_err();
@@ -1390,6 +2021,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let err = process_parameter(&param, None, true).unwrap_err();
@@ -1416,6 +2048,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let processed = process_parameter(&param, None, true).unwrap();
@@ -1434,7 +2067,7 @@ mod tests {
             items: None,
             required: false,
             deprecated: false,
-            schema: Some(RefOr::T(Schema::Object(schema))),
+            schema: Some(RefOr::T(Schema::Object(schema)).into()),
             content: None,
             style: None,
             explode: None,
@@ -1443,6 +2076,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let err = process_parameter(&param, None, true).unwrap_err();
@@ -1461,7 +2095,7 @@ mod tests {
             items: None,
             required: true,
             deprecated: false,
-            schema: Some(RefOr::T(Schema::Object(schema))),
+            schema: Some(RefOr::T(Schema::Object(schema)).into()),
             content: None,
             style: None,
             explode: None,
@@ -1470,6 +2104,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let processed = process_parameter(&param, None, true).unwrap();
@@ -1498,6 +2133,7 @@ mod tests {
             collection_format: Some("ssv".to_string()),
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let processed = process_parameter(&param, None, false).unwrap();
@@ -1525,6 +2161,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let processed = process_parameter(&param, None, true).unwrap();
@@ -1625,9 +2262,12 @@ mod tests {
             items: None,
             required: true,
             deprecated: false,
-            schema: Some(RefOr::T(Schema::Object(
-                ObjectBuilder::new().schema_type(Type::Object).build(),
-            ))),
+            schema: Some(
+                RefOr::T(Schema::Object(
+                    ObjectBuilder::new().schema_type(Type::Object).build(),
+                ))
+                .into(),
+            ),
             content: None,
             style: None,
             explode: None,
@@ -1636,6 +2276,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let err = process_parameter(&param, None, true).unwrap_err();
@@ -1671,6 +2312,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let err = process_parameter(&param, None, true).unwrap_err();
@@ -1696,9 +2338,12 @@ mod tests {
             items: None,
             required: false,
             deprecated: false,
-            schema: Some(RefOr::T(Schema::Object(
-                ObjectBuilder::new().schema_type(Type::String).build(),
-            ))),
+            schema: Some(
+                RefOr::T(Schema::Object(
+                    ObjectBuilder::new().schema_type(Type::String).build(),
+                ))
+                .into(),
+            ),
             content: Some(content_map),
             style: None,
             explode: None,
@@ -1707,6 +2352,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let err = process_parameter(&param, None, true).unwrap_err();
@@ -1740,10 +2386,50 @@ mod tests {
             collection_format: None,
             example: None,
             examples: Some(examples),
+            ..Default::default()
         };
 
         let processed = process_parameter(&param, None, true).unwrap();
-        assert_eq!(processed.example, Some(serde_json::json!("hello")));
+        assert_eq!(
+            processed.example,
+            Some(ExampleValue::data(serde_json::json!("hello")))
+        );
+    }
+
+    #[test]
+    fn test_parameter_examples_conflicting_fields_rejected() {
+        let mut examples = BTreeMap::new();
+        examples.insert(
+            "bad".to_string(),
+            serde_json::json!({
+                "value": "hello",
+                "serializedValue": "hello"
+            }),
+        );
+
+        let param = ShimParameter {
+            name: "greet".to_string(),
+            description: None,
+            parameter_in: "query".to_string(),
+            schema_type: None,
+            format: None,
+            items: None,
+            required: false,
+            deprecated: false,
+            schema: string_schema(),
+            content: None,
+            style: None,
+            explode: None,
+            allow_empty_value: None,
+            allow_reserved: None,
+            collection_format: None,
+            example: None,
+            examples: Some(examples),
+            ..Default::default()
+        };
+
+        let err = process_parameter(&param, None, true).unwrap_err();
+        assert!(format!("{err}").contains("examples.bad"));
     }
 
     #[test]
@@ -1784,10 +2470,70 @@ mod tests {
             collection_format: None,
             example: None,
             examples: Some(examples),
+            ..Default::default()
         };
 
         let processed = process_parameter(&param, Some(&components), true).unwrap();
-        assert_eq!(processed.example, Some(serde_json::json!("hi")));
+        assert_eq!(
+            processed.example,
+            Some(ExampleValue::data(serde_json::json!("hi")))
+        );
+    }
+
+    #[test]
+    fn test_parameter_examples_ref_overrides_metadata() {
+        let components_json = serde_json::json!({
+            "__self": "https://example.com/openapi.yaml",
+            "examples": {
+                "Greeting": {
+                    "summary": "Original summary",
+                    "description": "Original description",
+                    "value": "hi"
+                }
+            }
+        });
+        let components: ShimComponents = serde_json::from_value(components_json).unwrap();
+
+        let mut examples = BTreeMap::new();
+        examples.insert(
+            "greeting".to_string(),
+            serde_json::json!({
+                "$ref": "https://example.com/openapi.yaml#/components/examples/Greeting",
+                "summary": "Override summary",
+                "description": "Override description"
+            }),
+        );
+
+        let param = ShimParameter {
+            name: "salute".to_string(),
+            description: None,
+            parameter_in: "query".to_string(),
+            schema_type: None,
+            format: None,
+            items: None,
+            required: false,
+            deprecated: false,
+            schema: string_schema(),
+            content: None,
+            style: None,
+            explode: None,
+            allow_empty_value: None,
+            allow_reserved: None,
+            collection_format: None,
+            example: None,
+            examples: Some(examples),
+            ..Default::default()
+        };
+
+        let processed = process_parameter(&param, Some(&components), true).unwrap();
+        assert_eq!(
+            processed.example,
+            Some(ExampleValue::data_with_meta(
+                serde_json::json!("hi"),
+                Some("Override summary".to_string()),
+                Some("Override description".to_string())
+            ))
+        );
     }
 
     #[test]
@@ -1816,13 +2562,144 @@ mod tests {
             collection_format: None,
             example: None,
             examples: Some(examples),
+            ..Default::default()
         };
 
         let processed = process_parameter(&param, None, true).unwrap();
         assert_eq!(
             processed.example,
-            Some(serde_json::json!("https://example.com/example.txt"))
+            Some(ExampleValue::external(serde_json::json!(
+                "https://example.com/example.txt"
+            )))
         );
+    }
+
+    #[test]
+    fn test_parameter_examples_pick_serialized_value() {
+        let mut examples = BTreeMap::new();
+        examples.insert(
+            "serialized".to_string(),
+            serde_json::json!({ "serializedValue": "color=blue%20black" }),
+        );
+
+        let param = ShimParameter {
+            name: "color".to_string(),
+            description: None,
+            parameter_in: "query".to_string(),
+            schema_type: None,
+            format: None,
+            items: None,
+            required: false,
+            deprecated: false,
+            schema: string_schema(),
+            content: None,
+            style: None,
+            explode: None,
+            allow_empty_value: None,
+            allow_reserved: None,
+            collection_format: None,
+            example: None,
+            examples: Some(examples),
+            ..Default::default()
+        };
+
+        let processed = process_parameter(&param, None, true).unwrap();
+        assert_eq!(
+            processed.example,
+            Some(ExampleValue::serialized(serde_json::json!(
+                "color=blue%20black"
+            )))
+        );
+    }
+
+    #[test]
+    fn test_parameter_examples_conflicting_value_and_serialized_rejected() {
+        let mut examples = BTreeMap::new();
+        examples.insert(
+            "serialized".to_string(),
+            serde_json::json!({
+                "value": "blue black",
+                "serializedValue": "color=blue%20black"
+            }),
+        );
+
+        let param = ShimParameter {
+            name: "color".to_string(),
+            description: None,
+            parameter_in: "query".to_string(),
+            schema_type: None,
+            format: None,
+            items: None,
+            required: false,
+            deprecated: false,
+            schema: string_schema(),
+            content: None,
+            style: None,
+            explode: None,
+            allow_empty_value: None,
+            allow_reserved: None,
+            collection_format: None,
+            example: None,
+            examples: Some(examples),
+            ..Default::default()
+        };
+
+        let err = process_parameter(&param, None, true).unwrap_err();
+        assert!(format!("{err}").contains("must not define 'value'"));
+    }
+
+    #[test]
+    fn test_parameter_schema_true_maps_to_string() {
+        let param = ShimParameter {
+            name: "any".to_string(),
+            description: None,
+            parameter_in: "query".to_string(),
+            schema_type: None,
+            format: None,
+            items: None,
+            required: false,
+            deprecated: false,
+            schema: Some(SchemaOrBool::Bool(true)),
+            content: None,
+            style: None,
+            explode: None,
+            allow_empty_value: None,
+            allow_reserved: None,
+            collection_format: None,
+            example: None,
+            examples: None,
+            ..Default::default()
+        };
+
+        let processed = process_parameter(&param, None, true).unwrap();
+        assert_eq!(processed.ty, "String");
+    }
+
+    #[test]
+    fn test_parameter_schema_false_rejected() {
+        let param = ShimParameter {
+            name: "never".to_string(),
+            description: None,
+            parameter_in: "query".to_string(),
+            schema_type: None,
+            format: None,
+            items: None,
+            required: false,
+            deprecated: false,
+            schema: Some(SchemaOrBool::Bool(false)),
+            content: None,
+            style: None,
+            explode: None,
+            allow_empty_value: None,
+            allow_reserved: None,
+            collection_format: None,
+            example: None,
+            examples: None,
+            ..Default::default()
+        };
+
+        let err = process_parameter(&param, None, true).unwrap_err();
+        assert!(format!("{err}").contains("schema is 'false'"));
     }
 
     #[test]
@@ -1845,9 +2722,40 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let params = vec![RefOr::T(param.clone()), RefOr::T(param)];
+        let err = resolve_parameters(&params, None, true).unwrap_err();
+        assert!(format!("{err}").contains("Duplicate parameter"));
+    }
+
+    #[test]
+    fn test_header_parameter_duplicates_case_insensitive() {
+        let param_a = ShimParameter {
+            name: "X-Token".to_string(),
+            description: None,
+            parameter_in: "header".to_string(),
+            schema_type: None,
+            format: None,
+            items: None,
+            required: false,
+            deprecated: false,
+            schema: string_schema(),
+            content: None,
+            style: None,
+            explode: None,
+            allow_empty_value: None,
+            allow_reserved: None,
+            collection_format: None,
+            example: None,
+            examples: None,
+            ..Default::default()
+        };
+        let mut param_b = param_a.clone();
+        param_b.name = "x-token".to_string();
+
+        let params = vec![RefOr::T(param_a), RefOr::T(param_b)];
         let err = resolve_parameters(&params, None, true).unwrap_err();
         assert!(format!("{err}").contains("Duplicate parameter"));
     }
@@ -1873,6 +2781,7 @@ mod tests {
                 collection_format: None,
                 example: None,
                 examples: None,
+                ..Default::default()
             },
             ShimParameter {
                 name: "content-type".to_string(),
@@ -1892,6 +2801,7 @@ mod tests {
                 collection_format: None,
                 example: None,
                 examples: None,
+                ..Default::default()
             },
             ShimParameter {
                 name: "AUTHORIZATION".to_string(),
@@ -1911,6 +2821,7 @@ mod tests {
                 collection_format: None,
                 example: None,
                 examples: None,
+                ..Default::default()
             },
         ];
 
@@ -1932,6 +2843,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let params = reserved
@@ -1973,6 +2885,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let err = process_parameter(&param, None, true).unwrap_err();
@@ -1980,6 +2893,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_schema_example_fallback_inline() {
         let schema = Schema::Object(
             ObjectBuilder::new()
@@ -1997,7 +2911,7 @@ mod tests {
             items: None,
             required: false,
             deprecated: false,
-            schema: Some(RefOr::T(schema)),
+            schema: Some(RefOr::T(schema).into()),
             content: None,
             style: None,
             explode: None,
@@ -2006,10 +2920,14 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let processed = process_parameter(&param, None, true).unwrap();
-        assert_eq!(processed.example, Some(json!("from-schema")));
+        assert_eq!(
+            processed.example,
+            Some(ExampleValue::data(json!("from-schema")))
+        );
     }
 
     #[test]
@@ -2041,9 +2959,12 @@ mod tests {
             items: None,
             required: false,
             deprecated: false,
-            schema: Some(RefOr::Ref(Ref::new(
-                "https://example.com/openapi.yaml#/components/schemas/Filter",
-            ))),
+            schema: Some(
+                RefOr::Ref(Ref::new(
+                    "https://example.com/openapi.yaml#/components/schemas/Filter",
+                ))
+                .into(),
+            ),
             content: None,
             style: None,
             explode: None,
@@ -2052,10 +2973,14 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let processed = process_parameter(&param, Some(&components), true).unwrap();
-        assert_eq!(processed.example, Some(json!({ "status": "active" })));
+        assert_eq!(
+            processed.example,
+            Some(ExampleValue::data(json!({ "status": "active" })))
+        );
     }
 
     #[test]
@@ -2069,9 +2994,12 @@ mod tests {
             items: None,
             required: false,
             deprecated: false,
-            schema: Some(RefOr::T(Schema::Object(
-                ObjectBuilder::new().schema_type(Type::String).build(),
-            ))),
+            schema: Some(
+                RefOr::T(Schema::Object(
+                    ObjectBuilder::new().schema_type(Type::String).build(),
+                ))
+                .into(),
+            ),
             content: None,
             style: None,
             explode: None,
@@ -2080,6 +3008,7 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let processed = process_parameter(&param, None, true).unwrap();
@@ -2097,9 +3026,12 @@ mod tests {
             items: None,
             required: true,
             deprecated: false,
-            schema: Some(RefOr::T(Schema::Object(
-                ObjectBuilder::new().schema_type(Type::String).build(),
-            ))),
+            schema: Some(
+                RefOr::T(Schema::Object(
+                    ObjectBuilder::new().schema_type(Type::String).build(),
+                ))
+                .into(),
+            ),
             content: None,
             style: None,
             explode: None,
@@ -2108,9 +3040,203 @@ mod tests {
             collection_format: None,
             example: None,
             examples: None,
+            ..Default::default()
         };
 
         let err = process_parameter(&param, None, true).unwrap_err();
         assert!(format!("{err}").contains("allowEmptyValue"));
+    }
+
+    #[test]
+    fn test_parameter_content_media_type_ref_schema() {
+        let mut components = ShimComponents {
+            security_schemes: None,
+            path_items: None,
+            extra: BTreeMap::new(),
+        };
+        components.extra.insert(
+            "__self".to_string(),
+            serde_json::json!("https://example.com/openapi.yaml"),
+        );
+        components.extra.insert(
+            "mediaTypes".to_string(),
+            serde_json::json!({
+                "QueryFilter": {
+                    "schema": { "type": "integer", "format": "int32" }
+                }
+            }),
+        );
+
+        let mut content_map = BTreeMap::new();
+        content_map.insert("application/json".into(), ContentBuilder::new().build());
+
+        let raw = serde_json::json!({
+            "name": "filter",
+            "in": "query",
+            "content": {
+                "application/json": {
+                    "$ref": "#/components/mediaTypes/QueryFilter"
+                }
+            }
+        });
+
+        let param = ShimParameter {
+            name: "filter".to_string(),
+            description: None,
+            parameter_in: "query".to_string(),
+            schema_type: None,
+            format: None,
+            items: None,
+            required: true,
+            deprecated: false,
+            schema: None,
+            content: Some(content_map),
+            style: None,
+            explode: None,
+            allow_empty_value: None,
+            allow_reserved: None,
+            collection_format: None,
+            example: None,
+            examples: None,
+            raw,
+            ..Default::default()
+        };
+
+        let processed = process_parameter(&param, Some(&components), true).unwrap();
+        assert_eq!(processed.ty, "i32");
+        assert_eq!(processed.content_media_type, Some(ContentMediaType::Json));
+    }
+
+    #[test]
+    fn test_parameter_content_item_schema_sequential() {
+        let mut content_map = BTreeMap::new();
+        content_map.insert("application/x-ndjson".into(), ContentBuilder::new().build());
+
+        let raw = serde_json::json!({
+            "name": "events",
+            "in": "query",
+            "content": {
+                "application/x-ndjson": {
+                    "itemSchema": { "type": "string" }
+                }
+            }
+        });
+
+        let param = ShimParameter {
+            name: "events".to_string(),
+            description: None,
+            parameter_in: "query".to_string(),
+            schema_type: None,
+            format: None,
+            items: None,
+            required: false,
+            deprecated: false,
+            schema: None,
+            content: Some(content_map),
+            style: None,
+            explode: None,
+            allow_empty_value: None,
+            allow_reserved: None,
+            collection_format: None,
+            example: None,
+            examples: None,
+            raw,
+            ..Default::default()
+        };
+
+        let processed = process_parameter(&param, None, true).unwrap();
+        assert_eq!(processed.ty, "Vec<String>");
+    }
+
+    #[test]
+    fn test_parameter_content_item_schema_vendor_jsonl() {
+        let mut content_map = BTreeMap::new();
+        content_map.insert(
+            "application/vnd.acme+jsonl".into(),
+            ContentBuilder::new().build(),
+        );
+
+        let raw = serde_json::json!({
+            "name": "events",
+            "in": "query",
+            "content": {
+                "application/vnd.acme+jsonl": {
+                    "itemSchema": { "type": "string" }
+                }
+            }
+        });
+
+        let param = ShimParameter {
+            name: "events".to_string(),
+            description: None,
+            parameter_in: "query".to_string(),
+            schema_type: None,
+            format: None,
+            items: None,
+            required: false,
+            deprecated: false,
+            schema: None,
+            content: Some(content_map),
+            style: None,
+            explode: None,
+            allow_empty_value: None,
+            allow_reserved: None,
+            collection_format: None,
+            example: None,
+            examples: None,
+            raw,
+            ..Default::default()
+        };
+
+        let processed = process_parameter(&param, None, true).unwrap();
+        assert_eq!(processed.ty, "Vec<String>");
+    }
+
+    #[test]
+    fn test_parameter_content_examples_serialized_value() {
+        let mut content_map = BTreeMap::new();
+        content_map.insert("application/json".into(), ContentBuilder::new().build());
+
+        let raw = serde_json::json!({
+            "name": "payload",
+            "in": "query",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "sample": {
+                            "serializedValue": "{\"id\":1}"
+                        }
+                    }
+                }
+            }
+        });
+
+        let param = ShimParameter {
+            name: "payload".to_string(),
+            description: None,
+            parameter_in: "query".to_string(),
+            schema_type: None,
+            format: None,
+            items: None,
+            required: false,
+            deprecated: false,
+            schema: None,
+            content: Some(content_map),
+            style: None,
+            explode: None,
+            allow_empty_value: None,
+            allow_reserved: None,
+            collection_format: None,
+            example: None,
+            examples: None,
+            raw,
+            ..Default::default()
+        };
+
+        let processed = process_parameter(&param, None, true).unwrap();
+        assert_eq!(
+            processed.example,
+            Some(ExampleValue::serialized(serde_json::json!("{\"id\":1}")))
+        );
     }
 }

@@ -11,6 +11,8 @@ use crate::handler_generator::parsing::{
 };
 use crate::oas::{BodyFormat, ParamSource, ParsedRoute};
 use crate::strategies::BackendStrategy;
+#[cfg(test)]
+use std::collections::BTreeMap;
 use std::collections::HashSet;
 
 /// Represents a generated query parameter struct definition.
@@ -239,7 +241,7 @@ pub(crate) fn generate_function(
         args.push(format!(
             "{}: {}",
             var_name,
-            strategy.query_string_extractor(&qs_param.ty)
+            strategy.query_string_extractor(&qs_param.ty, qs_param.content_media_type.as_ref())
         ));
     } else {
         let has_query = route.params.iter().any(|p| p.source == ParamSource::Query);
@@ -316,7 +318,9 @@ pub(crate) fn generate_function(
 mod tests {
     use super::*;
     use crate::handler_generator::builder::update_handler_module;
-    use crate::oas::models::{ResponseHeader, RouteKind, SecurityRequirement};
+    use crate::oas::models::{
+        ContentMediaType, ResponseHeader, RouteKind, SecurityRequirement, SecurityRequirementGroup,
+    };
     use crate::oas::{BodyFormat, RequestBodyDefinition, RouteParam};
     use crate::parser::ParsedExternalDocs;
     use crate::strategies::ActixStrategy;
@@ -327,9 +331,24 @@ mod tests {
             path: "/users/{id}".into(),
             summary: None,
             description: None,
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
             base_path: None,
+
+            path_servers: None,
+
+            servers_override: None,
             method: "GET".into(),
             handler_name: "get_user".into(),
+            operation_id: None,
             params: vec![RouteParam {
                 name: "id".into(),
                 description: None,
@@ -342,10 +361,19 @@ mod tests {
                 allow_empty_value: false,
                 allow_reserved: false,
                 example: None,
+                raw_schema: None,
+                extensions: BTreeMap::new(),
             }],
+            path_params: vec![],
             request_body: None,
             security: vec![],
+            security_defined: false,
             response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
@@ -353,6 +381,9 @@ mod tests {
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
         };
 
         let strategy = ActixStrategy;
@@ -366,9 +397,24 @@ mod tests {
             path: "/search".into(),
             summary: None,
             description: None,
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
             base_path: None,
+
+            path_servers: None,
+
+            servers_override: None,
             method: "POST".into(),
             handler_name: "search".into(),
+            operation_id: None,
             params: vec![RouteParam {
                 name: "q".into(),
                 description: None,
@@ -381,7 +427,10 @@ mod tests {
                 allow_empty_value: false,
                 allow_reserved: false,
                 example: None,
+                raw_schema: None,
+                extensions: BTreeMap::new(),
             }],
+            path_params: vec![],
             request_body: Some(RequestBodyDefinition {
                 ty: "SearchFilter".into(),
                 description: None,
@@ -394,7 +443,13 @@ mod tests {
                 example: None,
             }),
             security: vec![],
+            security_defined: false,
             response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
@@ -402,6 +457,9 @@ mod tests {
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
         };
 
         let strategy = ActixStrategy;
@@ -417,10 +475,28 @@ mod tests {
             path: "/upload".into(),
             summary: None,
             description: None,
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
             base_path: None,
+
+            path_servers: None,
+
+            servers_override: None,
             method: "POST".into(),
             handler_name: "upload_file".into(),
+            operation_id: None,
             params: vec![],
+
+            path_params: vec![],
+
             request_body: Some(RequestBodyDefinition {
                 ty: "UploadForm".into(),
                 description: None,
@@ -433,7 +509,13 @@ mod tests {
                 example: None,
             }),
             security: vec![],
+            security_defined: false,
             response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
@@ -441,6 +523,9 @@ mod tests {
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
         };
 
         let strategy = ActixStrategy;
@@ -454,10 +539,28 @@ mod tests {
             path: "/text".into(),
             summary: None,
             description: None,
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
             base_path: None,
+
+            path_servers: None,
+
+            servers_override: None,
             method: "POST".into(),
             handler_name: "accept_text".into(),
+            operation_id: None,
             params: vec![],
+
+            path_params: vec![],
+
             request_body: Some(RequestBodyDefinition {
                 ty: "String".into(),
                 description: None,
@@ -470,7 +573,13 @@ mod tests {
                 example: None,
             }),
             security: vec![],
+            security_defined: false,
             response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
@@ -478,16 +587,37 @@ mod tests {
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
         };
 
         let binary_route = ParsedRoute {
             path: "/bin".into(),
             summary: None,
             description: None,
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
             base_path: None,
+
+            path_servers: None,
+
+            servers_override: None,
             method: "POST".into(),
             handler_name: "accept_binary".into(),
+            operation_id: None,
             params: vec![],
+
+            path_params: vec![],
+
             request_body: Some(RequestBodyDefinition {
                 ty: "Vec<u8>".into(),
                 description: None,
@@ -500,7 +630,13 @@ mod tests {
                 example: None,
             }),
             security: vec![],
+            security_defined: false,
             response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
@@ -508,6 +644,9 @@ mod tests {
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
         };
 
         let strategy = ActixStrategy;
@@ -522,10 +661,28 @@ mod tests {
             path: "/optional".into(),
             summary: None,
             description: None,
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
             base_path: None,
+
+            path_servers: None,
+
+            servers_override: None,
             method: "POST".into(),
             handler_name: "optional_body".into(),
+            operation_id: None,
             params: vec![],
+
+            path_params: vec![],
+
             request_body: Some(RequestBodyDefinition {
                 ty: "Payload".into(),
                 description: None,
@@ -538,7 +695,13 @@ mod tests {
                 example: None,
             }),
             security: vec![],
+            security_defined: false,
             response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
@@ -546,6 +709,9 @@ mod tests {
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
         };
 
         let strategy = ActixStrategy;
@@ -554,14 +720,29 @@ mod tests {
     }
 
     #[test]
-    fn test_oas_3_2_querystring_extractor() {
+    fn test_oas_3_2_querystring_extractor_form_default() {
         let route = ParsedRoute {
             path: "/raw".into(),
             summary: None,
             description: None,
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
             base_path: None,
+
+            path_servers: None,
+
+            servers_override: None,
             method: "GET".into(),
             handler_name: "raw_search".into(),
+            operation_id: None,
             params: vec![RouteParam {
                 name: "filter".into(),
                 description: None,
@@ -574,10 +755,19 @@ mod tests {
                 allow_empty_value: false,
                 allow_reserved: false,
                 example: None,
+                raw_schema: None,
+                extensions: BTreeMap::new(),
             }],
+            path_params: vec![],
             request_body: None,
             security: vec![],
+            security_defined: false,
             response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
@@ -585,6 +775,9 @@ mod tests {
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
         };
 
         let strategy = ActixStrategy;
@@ -593,22 +786,54 @@ mod tests {
     }
 
     #[test]
-    fn test_security_stub_gen() {
+    fn test_oas_3_2_querystring_extractor_json_raw() {
         let route = ParsedRoute {
-            path: "/api".into(),
+            path: "/raw".into(),
             summary: None,
             description: None,
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
             base_path: None,
-            method: "POST".into(),
-            handler_name: "secure_ops".into(),
-            params: vec![],
-            request_body: None,
-            security: vec![SecurityRequirement {
-                scheme_name: "ApiKey".into(),
-                scopes: vec![],
-                scheme: None, // Simplified for this test file context
+
+            path_servers: None,
+
+            servers_override: None,
+            method: "GET".into(),
+            handler_name: "raw_search_json".into(),
+            operation_id: None,
+            params: vec![RouteParam {
+                name: "filter".into(),
+                description: None,
+                source: ParamSource::QueryString,
+                ty: "FilterStruct".into(),
+                content_media_type: Some(ContentMediaType::Json),
+                style: None,
+                explode: false,
+                deprecated: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                example: None,
+                raw_schema: None,
+                extensions: BTreeMap::new(),
             }],
+            path_params: vec![],
+            request_body: None,
+            security: vec![],
+            security_defined: false,
             response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
@@ -616,6 +841,69 @@ mod tests {
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
+        };
+
+        let strategy = ActixStrategy;
+        let code = update_handler_module("", &[route], &strategy).unwrap();
+        assert!(code.contains("filter: String"));
+    }
+
+    #[test]
+    fn test_security_stub_gen() {
+        let route = ParsedRoute {
+            path: "/api".into(),
+            summary: None,
+            description: None,
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
+            base_path: None,
+
+            path_servers: None,
+
+            servers_override: None,
+            method: "POST".into(),
+            handler_name: "secure_ops".into(),
+            operation_id: None,
+            params: vec![],
+
+            path_params: vec![],
+
+            request_body: None,
+            security: vec![SecurityRequirementGroup {
+                schemes: vec![SecurityRequirement {
+                    scheme_name: "ApiKey".into(),
+                    scopes: vec![],
+                    scheme: None, // Simplified for this test file context
+                }],
+            }],
+            security_defined: false,
+            response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
+            response_headers: vec![],
+            response_links: None,
+            kind: RouteKind::Path,
+            tags: vec![],
+            callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
         };
         let strategy = ActixStrategy;
         let code = update_handler_module("", &[route], &strategy).unwrap();
@@ -630,17 +918,48 @@ mod tests {
             path: "/headers".into(),
             summary: None,
             description: None,
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
             base_path: None,
+
+            path_servers: None,
+
+            servers_override: None,
             method: "GET".into(),
             handler_name: "get_headers".into(),
+            operation_id: None,
             params: vec![],
+
+            path_params: vec![],
+
             request_body: None,
             security: vec![],
+            security_defined: false,
             response_type: Some("Body".to_string()),
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
             response_headers: vec![ResponseHeader {
                 name: "X-Custom".to_string(),
                 description: None,
+                required: false,
+                deprecated: false,
+                style: None,
+                explode: None,
                 ty: "String".to_string(),
+                content_media_type: None,
+                example: None,
+                extensions: BTreeMap::new(),
             }],
             response_links: None,
             kind: RouteKind::Path,
@@ -648,6 +967,9 @@ mod tests {
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
         };
         let strategy = ActixStrategy;
         let code = update_handler_module("", &[route], &strategy).unwrap();
@@ -660,13 +982,37 @@ mod tests {
             path: "/doc".into(),
             summary: Some("Short summary".into()),
             description: Some("Longer description.".into()),
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
             base_path: None,
+
+            path_servers: None,
+
+            servers_override: None,
             method: "GET".into(),
             handler_name: "doc_route".into(),
+            operation_id: None,
             params: vec![],
+
+            path_params: vec![],
+
             request_body: None,
             security: vec![],
+            security_defined: false,
             response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
@@ -677,6 +1023,9 @@ mod tests {
                 url: "https://example.com/docs".into(),
                 description: Some("Docs".into()),
             }),
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
         };
 
         let strategy = ActixStrategy;
@@ -693,9 +1042,24 @@ mod tests {
             path: "/q".into(),
             summary: None,
             description: None,
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
             base_path: None,
+
+            path_servers: None,
+
+            servers_override: None,
             method: "GET".into(),
             handler_name: "list_items".into(),
+            operation_id: None,
             params: vec![
                 RouteParam {
                     name: "user-id".into(),
@@ -709,6 +1073,8 @@ mod tests {
                     allow_empty_value: false,
                     allow_reserved: false,
                     example: None,
+                    raw_schema: None,
+                    extensions: BTreeMap::new(),
                 },
                 RouteParam {
                     name: "user_id".into(),
@@ -722,11 +1088,20 @@ mod tests {
                     allow_empty_value: false,
                     allow_reserved: false,
                     example: None,
+                    raw_schema: None,
+                    extensions: BTreeMap::new(),
                 },
             ],
+            path_params: vec![],
             request_body: None,
             security: vec![],
+            security_defined: false,
             response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
@@ -734,6 +1109,9 @@ mod tests {
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
         };
 
         let generated = generate_query_struct(&route).unwrap();
@@ -749,9 +1127,24 @@ mod tests {
             path: "/search".into(),
             summary: None,
             description: None,
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
             base_path: None,
+
+            path_servers: None,
+
+            servers_override: None,
             method: "GET".into(),
             handler_name: "search".into(),
+            operation_id: None,
             params: vec![RouteParam {
                 name: "status".into(),
                 description: Some("Filter results by status.".into()),
@@ -764,10 +1157,19 @@ mod tests {
                 allow_empty_value: false,
                 allow_reserved: false,
                 example: None,
+                raw_schema: None,
+                extensions: BTreeMap::new(),
             }],
+            path_params: vec![],
             request_body: None,
             security: vec![],
+            security_defined: false,
             response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
@@ -775,6 +1177,9 @@ mod tests {
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
         };
 
         let generated = generate_query_struct(&route).unwrap();

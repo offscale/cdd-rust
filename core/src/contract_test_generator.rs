@@ -10,6 +10,8 @@ use crate::oas::models::RouteKind;
 use crate::oas::models::{ContentMediaType, ParamStyle};
 use crate::oas::{ParamSource, ParsedRoute};
 use crate::strategies::BackendStrategy;
+#[cfg(test)]
+use std::collections::BTreeMap;
 
 /// Generates the content of `tests/api_contracts.rs`.
 pub fn generate_contract_tests_file(
@@ -149,9 +151,16 @@ fn apply_path_params(path_template: &str, params: &[crate::oas::RouteParam]) -> 
 }
 
 fn serialize_path_param(param: &crate::oas::RouteParam) -> String {
+    if let Some(example) = &param.example {
+        if example.is_serialized() {
+            return example_value_to_string(example);
+        }
+    }
+
     let value = param
         .example
-        .clone()
+        .as_ref()
+        .map(|example| example.value.clone())
         .unwrap_or_else(|| dummy_json_value(&param.ty));
     let style = param.style.clone().unwrap_or(ParamStyle::Simple);
     let explode = param.explode;
@@ -300,9 +309,16 @@ fn encode_path_value(value: &str, allow_reserved: bool) -> String {
 }
 
 fn build_querystring_value(param: &crate::oas::RouteParam) -> String {
+    if let Some(example) = &param.example {
+        if example.is_serialized() {
+            return example_value_to_string(example);
+        }
+    }
+
     let value = param
         .example
-        .clone()
+        .as_ref()
+        .map(|example| example.value.clone())
         .unwrap_or_else(|| dummy_json_value(&param.ty));
 
     if matches!(
@@ -353,6 +369,10 @@ fn example_to_string(value: &serde_json::Value) -> String {
     }
 }
 
+fn example_value_to_string(example: &crate::oas::ExampleValue) -> String {
+    example_to_string(&example.value)
+}
+
 fn rust_string_literal(value: &str) -> String {
     format!("{:?}", value)
 }
@@ -401,9 +421,16 @@ fn serialize_cookie_params(params: &[crate::oas::RouteParam]) -> String {
 }
 
 fn serialize_header_param(param: &crate::oas::RouteParam) -> String {
+    if let Some(example) = &param.example {
+        if example.is_serialized() {
+            return example_value_to_string(example);
+        }
+    }
+
     let value = param
         .example
-        .clone()
+        .as_ref()
+        .map(|example| example.value.clone())
         .unwrap_or_else(|| dummy_json_value(&param.ty));
     if let Some(media_type) = param.content_media_type.as_ref() {
         return serialize_content_value(media_type, &value);
@@ -456,9 +483,16 @@ fn serialize_header_object(
 }
 
 fn serialize_cookie_param(param: &crate::oas::RouteParam) -> Vec<String> {
+    if let Some(example) = &param.example {
+        if example.is_serialized() {
+            return vec![example_value_to_string(example)];
+        }
+    }
+
     let value = param
         .example
-        .clone()
+        .as_ref()
+        .map(|example| example.value.clone())
         .unwrap_or_else(|| dummy_json_value(&param.ty));
     if let Some(media_type) = param.content_media_type.as_ref() {
         let serialized = serialize_content_value(media_type, &value);
@@ -567,8 +601,14 @@ fn serialize_cookie_object(
 }
 
 fn serialize_query_param(param: &crate::oas::RouteParam) -> Vec<String> {
-    let value = match param.example.clone() {
-        Some(example) => example,
+    if let Some(example) = &param.example {
+        if example.is_serialized() {
+            return vec![example_value_to_string(example)];
+        }
+    }
+
+    let value = match param.example.as_ref() {
+        Some(example) => example.value.clone(),
         None if param.allow_empty_value => serde_json::Value::String(String::new()),
         None => dummy_json_value(&param.ty),
     };
@@ -859,9 +899,24 @@ mod tests {
             path: "/users/{id}".into(),
             summary: None,
             description: None,
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
             base_path: None,
+
+            path_servers: None,
+
+            servers_override: None,
             method: "GET".into(),
             handler_name: "get_user".into(),
+            operation_id: None,
             params: vec![crate::oas::RouteParam {
                 name: "id".into(),
                 description: None,
@@ -874,10 +929,19 @@ mod tests {
                 allow_empty_value: false,
                 allow_reserved: false,
                 example: None,
+                raw_schema: None,
+                extensions: BTreeMap::new(),
             }],
+            path_params: vec![],
             request_body: None,
             security: vec![],
+            security_defined: false,
             response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
@@ -885,6 +949,9 @@ mod tests {
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
         }];
 
         let strategy = ActixStrategy;
@@ -909,13 +976,37 @@ mod tests {
                 path: "/users".into(),
                 summary: None,
                 description: None,
+
+                path_summary: None,
+
+                path_description: None,
+                path_extensions: BTreeMap::new(),
+
+                operation_summary: None,
+
+                operation_description: None,
+
                 base_path: None,
+
+                path_servers: None,
+
+                servers_override: None,
                 method: "GET".into(),
                 handler_name: "list_users".into(),
+                operation_id: None,
                 params: vec![],
+
+                path_params: vec![],
+
                 request_body: None,
                 security: vec![],
+                security_defined: false,
                 response_type: None,
+                response_status: None,
+                response_summary: None,
+                response_description: None,
+                response_media_type: None,
+                response_example: None,
                 response_headers: vec![],
                 response_links: None,
                 kind: RouteKind::Path,
@@ -923,18 +1014,45 @@ mod tests {
                 callbacks: vec![],
                 deprecated: false,
                 external_docs: None,
+                raw_request_body: None,
+                raw_responses: None,
+                extensions: BTreeMap::new(),
             },
             ParsedRoute {
                 path: "userCreated".into(),
                 summary: None,
                 description: None,
+
+                path_summary: None,
+
+                path_description: None,
+                path_extensions: BTreeMap::new(),
+
+                operation_summary: None,
+
+                operation_description: None,
+
                 base_path: None,
+
+                path_servers: None,
+
+                servers_override: None,
                 method: "POST".into(),
                 handler_name: "user_created".into(),
+                operation_id: None,
                 params: vec![],
+
+                path_params: vec![],
+
                 request_body: None,
                 security: vec![],
+                security_defined: false,
                 response_type: None,
+                response_status: None,
+                response_summary: None,
+                response_description: None,
+                response_media_type: None,
+                response_example: None,
                 response_headers: vec![],
                 response_links: None,
                 kind: RouteKind::Webhook,
@@ -942,6 +1060,9 @@ mod tests {
                 callbacks: vec![],
                 deprecated: false,
                 external_docs: None,
+                raw_request_body: None,
+                raw_responses: None,
+                extensions: BTreeMap::new(),
             },
         ];
 
@@ -960,9 +1081,24 @@ mod tests {
             path: "/search".into(),
             summary: None,
             description: None,
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
             base_path: None,
+
+            path_servers: None,
+
+            servers_override: None,
             method: "GET".into(),
             handler_name: "search_items".into(),
+            operation_id: None,
             params: vec![
                 crate::oas::RouteParam {
                     name: "q".into(),
@@ -976,6 +1112,8 @@ mod tests {
                     allow_empty_value: false,
                     allow_reserved: false,
                     example: None,
+                    raw_schema: None,
+                    extensions: BTreeMap::new(),
                 },
                 crate::oas::RouteParam {
                     name: "page".into(),
@@ -989,18 +1127,30 @@ mod tests {
                     allow_empty_value: false,
                     allow_reserved: false,
                     example: None,
+                    raw_schema: None,
+                    extensions: BTreeMap::new(),
                 },
             ],
+            path_params: vec![],
             request_body: None,
             security: vec![],
+            security_defined: false,
             response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
             tags: vec![],
+            extensions: BTreeMap::new(),
         }];
 
         let strategy = ActixStrategy;
@@ -1009,14 +1159,138 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_contract_tests_non_json_bodies_serialized() {
+        let routes = vec![
+            ParsedRoute {
+                path: "/submit".into(),
+                summary: None,
+                description: None,
+                path_summary: None,
+                path_description: None,
+                path_extensions: BTreeMap::new(),
+                operation_summary: None,
+                operation_description: None,
+                base_path: None,
+                path_servers: None,
+                servers_override: None,
+                method: "POST".into(),
+                handler_name: "submit_form".into(),
+                operation_id: None,
+                params: vec![],
+                path_params: vec![],
+                request_body: Some(RequestBodyDefinition {
+                    ty: "Form".into(),
+                    description: None,
+                    media_type: "application/x-www-form-urlencoded".into(),
+                    format: BodyFormat::Form,
+                    required: true,
+                    encoding: None,
+                    prefix_encoding: None,
+                    item_encoding: None,
+                    example: None,
+                }),
+                security: vec![],
+                security_defined: false,
+                response_type: None,
+                response_status: None,
+                response_summary: None,
+                response_description: None,
+                response_media_type: None,
+                response_example: None,
+                response_headers: vec![],
+                response_links: None,
+                kind: RouteKind::Path,
+                tags: vec![],
+                callbacks: vec![],
+                deprecated: false,
+                external_docs: None,
+                raw_request_body: None,
+                raw_responses: None,
+                extensions: BTreeMap::new(),
+            },
+            ParsedRoute {
+                path: "/upload".into(),
+                summary: None,
+                description: None,
+                path_summary: None,
+                path_description: None,
+                path_extensions: BTreeMap::new(),
+                operation_summary: None,
+                operation_description: None,
+                base_path: None,
+                path_servers: None,
+                servers_override: None,
+                method: "POST".into(),
+                handler_name: "upload_file".into(),
+                operation_id: None,
+                params: vec![],
+                path_params: vec![],
+                request_body: Some(RequestBodyDefinition {
+                    ty: "Upload".into(),
+                    description: None,
+                    media_type: "multipart/form-data".into(),
+                    format: BodyFormat::Multipart,
+                    required: true,
+                    encoding: None,
+                    prefix_encoding: None,
+                    item_encoding: None,
+                    example: None,
+                }),
+                security: vec![],
+                security_defined: false,
+                response_type: None,
+                response_status: None,
+                response_summary: None,
+                response_description: None,
+                response_media_type: None,
+                response_example: None,
+                response_headers: vec![],
+                response_links: None,
+                kind: RouteKind::Path,
+                tags: vec![],
+                callbacks: vec![],
+                deprecated: false,
+                external_docs: None,
+                raw_request_body: None,
+                raw_responses: None,
+                extensions: BTreeMap::new(),
+            },
+        ];
+
+        let strategy = ActixStrategy;
+        let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy).unwrap();
+
+        assert!(code.contains("application/x-www-form-urlencoded"));
+        assert!(code.contains("dummy=value"));
+        assert!(code.contains("multipart/form-data"));
+        assert!(code.contains("Content-Disposition: form-data; name=\\\"payload\\\""));
+        assert!(!code.contains(".set_form("));
+    }
+
+    #[test]
     fn test_generate_uses_parameter_example() {
         let routes = vec![ParsedRoute {
             path: "/items/{itemId}".into(),
             summary: None,
             description: None,
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
             base_path: None,
+
+            path_servers: None,
+
+            servers_override: None,
             method: "GET".into(),
             handler_name: "get_item".into(),
+            operation_id: None,
             params: vec![crate::oas::RouteParam {
                 name: "itemId".into(),
                 description: None,
@@ -1028,11 +1302,20 @@ mod tests {
                 deprecated: false,
                 allow_empty_value: false,
                 allow_reserved: false,
-                example: Some(serde_json::json!("item-42")),
+                example: Some(crate::oas::ExampleValue::data(serde_json::json!("item-42"))),
+                raw_schema: None,
+                extensions: BTreeMap::new(),
             }],
+            path_params: vec![],
             request_body: None,
             security: vec![],
+            security_defined: false,
             response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
@@ -1040,6 +1323,9 @@ mod tests {
             deprecated: false,
             external_docs: None,
             tags: vec![],
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
         }];
 
         let strategy = ActixStrategy;
@@ -1060,7 +1346,9 @@ mod tests {
             deprecated: false,
             allow_empty_value: false,
             allow_reserved: false,
-            example: Some(serde_json::json!("blue")),
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!("blue"))),
+            raw_schema: None,
+            extensions: BTreeMap::new(),
         };
 
         let serialized = serialize_path_param(&param);
@@ -1080,7 +1368,11 @@ mod tests {
             deprecated: false,
             allow_empty_value: false,
             allow_reserved: false,
-            example: Some(serde_json::json!(["blue", "black"])),
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!([
+                "blue", "black"
+            ]))),
+            raw_schema: None,
+            extensions: BTreeMap::new(),
         };
 
         let serialized = serialize_path_param(&param);
@@ -1100,7 +1392,12 @@ mod tests {
             deprecated: false,
             allow_empty_value: false,
             allow_reserved: false,
-            example: Some(serde_json::json!({"R": 100, "G": 200})),
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!({
+                "R": 100,
+                "G": 200
+            }))),
+            raw_schema: None,
+            extensions: BTreeMap::new(),
         };
 
         let serialized = serialize_path_param(&param);
@@ -1113,9 +1410,24 @@ mod tests {
             path: "/search".into(),
             summary: None,
             description: None,
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
             base_path: None,
+
+            path_servers: None,
+
+            servers_override: None,
             method: "GET".into(),
             handler_name: "search_raw".into(),
+            operation_id: None,
             params: vec![crate::oas::RouteParam {
                 name: "raw".into(),
                 description: None,
@@ -1128,10 +1440,19 @@ mod tests {
                 allow_empty_value: false,
                 allow_reserved: false,
                 example: None,
+                raw_schema: None,
+                extensions: BTreeMap::new(),
             }],
+            path_params: vec![],
             request_body: None,
             security: vec![],
+            security_defined: false,
             response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
@@ -1139,6 +1460,9 @@ mod tests {
             deprecated: false,
             external_docs: None,
             tags: vec![],
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
         }];
 
         let strategy = ActixStrategy;
@@ -1152,9 +1476,24 @@ mod tests {
             path: "/secure".into(),
             summary: None,
             description: None,
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
             base_path: None,
+
+            path_servers: None,
+
+            servers_override: None,
             method: "GET".into(),
             handler_name: "secure".into(),
+            operation_id: None,
             params: vec![
                 crate::oas::RouteParam {
                     name: "X-Token".into(),
@@ -1167,7 +1506,9 @@ mod tests {
                     deprecated: false,
                     allow_empty_value: false,
                     allow_reserved: false,
-                    example: Some(serde_json::json!("abc123")),
+                    example: Some(crate::oas::ExampleValue::data(serde_json::json!("abc123"))),
+                    raw_schema: None,
+                    extensions: BTreeMap::new(),
                 },
                 crate::oas::RouteParam {
                     name: "session".into(),
@@ -1181,11 +1522,20 @@ mod tests {
                     allow_empty_value: false,
                     allow_reserved: false,
                     example: None,
+                    raw_schema: None,
+                    extensions: BTreeMap::new(),
                 },
             ],
+            path_params: vec![],
             request_body: None,
             security: vec![],
+            security_defined: false,
             response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
@@ -1193,6 +1543,9 @@ mod tests {
             deprecated: false,
             external_docs: None,
             tags: vec![],
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
         }];
 
         let strategy = ActixStrategy;
@@ -1214,7 +1567,12 @@ mod tests {
             deprecated: false,
             allow_empty_value: false,
             allow_reserved: false,
-            example: Some(serde_json::json!({"R": 100, "G": 200})),
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!({
+                "R": 100,
+                "G": 200
+            }))),
+            raw_schema: None,
+            extensions: BTreeMap::new(),
         };
 
         let header = serialize_header_param(&param);
@@ -1234,7 +1592,12 @@ mod tests {
             deprecated: false,
             allow_empty_value: false,
             allow_reserved: false,
-            example: Some(serde_json::json!({"R": 100, "G": 200})),
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!({
+                "R": 100,
+                "G": 200
+            }))),
+            raw_schema: None,
+            extensions: BTreeMap::new(),
         };
 
         let header = serialize_header_param(&param);
@@ -1254,7 +1617,11 @@ mod tests {
             deprecated: false,
             allow_empty_value: false,
             allow_reserved: false,
-            example: Some(serde_json::json!(["blue", "black"])),
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!([
+                "blue", "black"
+            ]))),
+            raw_schema: None,
+            extensions: BTreeMap::new(),
         };
 
         let header = serialize_header_param(&param);
@@ -1274,7 +1641,9 @@ mod tests {
             deprecated: false,
             allow_empty_value: false,
             allow_reserved: false,
-            example: Some(serde_json::json!({"a": 1})),
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!({"a": 1}))),
+            raw_schema: None,
+            extensions: BTreeMap::new(),
         };
 
         let header = serialize_header_param(&param);
@@ -1294,7 +1663,11 @@ mod tests {
             deprecated: false,
             allow_empty_value: false,
             allow_reserved: false,
-            example: Some(serde_json::json!(["blue", "black"])),
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!([
+                "blue", "black"
+            ]))),
+            raw_schema: None,
+            extensions: BTreeMap::new(),
         };
 
         let header = serialize_cookie_params(&[param]);
@@ -1314,7 +1687,12 @@ mod tests {
             deprecated: false,
             allow_empty_value: false,
             allow_reserved: false,
-            example: Some(serde_json::json!({"R": 100, "G": 200})),
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!({
+                "R": 100,
+                "G": 200
+            }))),
+            raw_schema: None,
+            extensions: BTreeMap::new(),
         };
 
         let header = serialize_cookie_params(&[param]);
@@ -1334,7 +1712,12 @@ mod tests {
             deprecated: false,
             allow_empty_value: false,
             allow_reserved: false,
-            example: Some(serde_json::json!({"a": "b", "c": "d e"})),
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!({
+                "a": "b",
+                "c": "d e"
+            }))),
+            raw_schema: None,
+            extensions: BTreeMap::new(),
         };
 
         let header = serialize_cookie_params(&[param]);
@@ -1354,7 +1737,11 @@ mod tests {
             deprecated: false,
             allow_empty_value: false,
             allow_reserved: false,
-            example: Some(serde_json::json!(["blue", "black"])),
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!([
+                "blue", "black"
+            ]))),
+            raw_schema: None,
+            extensions: BTreeMap::new(),
         };
 
         let query = serialize_query_params(&[param]);
@@ -1374,7 +1761,12 @@ mod tests {
             deprecated: false,
             allow_empty_value: false,
             allow_reserved: false,
-            example: Some(serde_json::json!({"R": 100, "G": 200})),
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!({
+                "R": 100,
+                "G": 200
+            }))),
+            raw_schema: None,
+            extensions: BTreeMap::new(),
         };
 
         let query = serialize_query_params(&[param]);
@@ -1395,6 +1787,8 @@ mod tests {
             allow_empty_value: true,
             allow_reserved: false,
             example: None,
+            raw_schema: None,
+            extensions: BTreeMap::new(),
         };
 
         let query = serialize_query_params(&[param]);
@@ -1414,7 +1808,11 @@ mod tests {
             deprecated: false,
             allow_empty_value: false,
             allow_reserved: false,
-            example: Some(serde_json::json!(["blue", "black"])),
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!([
+                "blue", "black"
+            ]))),
+            raw_schema: None,
+            extensions: BTreeMap::new(),
         };
 
         let query = serialize_query_params(&[param]);
@@ -1434,7 +1832,11 @@ mod tests {
             deprecated: false,
             allow_empty_value: false,
             allow_reserved: false,
-            example: Some(serde_json::json!(["blue", "black"])),
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!([
+                "blue", "black"
+            ]))),
+            raw_schema: None,
+            extensions: BTreeMap::new(),
         };
 
         let query = serialize_query_params(&[param]);
@@ -1454,11 +1856,40 @@ mod tests {
             deprecated: false,
             allow_empty_value: false,
             allow_reserved: false,
-            example: Some(serde_json::json!({"R": 100, "G": 200})),
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!({
+                "R": 100,
+                "G": 200
+            }))),
+            raw_schema: None,
+            extensions: BTreeMap::new(),
         };
 
         let query = serialize_query_params(&[param]);
         assert_eq!(query, "color%5BR%5D=100&color%5BG%5D=200");
+    }
+
+    #[test]
+    fn test_query_param_uses_serialized_example_directly() {
+        let param = crate::oas::RouteParam {
+            name: "color".into(),
+            description: None,
+            source: ParamSource::Query,
+            ty: "String".into(),
+            content_media_type: None,
+            style: Some(ParamStyle::Form),
+            explode: true,
+            deprecated: false,
+            allow_empty_value: false,
+            allow_reserved: false,
+            example: Some(crate::oas::ExampleValue::serialized(serde_json::json!(
+                "color=blue%20black"
+            ))),
+            raw_schema: None,
+            extensions: BTreeMap::new(),
+        };
+
+        let query = serialize_query_params(&[param]);
+        assert_eq!(query, "color=blue%20black");
     }
 
     #[test]
@@ -1474,7 +1905,11 @@ mod tests {
             deprecated: false,
             allow_empty_value: false,
             allow_reserved: false,
-            example: Some(serde_json::json!({"foo": "bar"})),
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!({
+                "foo": "bar"
+            }))),
+            raw_schema: None,
+            extensions: BTreeMap::new(),
         };
 
         let raw = build_querystring_value(&param);
@@ -1494,7 +1929,9 @@ mod tests {
             deprecated: false,
             allow_empty_value: false,
             allow_reserved: false,
-            example: Some(serde_json::json!("hello")),
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!("hello"))),
+            raw_schema: None,
+            extensions: BTreeMap::new(),
         };
 
         let raw = build_querystring_value(&param);
@@ -1514,7 +1951,11 @@ mod tests {
             deprecated: false,
             allow_empty_value: false,
             allow_reserved: false,
-            example: Some(serde_json::json!({"foo": "a + b"})),
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!({
+                "foo": "a + b"
+            }))),
+            raw_schema: None,
+            extensions: BTreeMap::new(),
         };
 
         let raw = build_querystring_value(&param);
@@ -1527,10 +1968,28 @@ mod tests {
             path: "/create".into(),
             summary: None,
             description: None,
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
             base_path: None,
+
+            path_servers: None,
+
+            servers_override: None,
             method: "POST".into(),
             handler_name: "create_item".into(),
+            operation_id: None,
             params: vec![],
+
+            path_params: vec![],
+
             request_body: Some(RequestBodyDefinition {
                 ty: "Item".into(),
                 description: None,
@@ -1543,7 +2002,13 @@ mod tests {
                 example: None,
             }),
             security: vec![],
+            security_defined: false,
             response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
@@ -1551,6 +2016,9 @@ mod tests {
             deprecated: false,
             external_docs: None,
             tags: vec![],
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
         }];
 
         let strategy = ActixStrategy;
@@ -1564,20 +2032,47 @@ mod tests {
             path: "/ping".into(),
             summary: None,
             description: None,
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
             base_path: Some("/api/v1".into()),
+
+            path_servers: None,
+
+            servers_override: None,
             method: "GET".into(),
             handler_name: "ping".into(),
+            operation_id: None,
             params: vec![],
+
+            path_params: vec![],
+
             request_body: None,
             security: vec![],
+            security_defined: false,
             response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
             callbacks: vec![],
             deprecated: false,
             external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
             tags: vec![],
+            extensions: BTreeMap::new(),
         }];
 
         let strategy = ActixStrategy;
@@ -1594,10 +2089,28 @@ mod tests {
             path: "/optional".into(),
             summary: None,
             description: None,
+
+            path_summary: None,
+
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+
+            operation_summary: None,
+
+            operation_description: None,
+
             base_path: None,
+
+            path_servers: None,
+
+            servers_override: None,
             method: "POST".into(),
             handler_name: "optional_body".into(),
+            operation_id: None,
             params: vec![],
+
+            path_params: vec![],
+
             request_body: Some(RequestBodyDefinition {
                 ty: "Payload".into(),
                 description: None,
@@ -1610,7 +2123,13 @@ mod tests {
                 example: None,
             }),
             security: vec![],
+            security_defined: false,
             response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
             response_headers: vec![],
             response_links: None,
             kind: RouteKind::Path,
@@ -1618,6 +2137,9 @@ mod tests {
             deprecated: false,
             external_docs: None,
             tags: vec![],
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
         }];
 
         let strategy = ActixStrategy;

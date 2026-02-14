@@ -152,6 +152,10 @@ pub struct ParsedField {
     pub rename: Option<String>,
     /// Whether the field is marked to be skipped in serialization/schema.
     pub is_skipped: bool,
+    /// Whether the field is read-only (deserialize-only).
+    pub is_read_only: bool,
+    /// Whether the field is write-only (serialize-only).
+    pub is_write_only: bool,
     /// Whether the field is marked as deprecated.
     pub is_deprecated: bool,
     /// External documentation associated with this field.

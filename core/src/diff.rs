@@ -141,6 +141,8 @@ mod tests {
             description: None,
             rename: None,
             is_skipped: false,
+            is_read_only: false,
+            is_write_only: false,
             is_deprecated: false,
             external_docs: None,
         }
@@ -153,6 +155,8 @@ mod tests {
             description: None,
             rename: Some(rename.to_string()),
             is_skipped: false,
+            is_read_only: false,
+            is_write_only: false,
             is_deprecated: false,
             external_docs: None,
         }

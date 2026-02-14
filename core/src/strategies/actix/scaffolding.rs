@@ -101,7 +101,7 @@ mod tests {
     use crate::oas::models::{
         LinkParamValue, LinkRequestBody, ParsedLink, ResponseHeader, RuntimeExpression,
     };
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
 
     #[test]
     fn test_handler_imports_contains_expected_use() {
@@ -125,7 +125,14 @@ mod tests {
         let headers = vec![ResponseHeader {
             name: "X-Rate-Limit".to_string(),
             description: Some("limit".to_string()),
+            required: false,
+            deprecated: false,
+            style: None,
+            explode: None,
             ty: "i32".to_string(),
+            content_media_type: None,
+            example: None,
+            extensions: BTreeMap::new(),
         }];
 
         let mut params = HashMap::new();
@@ -138,8 +145,10 @@ mod tests {
             description: None,
             operation_id: None,
             operation_ref: Some("/users/{id}".to_string()),
+            resolved_operation_ref: None,
             parameters: params,
             request_body: Some(LinkRequestBody::Literal(serde_json::json!("payload"))),
+            server: None,
             server_url: Some("https://api.example.com".to_string()),
         }];
 

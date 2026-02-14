@@ -4,7 +4,7 @@
 //!
 //! Logic for generating integration test code helpers and methods.
 
-use crate::oas::models::{EncodingInfo, ParamStyle};
+use crate::oas::models::{EncodingInfo, ExampleValue, ParamStyle};
 
 /// Returns imports for test files.
 pub fn test_imports() -> String {
@@ -13,7 +13,7 @@ pub fn test_imports() -> String {
     code.push_str("use actix_web::{test, App, web};\n");
     code.push_str("use serde_json::Value;\n");
     code.push_str("use std::fs;\n");
-    code.push_str("use jsonschema::JSONSchema;\n\n");
+    code.push_str("use jsonschema::{Draft, JSONSchema};\n\n");
     code
 }
 
@@ -43,13 +43,20 @@ pub fn test_body_setup_code(body: &crate::oas::RequestBodyDefinition) -> String 
 
 fn json_body_setup(body: &crate::oas::RequestBodyDefinition) -> String {
     if let Some(example) = &body.example {
+        if example.is_serialized() {
+            let payload = serialized_payload_expr(example);
+            return format!(
+                "        .insert_header((\"Content-Type\", \"{}\"))\n        .set_payload({})\n",
+                body.media_type, payload
+            );
+        }
         let normalized = normalize_media_type(&body.media_type);
-        let json_expr = json_value_expr(example);
+        let json_expr = json_value_expr(&example.value);
         if normalized == "application/json" {
             return format!("        .set_json({})\n", json_expr);
         }
 
-        let payload = json_string_expr(example);
+        let payload = json_string_expr(&example.value);
         return format!(
             "        .insert_header((\"Content-Type\", \"{}\"))\n        .set_payload({})\n",
             body.media_type, payload
@@ -69,8 +76,15 @@ fn json_body_setup(body: &crate::oas::RequestBodyDefinition) -> String {
 
 fn form_body_setup(body: &crate::oas::RequestBodyDefinition) -> String {
     if let Some(example) = &body.example {
+        if example.is_serialized() {
+            let payload = serialized_payload_expr(example);
+            return format!(
+                "        .insert_header((\"Content-Type\", \"{}\"))\n        .set_payload({})\n",
+                body.media_type, payload
+            );
+        }
         if normalize_media_type(&body.media_type) == "application/x-www-form-urlencoded" {
-            if let Some(map) = example.as_object() {
+            if let Some(map) = example.value.as_object() {
                 let payload = serialize_form_urlencoded(map, body.encoding.as_ref());
                 let payload_lit = rust_string_literal(&payload);
                 return format!(
@@ -80,12 +94,18 @@ fn form_body_setup(body: &crate::oas::RequestBodyDefinition) -> String {
             }
         }
 
-        let form_expr = json_value_expr(example);
+        let form_expr = json_value_expr(&example.value);
         return format!("        .set_form(&{})\n", form_expr);
     }
 
     if normalize_media_type(&body.media_type) == "application/x-www-form-urlencoded" {
-        return "        .set_form(&serde_json::json!({ \"dummy\": \"value\" }))\n".to_string();
+        let map = dummy_form_map(body.encoding.as_ref());
+        let payload = serialize_form_urlencoded(&map, body.encoding.as_ref());
+        let payload_lit = rust_string_literal(&payload);
+        return format!(
+            "        .insert_header((\"Content-Type\", \"{}\"))\n        .set_payload({})\n",
+            body.media_type, payload_lit
+        );
     }
 
     format!(
@@ -100,10 +120,305 @@ fn multipart_body_setup(body: &crate::oas::RequestBodyDefinition) -> String {
     } else {
         body.media_type.as_str()
     };
+    let boundary = "boundary";
+    let content_type = if media.to_ascii_lowercase().contains("boundary=") {
+        media.to_string()
+    } else {
+        format!("{}; boundary={}", media, boundary)
+    };
+
+    if let Some(example) = &body.example {
+        if example.is_serialized() {
+            let payload = serialized_payload_expr(example);
+            return format!(
+                "        .insert_header((\"Content-Type\", \"{}\"))\n        .set_payload({})\n",
+                content_type, payload
+            );
+        }
+
+        if let Some(payload) = build_multipart_payload(body, boundary) {
+            let payload_lit = rust_string_literal(&payload);
+            return format!(
+                "        .insert_header((\"Content-Type\", \"{}\"))\n        .set_payload({})\n",
+                content_type, payload_lit
+            );
+        }
+    }
+
+    let payload = build_multipart_fallback_payload(body, boundary);
+    let payload_lit = rust_string_literal(&payload);
     format!(
-        "        .insert_header((\"Content-Type\", \"{}; boundary=boundary\"))\n        .set_payload(\"--boundary--\")\n",
-        media
+        "        .insert_header((\"Content-Type\", \"{}\"))\n        .set_payload({})\n",
+        content_type, payload_lit
     )
+}
+
+fn build_multipart_payload(
+    body: &crate::oas::RequestBodyDefinition,
+    boundary: &str,
+) -> Option<String> {
+    let example = body.example.as_ref()?;
+    let value = &example.value;
+
+    match value {
+        serde_json::Value::Object(map) => Some(render_named_multipart(
+            map,
+            body.encoding.as_ref(),
+            boundary,
+        )),
+        serde_json::Value::Array(items) => Some(render_positional_multipart(
+            items,
+            body.prefix_encoding.as_ref(),
+            body.item_encoding.as_ref(),
+            boundary,
+        )),
+        _ => Some(render_single_part("payload", value, boundary, None)),
+    }
+}
+
+fn build_multipart_fallback_payload(
+    body: &crate::oas::RequestBodyDefinition,
+    boundary: &str,
+) -> String {
+    if let Some(encoding) = body.encoding.as_ref() {
+        if !encoding.is_empty() {
+            let mut map = serde_json::Map::new();
+            for (name, enc) in encoding {
+                map.insert(name.clone(), dummy_value_for_encoding(enc));
+            }
+            return render_named_multipart(&map, Some(encoding), boundary);
+        }
+    }
+
+    if body.prefix_encoding.is_some() || body.item_encoding.is_some() {
+        let mut items = Vec::new();
+        if let Some(prefix) = body.prefix_encoding.as_ref() {
+            for enc in prefix {
+                items.push(dummy_value_for_encoding(enc));
+            }
+        }
+        if let Some(item) = body.item_encoding.as_ref() {
+            items.push(dummy_value_for_encoding(item));
+        }
+        if items.is_empty() {
+            items.push(serde_json::Value::String("value".to_string()));
+        }
+        return render_positional_multipart(
+            &items,
+            body.prefix_encoding.as_ref(),
+            body.item_encoding.as_ref(),
+            boundary,
+        );
+    }
+
+    render_single_part(
+        "payload",
+        &serde_json::Value::String("value".to_string()),
+        boundary,
+        None,
+    )
+}
+
+fn dummy_form_map(
+    encoding: Option<&std::collections::HashMap<String, EncodingInfo>>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut map = serde_json::Map::new();
+    if let Some(enc) = encoding {
+        for (name, info) in enc {
+            map.insert(name.clone(), dummy_value_for_encoding(info));
+        }
+    }
+    if map.is_empty() {
+        map.insert(
+            "dummy".to_string(),
+            serde_json::Value::String("value".to_string()),
+        );
+    }
+    map
+}
+
+fn dummy_value_for_encoding(info: &EncodingInfo) -> serde_json::Value {
+    let content_type = info
+        .content_type
+        .as_ref()
+        .and_then(|ct| first_content_type(ct));
+    if content_type
+        .as_deref()
+        .map(is_json_media_type)
+        .unwrap_or(false)
+    {
+        serde_json::json!({ "dummy": "value" })
+    } else {
+        serde_json::Value::String("value".to_string())
+    }
+}
+
+fn render_named_multipart(
+    map: &serde_json::Map<String, serde_json::Value>,
+    encoding: Option<&std::collections::HashMap<String, EncodingInfo>>,
+    boundary: &str,
+) -> String {
+    let mut payload = String::new();
+    for (name, value) in map {
+        let enc = encoding.and_then(|m| m.get(name));
+        let content_type = enc
+            .and_then(|e| e.content_type.as_ref())
+            .and_then(|c| first_content_type(c));
+        append_multipart_part(
+            &mut payload,
+            boundary,
+            Some(name),
+            content_type.as_deref(),
+            enc.map(|e| &e.headers),
+            value,
+        );
+    }
+    finalize_multipart_payload(payload, boundary)
+}
+
+fn render_positional_multipart(
+    items: &[serde_json::Value],
+    prefix: Option<&Vec<EncodingInfo>>,
+    item: Option<&EncodingInfo>,
+    boundary: &str,
+) -> String {
+    let mut payload = String::new();
+    for (idx, value) in items.iter().enumerate() {
+        let enc = prefix.and_then(|p| p.get(idx)).or(item);
+        let content_type = enc
+            .and_then(|e| e.content_type.as_ref())
+            .and_then(|c| first_content_type(c));
+        let name = format!("part{}", idx);
+        append_multipart_part(
+            &mut payload,
+            boundary,
+            Some(&name),
+            content_type.as_deref(),
+            enc.map(|e| &e.headers),
+            value,
+        );
+    }
+    finalize_multipart_payload(payload, boundary)
+}
+
+fn render_single_part(
+    name: &str,
+    value: &serde_json::Value,
+    boundary: &str,
+    content_type: Option<&str>,
+) -> String {
+    let mut payload = String::new();
+    append_multipart_part(
+        &mut payload,
+        boundary,
+        Some(name),
+        content_type,
+        None,
+        value,
+    );
+    finalize_multipart_payload(payload, boundary)
+}
+
+fn append_multipart_part(
+    out: &mut String,
+    boundary: &str,
+    name: Option<&str>,
+    content_type: Option<&str>,
+    headers: Option<&std::collections::HashMap<String, String>>,
+    value: &serde_json::Value,
+) {
+    let inferred = content_type.or_else(|| infer_multipart_content_type(value));
+    let body = serialize_multipart_value(value, inferred);
+
+    out.push_str(&format!("--{}\r\n", boundary));
+    if let Some(n) = name {
+        out.push_str(&format!(
+            "Content-Disposition: form-data; name=\"{}\"\r\n",
+            n
+        ));
+    }
+    if let Some(ct) = inferred {
+        out.push_str(&format!("Content-Type: {}\r\n", ct));
+    }
+    append_multipart_headers(out, headers);
+    out.push_str("\r\n");
+    out.push_str(&body);
+    out.push_str("\r\n");
+}
+
+fn append_multipart_headers(
+    out: &mut String,
+    headers: Option<&std::collections::HashMap<String, String>>,
+) {
+    let Some(headers) = headers else {
+        return;
+    };
+
+    let mut names = headers.keys().collect::<Vec<_>>();
+    names.sort();
+    for name in names {
+        if name.eq_ignore_ascii_case("content-type") {
+            continue;
+        }
+        let ty = headers.get(name).map(|s| s.as_str()).unwrap_or("String");
+        let value = header_value_for_type(ty);
+        out.push_str(&format!("{}: {}\r\n", name, value));
+    }
+}
+
+fn header_value_for_type(ty: &str) -> String {
+    if ty.contains("Uuid") {
+        "00000000-0000-0000-0000-000000000000".to_string()
+    } else if ty.contains("i32") || ty.contains("i64") || ty.contains("Integer") {
+        "1".to_string()
+    } else if ty.contains("bool") || ty.contains("Boolean") {
+        "true".to_string()
+    } else if ty.contains("Date") {
+        "2023-01-01T00:00:00Z".to_string()
+    } else {
+        "test_val".to_string()
+    }
+}
+
+fn finalize_multipart_payload(mut payload: String, boundary: &str) -> String {
+    payload.push_str(&format!("--{}--", boundary));
+    payload
+}
+
+fn infer_multipart_content_type(value: &serde_json::Value) -> Option<&'static str> {
+    match value {
+        serde_json::Value::Object(_) | serde_json::Value::Array(_) => Some("application/json"),
+        serde_json::Value::String(_)
+        | serde_json::Value::Number(_)
+        | serde_json::Value::Bool(_)
+        | serde_json::Value::Null => Some("text/plain"),
+    }
+}
+
+fn serialize_multipart_value(value: &serde_json::Value, content_type: Option<&str>) -> String {
+    if content_type
+        .map(|ct| ct.to_ascii_lowercase().contains("json"))
+        .unwrap_or(false)
+    {
+        return value.to_string();
+    }
+
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Null => String::new(),
+        _ => value.to_string(),
+    }
+}
+
+fn first_content_type(value: &str) -> Option<String> {
+    let ct = value.split(',').next()?.trim();
+    if ct.is_empty() {
+        None
+    } else {
+        Some(ct.to_string())
+    }
 }
 
 fn text_body_setup(body: &crate::oas::RequestBodyDefinition) -> String {
@@ -113,7 +428,11 @@ fn text_body_setup(body: &crate::oas::RequestBodyDefinition) -> String {
         body.media_type.as_str()
     };
     if let Some(example) = &body.example {
-        let payload = text_string_expr(example);
+        let payload = if example.is_serialized() {
+            serialized_payload_expr(example)
+        } else {
+            text_string_expr(&example.value)
+        };
         return format!(
             "        .insert_header((\"Content-Type\", \"{}\"))\n        .set_payload({})\n",
             media, payload
@@ -131,6 +450,15 @@ fn binary_body_setup(body: &crate::oas::RequestBodyDefinition) -> String {
     } else {
         body.media_type.as_str()
     };
+    if let Some(example) = &body.example {
+        if example.is_serialized() {
+            let payload = serialized_payload_expr(example);
+            return format!(
+                "        .insert_header((\"Content-Type\", \"{}\"))\n        .set_payload({})\n",
+                media, payload
+            );
+        }
+    }
     format!(
         "        .insert_header((\"Content-Type\", \"{}\"))\n        .set_payload(vec![0u8, 1u8, 2u8, 3u8])\n",
         media
@@ -180,6 +508,11 @@ fn example_to_string(value: &serde_json::Value) -> String {
     }
 }
 
+fn serialized_payload_expr(example: &ExampleValue) -> String {
+    let payload = example_to_string(&example.value);
+    rust_string_literal(&payload)
+}
+
 fn rust_string_literal(value: &str) -> String {
     format!("{:?}", value)
 }
@@ -206,6 +539,14 @@ fn normalize_media_type(media_type: &str) -> String {
         .to_ascii_lowercase()
 }
 
+fn is_json_media_type(media_type: &str) -> bool {
+    let normalized = normalize_media_type(media_type);
+    normalized == "application/json"
+        || normalized == "application/*+json"
+        || normalized.ends_with("+json")
+        || is_sequential_json_media_type(&normalized)
+}
+
 fn serialize_form_urlencoded(
     map: &serde_json::Map<String, serde_json::Value>,
     encoding: Option<&std::collections::HashMap<String, EncodingInfo>>,
@@ -221,6 +562,23 @@ fn serialize_form_urlencoded(
             .and_then(|e| e.explode)
             .unwrap_or(matches!(style, ParamStyle::Form));
         let allow_reserved = enc.and_then(|e| e.allow_reserved).unwrap_or(false);
+        let content_type = enc
+            .and_then(|e| e.content_type.as_ref())
+            .and_then(|ct| first_content_type(ct));
+
+        if content_type
+            .as_deref()
+            .map(is_json_media_type)
+            .unwrap_or(false)
+        {
+            let json_payload = value.to_string();
+            pairs.push(format!(
+                "{}={}",
+                encode_form_component(name, allow_reserved),
+                encode_form_component(&json_payload, allow_reserved)
+            ));
+            continue;
+        }
 
         pairs.extend(serialize_form_param(
             name,
@@ -625,6 +983,62 @@ fn select_response_for_status(
     map.get("default")
 }
 
+fn schema_draft_from_uri(uri: &str) -> Option<Draft> {
+    let normalized = uri.trim_end_matches('#');
+    match normalized {
+        "https://spec.openapis.org/oas/3.1/dialect/base" => Some(Draft::Draft202012),
+        "https://json-schema.org/draft/2020-12/schema" => Some(Draft::Draft202012),
+        "https://json-schema.org/draft/2019-09/schema" => Some(Draft::Draft201909),
+        "http://json-schema.org/draft-07/schema" => Some(Draft::Draft7),
+        "http://json-schema.org/draft-04/schema" => Some(Draft::Draft4),
+        _ => None,
+    }
+}
+
+fn resolve_schema_draft(
+    schema: &serde_json::Value,
+    openapi: &serde_json::Value,
+) -> Option<Draft> {
+    if let Some(uri) = schema.get("$schema").and_then(|v| v.as_str()) {
+        if let Some(draft) = schema_draft_from_uri(uri) {
+            return Some(draft);
+        }
+    }
+
+    if let Some(uri) = openapi.get("jsonSchemaDialect").and_then(|v| v.as_str()) {
+        if let Some(draft) = schema_draft_from_uri(uri) {
+            return Some(draft);
+        }
+    }
+
+    if let Some(version) = openapi.get("openapi").and_then(|v| v.as_str()) {
+        if version.starts_with("3.1") || version.starts_with("3.2") {
+            return Some(Draft::Draft202012);
+        }
+        if version.starts_with("3.0") {
+            return Some(Draft::Draft4);
+        }
+    }
+
+    if openapi.get("swagger").and_then(|v| v.as_str()).is_some() {
+        return Some(Draft::Draft4);
+    }
+
+    None
+}
+
+fn compile_schema(
+    schema: &serde_json::Value,
+    openapi: &serde_json::Value,
+) -> Result<JSONSchema, jsonschema::CompilationError> {
+    let opts = if let Some(draft) = resolve_schema_draft(schema, openapi) {
+        JSONSchema::options().with_draft(draft)
+    } else {
+        JSONSchema::options()
+    };
+    opts.compile(schema)
+}
+
 fn resolve_response_ref(resp_def: &serde_json::Value, openapi: &serde_json::Value) -> serde_json::Value {
     let Some(ref_str) = resp_def.get("$ref").and_then(|v| v.as_str()) else {
         return resp_def.clone();
@@ -687,6 +1101,243 @@ fn resolve_header_ref(header_def: &serde_json::Value, openapi: &serde_json::Valu
     merged
 }
 
+fn header_values(headers: &actix_web::http::HeaderMap, name: &str) -> Vec<String> {
+    headers
+        .get_all(name)
+        .iter()
+        .filter_map(|value| value.to_str().ok().map(|s| s.to_string()))
+        .collect()
+}
+
+fn extract_header_meta(
+    resolved: &serde_json::Value,
+) -> Option<(serde_json::Value, bool, bool)> {
+    if let Some(schema) = resolved.get("schema") {
+        let explode = resolved
+            .get("explode")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        return Some((schema.clone(), false, explode));
+    }
+
+    let content = resolved.get("content").and_then(|c| c.as_object())?;
+    let (_, media_def) = select_media_type(content)?;
+    let schema = media_def.get("schema")?.clone();
+    Some((schema, true, false))
+}
+
+fn split_header_parts(input: &str) -> Vec<String> {
+    input
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn schema_type_hint(schema: &serde_json::Value) -> Option<String> {
+    match schema.get("type") {
+        Some(serde_json::Value::String(s)) => Some(s.clone()),
+        Some(serde_json::Value::Array(arr)) => arr
+            .iter()
+            .filter_map(|v| v.as_str())
+            .find(|s| *s != "null")
+            .map(|s| s.to_string()),
+        _ => None,
+    }
+}
+
+fn parse_bool_header(value: &str) -> Option<bool> {
+    match value.to_ascii_lowercase().as_str() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
+}
+
+fn validate_header_value(name: &str, schema: &serde_json::Value, value: &str) {
+    if schema.as_bool() == Some(false) {
+        panic!("Response header '{}' is not allowed by schema: false", name);
+    }
+
+    if let Some(enum_vals) = schema.get("enum").and_then(|v| v.as_array()) {
+        let allowed: Vec<String> = enum_vals
+            .iter()
+            .map(|v| {
+                if let Some(s) = v.as_str() {
+                    s.to_string()
+                } else {
+                    v.to_string()
+                }
+            })
+            .collect();
+        if !allowed.iter().any(|v| v == value) {
+            panic!(
+                "Response header '{}' value '{}' not in enum {:?}",
+                name, value, allowed
+            );
+        }
+        return;
+    }
+
+    let Some(kind) = schema_type_hint(schema) else {
+        return;
+    };
+
+    match kind.as_str() {
+        "integer" => {
+            if value.parse::<i64>().is_err() {
+                panic!(
+                    "Response header '{}' should be integer, got '{}'",
+                    name, value
+                );
+            }
+        }
+        "number" => {
+            if value.parse::<f64>().is_err() {
+                panic!(
+                    "Response header '{}' should be number, got '{}'",
+                    name, value
+                );
+            }
+        }
+        "boolean" => {
+            if parse_bool_header(value).is_none() {
+                panic!(
+                    "Response header '{}' should be boolean, got '{}'",
+                    name, value
+                );
+            }
+        }
+        "string" => {}
+        _ => {}
+    }
+}
+
+fn validate_header_values(
+    name: &str,
+    schema: &serde_json::Value,
+    values: &[String],
+    explode: bool,
+    is_content: bool,
+) {
+    if schema.as_bool() == Some(false) {
+        panic!("Response header '{}' is not allowed by schema: false", name);
+    }
+
+    if values.is_empty() {
+        return;
+    }
+
+    if name.eq_ignore_ascii_case("set-cookie") {
+        validate_set_cookie_values(name, schema, values);
+        return;
+    }
+
+    let kind = schema_type_hint(schema);
+    if !is_content {
+        if let Some(kind) = kind.as_deref() {
+            let joined = values.join(",");
+            if kind == "array" {
+                let items_schema = schema.get("items").unwrap_or(schema);
+                for part in split_header_parts(&joined) {
+                    validate_header_value(name, items_schema, &part);
+                }
+                return;
+            }
+            if kind == "object" {
+                let props = schema.get("properties").and_then(|v| v.as_object());
+                let additional = schema.get("additionalProperties");
+                if explode {
+                    for pair in split_header_parts(&joined) {
+                        if let Some((k, v)) = pair.split_once('=') {
+                            if let Some(prop_schema) = props.and_then(|p| p.get(k)) {
+                                validate_header_value(name, prop_schema, v);
+                            } else if let Some(additional) = additional {
+                                if additional == &serde_json::Value::Bool(false) {
+                                    panic!(
+                                        "Response header '{}' contains unknown field '{}'",
+                                        name, k
+                                    );
+                                }
+                                validate_header_value(name, additional, v);
+                            }
+                        }
+                    }
+                } else {
+                    let parts = split_header_parts(&joined);
+                    if parts.len() % 2 != 0 {
+                        panic!(
+                            "Response header '{}' object serialization is malformed",
+                            name
+                        );
+                    }
+                    for chunk in parts.chunks(2) {
+                        let key = &chunk[0];
+                        let val = &chunk[1];
+                        if let Some(prop_schema) = props.and_then(|p| p.get(key)) {
+                            validate_header_value(name, prop_schema, val);
+                        } else if let Some(additional) = additional {
+                            if additional == &serde_json::Value::Bool(false) {
+                                panic!(
+                                    "Response header '{}' contains unknown field '{}'",
+                                    name, key
+                                );
+                            }
+                            validate_header_value(name, additional, val);
+                        }
+                    }
+                }
+                return;
+            }
+        }
+    }
+
+    for value in values {
+        validate_header_value(name, schema, value);
+    }
+}
+
+fn validate_set_cookie_values(name: &str, schema: &serde_json::Value, values: &[String]) {
+    let kind = schema_type_hint(schema);
+    match kind.as_deref() {
+        Some("array") => {
+            let items_schema = schema.get("items").unwrap_or(schema);
+            for value in values {
+                validate_header_value(name, items_schema, value);
+            }
+        }
+        Some("object") => {
+            let props = schema.get("properties").and_then(|v| v.as_object());
+            let additional = schema.get("additionalProperties");
+            for value in values {
+                let Some((k, v)) = value.split_once('=') else {
+                    panic!(
+                        "Response header '{}' Set-Cookie value '{}' is malformed",
+                        name, value
+                    );
+                };
+                let key = k.trim();
+                if let Some(prop_schema) = props.and_then(|p| p.get(key)) {
+                    validate_header_value(name, prop_schema, v);
+                } else if let Some(additional) = additional {
+                    if additional == &serde_json::Value::Bool(false) {
+                        panic!(
+                            "Response header '{}' contains unknown field '{}'",
+                            name, key
+                        );
+                    }
+                    validate_header_value(name, additional, v);
+                }
+            }
+        }
+        _ => {
+            for value in values {
+                validate_header_value(name, schema, value);
+            }
+        }
+    }
+}
+
 fn validate_required_headers(
     resp_def: &serde_json::Value,
     headers: &actix_web::http::HeaderMap,
@@ -705,8 +1356,14 @@ fn validate_required_headers(
             .get("required")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        if required && headers.get(name).is_none() {
+        let values = header_values(headers, name);
+        if required && values.is_empty() {
             panic!("Required response header '{}' is missing", name);
+        }
+        if let Some((schema, is_content, explode)) = extract_header_meta(&resolved) {
+            if !values.is_empty() {
+                validate_header_values(name, &schema, &values, explode, is_content);
+            }
         }
     }
 }
@@ -810,6 +1467,12 @@ async fn validate_response(resp: actix_web::dev::ServiceResponse, method: &str, 
     if let Some(op) = operation {
         let responses = op.get("responses");
         let response = responses.and_then(|r| select_response_for_status(r, status_code));
+        if response.is_none() {
+            panic!(
+                "Response status {} not documented for {} {}",
+                status_code, method, path_template
+            );
+        }
         if let Some(resp_def) = response {
             let resp_def = resolve_response_ref(resp_def, &openapi);
             validate_required_headers(&resp_def, &headers, &openapi);
@@ -817,7 +1480,7 @@ async fn validate_response(resp: actix_web::dev::ServiceResponse, method: &str, 
 
             if let Some(schema) = schema_swagger2 {
                 let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap_or(serde_json::Value::Null);
-                match JSONSchema::options().compile(schema) {
+                match compile_schema(schema, &openapi) {
                     Ok(validator) => {
                         if let Err(errors) = validator.validate(&body_json) {
                             let err_msgs: Vec<String> = errors.map(|e| e.to_string()).collect();
@@ -869,7 +1532,7 @@ async fn validate_response(resp: actix_web::dev::ServiceResponse, method: &str, 
                             return;
                         };
 
-                        match JSONSchema::options().compile(&schema) {
+                        match compile_schema(&schema, &openapi) {
                             Ok(validator) => {
                                 if let Err(errors) = validator.validate(&body_json) {
                                     let err_msgs: Vec<String> = errors.map(|e| e.to_string()).collect();
@@ -891,14 +1554,13 @@ async fn validate_response(resp: actix_web::dev::ServiceResponse, method: &str, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     use std::collections::HashMap;
 
     #[test]
     fn test_imports_and_signature() {
         let imports = test_imports();
         assert!(imports.contains("use actix_web::{test, App, web};"));
-        assert!(imports.contains("use jsonschema::JSONSchema;"));
+        assert!(imports.contains("use jsonschema::{Draft, JSONSchema};"));
 
         let sig = test_fn_signature("test_ping");
         assert!(sig.contains("#[actix_web::test]"));
@@ -983,10 +1645,156 @@ mod tests {
             encoding: None,
             prefix_encoding: None,
             item_encoding: None,
-            example: Some(serde_json::json!({"hello": "world"})),
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!({
+                "hello": "world"
+            }))),
         });
         assert!(body.contains("from_str::<serde_json::Value>"));
         assert!(body.contains("hello"));
+    }
+
+    #[test]
+    fn test_body_setup_uses_serialized_example() {
+        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+            ty: "Payload".into(),
+            description: None,
+            media_type: "application/json".into(),
+            format: crate::oas::BodyFormat::Json,
+            required: true,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: None,
+            example: Some(crate::oas::ExampleValue::serialized(serde_json::json!(
+                "{\"ok\":true}"
+            ))),
+        });
+        assert!(body.contains("set_payload"));
+        assert!(body.contains("{\\\"ok\\\":true}"));
+    }
+
+    #[test]
+    fn test_multipart_body_setup_uses_serialized_example() {
+        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+            ty: "Upload".into(),
+            description: None,
+            media_type: "multipart/form-data".into(),
+            format: crate::oas::BodyFormat::Multipart,
+            required: true,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: None,
+            example: Some(crate::oas::ExampleValue::serialized(serde_json::json!(
+                "--boundary\r\nContent-Disposition: form-data; name=\"field\"\r\n\r\nvalue\r\n--boundary--"
+            ))),
+        });
+        assert!(body.contains("Content-Type"));
+        assert!(body.contains("set_payload"));
+        assert!(body.contains("--boundary"));
+    }
+
+    #[test]
+    fn test_multipart_body_setup_builds_named_parts() {
+        let mut enc = std::collections::HashMap::new();
+        enc.insert(
+            "file".to_string(),
+            crate::oas::models::EncodingInfo {
+                content_type: Some("image/png".to_string()),
+                headers: std::collections::HashMap::new(),
+                style: None,
+                explode: None,
+                allow_reserved: None,
+                encoding: None,
+                prefix_encoding: None,
+                item_encoding: None,
+            },
+        );
+        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+            ty: "Upload".into(),
+            description: None,
+            media_type: "multipart/form-data".into(),
+            format: crate::oas::BodyFormat::Multipart,
+            required: true,
+            encoding: Some(enc),
+            prefix_encoding: None,
+            item_encoding: None,
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!({
+                "file": "pngbytes",
+                "meta": { "id": 1 }
+            }))),
+        });
+        assert!(body.contains("Content-Disposition: form-data; name=\\\"file\\\""));
+        assert!(body.contains("Content-Type: image/png"));
+        assert!(body.contains("Content-Disposition: form-data; name=\\\"meta\\\""));
+        assert!(body.contains("Content-Type: application/json"));
+        assert!(body.contains("\\\"id\\\":1"));
+    }
+
+    #[test]
+    fn test_multipart_body_setup_includes_encoding_headers() {
+        let mut headers = std::collections::HashMap::new();
+        headers.insert("X-Trace-Id".to_string(), "Uuid".to_string());
+        headers.insert("Content-Type".to_string(), "String".to_string());
+        let mut enc = std::collections::HashMap::new();
+        enc.insert(
+            "file".to_string(),
+            crate::oas::models::EncodingInfo {
+                content_type: Some("image/png".to_string()),
+                headers,
+                style: None,
+                explode: None,
+                allow_reserved: None,
+                encoding: None,
+                prefix_encoding: None,
+                item_encoding: None,
+            },
+        );
+        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+            ty: "Upload".into(),
+            description: None,
+            media_type: "multipart/form-data".into(),
+            format: crate::oas::BodyFormat::Multipart,
+            required: true,
+            encoding: Some(enc),
+            prefix_encoding: None,
+            item_encoding: None,
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!({
+                "file": "pngbytes"
+            }))),
+        });
+        assert!(body.contains("X-Trace-Id"));
+        assert_eq!(body.matches("Content-Type: image/png").count(), 1);
+    }
+
+    #[test]
+    fn test_multipart_body_setup_default_payload() {
+        let mut enc = std::collections::HashMap::new();
+        enc.insert(
+            "file".to_string(),
+            crate::oas::models::EncodingInfo {
+                content_type: Some("image/png".to_string()),
+                headers: std::collections::HashMap::new(),
+                style: None,
+                explode: None,
+                allow_reserved: None,
+                encoding: None,
+                prefix_encoding: None,
+                item_encoding: None,
+            },
+        );
+        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+            ty: "Upload".into(),
+            description: None,
+            media_type: "multipart/form-data".into(),
+            format: crate::oas::BodyFormat::Multipart,
+            required: true,
+            encoding: Some(enc),
+            prefix_encoding: None,
+            item_encoding: None,
+            example: None,
+        });
+        assert!(body.contains("multipart/form-data"));
+        assert!(body.contains("Content-Disposition: form-data; name=\\\"file\\\""));
+        assert!(body.contains("Content-Type: image/png"));
     }
 
     #[test]
@@ -1000,11 +1808,94 @@ mod tests {
             encoding: None,
             prefix_encoding: None,
             item_encoding: None,
-            example: Some(serde_json::json!({"foo": "a + b", "bar": true})),
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!({
+                "foo": "a + b",
+                "bar": true
+            }))),
         });
         assert!(body.contains("Content-Type"));
         assert!(body.contains("foo=a+%2B+b"));
         assert!(body.contains("bar=true"));
+    }
+
+    #[test]
+    fn test_form_body_setup_urlencoded_default_payload() {
+        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+            ty: "Form".into(),
+            description: None,
+            media_type: "application/x-www-form-urlencoded".into(),
+            format: crate::oas::BodyFormat::Form,
+            required: true,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: None,
+            example: None,
+        });
+        assert!(body.contains("Content-Type"));
+        assert!(body.contains("set_payload"));
+        assert!(body.contains("dummy=value"));
+    }
+
+    #[test]
+    fn test_form_body_setup_urlencoded_default_payload_uses_encoding() {
+        let mut encoding = HashMap::new();
+        encoding.insert(
+            "payload".into(),
+            EncodingInfo {
+                content_type: Some("application/json".to_string()),
+                headers: HashMap::new(),
+                style: Some(ParamStyle::Form),
+                explode: Some(true),
+                allow_reserved: Some(false),
+                encoding: None,
+                prefix_encoding: None,
+                item_encoding: None,
+            },
+        );
+        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+            ty: "Form".into(),
+            description: None,
+            media_type: "application/x-www-form-urlencoded".into(),
+            format: crate::oas::BodyFormat::Form,
+            required: true,
+            encoding: Some(encoding),
+            prefix_encoding: None,
+            item_encoding: None,
+            example: None,
+        });
+        assert!(body.contains("payload=%7B%22dummy%22%3A%22value%22%7D"));
+    }
+
+    #[test]
+    fn test_form_body_setup_urlencoded_json_content_type() {
+        let mut encoding = HashMap::new();
+        encoding.insert(
+            "payload".into(),
+            EncodingInfo {
+                content_type: Some("application/json".to_string()),
+                headers: HashMap::new(),
+                style: Some(ParamStyle::Form),
+                explode: Some(true),
+                allow_reserved: Some(false),
+                encoding: None,
+                prefix_encoding: None,
+                item_encoding: None,
+            },
+        );
+        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+            ty: "Form".into(),
+            description: None,
+            media_type: "application/x-www-form-urlencoded".into(),
+            format: crate::oas::BodyFormat::Form,
+            required: true,
+            encoding: Some(encoding),
+            prefix_encoding: None,
+            item_encoding: None,
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!({
+                "payload": { "a": 1, "b": "x" }
+            }))),
+        });
+        assert!(body.contains("payload=%7B%22a%22%3A1%2C%22b%22%3A%22x%22%7D"));
     }
 
     #[test]
@@ -1018,6 +1909,9 @@ mod tests {
                 style: Some(ParamStyle::Form),
                 explode: Some(true),
                 allow_reserved: Some(true),
+                encoding: None,
+                prefix_encoding: None,
+                item_encoding: None,
             },
         );
         let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
@@ -1029,30 +1923,11 @@ mod tests {
             encoding: Some(encoding),
             prefix_encoding: None,
             item_encoding: None,
-            example: Some(serde_json::json!({"path": "a/b"})),
+            example: Some(crate::oas::ExampleValue::data(serde_json::json!({
+                "path": "a/b"
+            }))),
         });
         assert!(body.contains("path=a/b"));
-    }
-
-    #[test]
-    fn test_resolve_header_ref_overrides_description() {
-        let openapi = json!({
-            "components": {
-                "headers": {
-                    "Rate": {
-                        "description": "base",
-                        "schema": { "type": "string" }
-                    }
-                }
-            }
-        });
-        let header_def = json!({
-            "$ref": "#/components/headers/Rate",
-            "description": "override"
-        });
-
-        let resolved = resolve_header_ref(&header_def, &openapi);
-        assert_eq!(resolved["description"], "override");
     }
 
     #[test]
@@ -1062,19 +1937,24 @@ mod tests {
 
         let assertion = test_assertion();
         assert!(assertion.contains("StatusCode::NOT_FOUND"));
-    }
 
-    #[test]
-    fn test_validation_helper_snippet() {
         let helper = test_validation_helper();
         assert!(helper.contains("validate_response"));
-        assert!(helper.contains("JSONSchema::options().compile"));
+        assert!(helper.contains("compile_schema"));
+        assert!(helper.contains("resolve_schema_draft"));
         assert!(helper.contains("parse_sequential_json"));
         assert!(helper.contains("parse_event_stream"));
         assert!(helper.contains("select_media_type"));
         assert!(helper.contains("select_media_type_for_response"));
         assert!(helper.contains("select_response_for_status"));
         assert!(helper.contains("validate_required_headers"));
+        assert!(helper.contains("extract_header_meta"));
+        assert!(helper.contains("split_header_parts"));
+        assert!(helper.contains("validate_header_value"));
+        assert!(helper.contains("validate_header_values"));
+        assert!(helper.contains("validate_set_cookie_values"));
+        assert!(helper.contains("set-cookie"));
+        assert!(helper.contains("schema_type_hint"));
         assert!(helper.contains("resolve_response_ref"));
     }
 }

@@ -11,6 +11,7 @@
 //! - Map string `enum` schemas to Rust enums.
 //! - Resolve `Ref` pointers within the schema scope.
 //! - **NEW**: Respects `$self` for base URI resolution (OAS 3.2 Appendix F).
+//! - **NEW**: Supports schema-root documents without an OpenAPI wrapper.
 //! - Propagate schema- and property-level `externalDocs` metadata.
 
 pub mod enums;
@@ -18,16 +19,24 @@ pub mod refs;
 pub mod structs;
 
 use crate::error::{AppError, AppResult};
+use crate::oas::normalization::{
+    normalize_boolean_schemas, normalize_const_schemas, normalize_nullable_schemas,
+};
+use crate::oas::registry::DocumentRegistry;
 use crate::oas::routes::shims::{ShimExternalDocs, ShimOpenApi};
 use crate::oas::schemas::enums::parse_variants;
-use crate::oas::schemas::refs::{resolve_ref_local, resolve_ref_name, ResolutionContext};
+use crate::oas::schemas::refs::{
+    collect_inline_schema_index, collect_schema_anchors, collect_schema_ids, compute_base_uri,
+    contains_dynamic_ref, resolve_dynamic_refs_for_component, resolve_dynamic_refs_in_schema_root,
+    resolve_ref_local, resolve_ref_name, ResolutionContext,
+};
 use crate::oas::schemas::structs::flatten_schema_fields;
 use crate::oas::validation::validate_component_keys;
 use crate::parser::{ParsedEnum, ParsedExternalDocs, ParsedModel, ParsedStruct, ParsedVariant};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use utoipa::openapi::schema::{AdditionalProperties, Schema, SchemaType, Type};
-use utoipa::openapi::{Deprecated, OpenApi, RefOr};
+use utoipa::openapi::{Components, Deprecated, OpenApi, RefOr};
 
 /// Parses a raw OpenAPI YAML string and extracts definitions.
 ///
@@ -37,34 +46,71 @@ use utoipa::openapi::{Deprecated, OpenApi, RefOr};
 /// Extracts `$self` from the root via `ShimOpenApi` to establish the document's Base URI
 /// for reference resolution as per OAS 3.2.0 Appendix F.
 pub fn parse_openapi_spec(yaml_content: &str) -> AppResult<Vec<ParsedModel>> {
-    // 1. Pre-parse to get standard fields like $self (Shim)
+    parse_openapi_spec_with_registry(yaml_content, None, None)
+}
+
+/// Parses an OpenAPI YAML string and extracts definitions, allowing external reference resolution.
+pub fn parse_openapi_spec_with_registry(
+    yaml_content: &str,
+    registry: Option<&DocumentRegistry>,
+    retrieval_uri: Option<&str>,
+) -> AppResult<Vec<ParsedModel>> {
+    // 1. Parse raw YAML/JSON to detect OpenAPI wrapper vs schema-root documents.
+    let mut json_val: serde_json::Value = serde_yaml::from_str(yaml_content)
+        .map_err(|e| AppError::General(format!("Failed to parse YAML container: {}", e)))?;
+    let has_openapi = json_val.get("openapi").is_some() || json_val.get("swagger").is_some();
+    if !has_openapi {
+        normalize_nullable_schemas(&mut json_val);
+        normalize_boolean_schemas(&mut json_val);
+        normalize_const_schemas(&mut json_val);
+        return parse_schema_root_document(&json_val);
+    }
+
+    // 2. Pre-parse to get standard fields like $self (Shim)
     let shim: ShimOpenApi = serde_yaml::from_str(yaml_content)
         .map_err(|e| AppError::General(format!("Failed to parse OpenAPI Shim: {}", e)))?;
     if let Some(components) = shim.components.as_ref() {
         validate_component_keys(components)?;
     }
 
-    // 2. Parse using full AST (Utoipa) for schema traversal.
+    // 3. Parse using full AST (Utoipa) for schema traversal.
     // Compatibility Hack: Utoipa 5.x tightly validates the "openapi" version string.
     // If it is "3.2.0", Utoipa will panic or error.
     // We parse it into generic Value, downgrade version string to "3.1.0" for AST parsing,
     // then pass it to Utoipa.
-    let mut json_val: serde_json::Value = serde_yaml::from_str(yaml_content)
-        .map_err(|e| AppError::General(format!("Failed to parse YAML container: {}", e)))?;
+    normalize_nullable_schemas(&mut json_val);
+    normalize_boolean_schemas(&mut json_val);
+    if let Some(schema_map) = json_val
+        .get_mut("components")
+        .and_then(|c| c.get_mut("schemas"))
+        .and_then(|s| s.as_object_mut())
+    {
+        for schema in schema_map.values_mut() {
+            normalize_const_schemas(schema);
+        }
+    }
 
     let raw_schemas = json_val
         .get("components")
         .and_then(|c| c.get("schemas"))
-        .and_then(|s| s.as_object());
-    let (schema_docs, field_docs) = collect_schema_external_docs(raw_schemas);
-    let discriminator_defaults = collect_discriminator_defaults(raw_schemas);
+        .and_then(|s| s.as_object())
+        .cloned();
+    let (schema_docs, field_docs) = collect_schema_external_docs(raw_schemas.as_ref());
+    let discriminator_defaults = collect_discriminator_defaults(raw_schemas.as_ref());
+    let has_dynamic_ref = raw_schemas
+        .as_ref()
+        .map(|schemas| schemas.values().any(contains_dynamic_ref))
+        .unwrap_or(false);
 
     if let Some(ver) = json_val.get_mut("openapi") {
-        if ver.as_str() == Some("3.2.0") {
-            *ver = serde_json::json!("3.1.0");
+        if let Some(raw) = ver.as_str() {
+            if raw.starts_with("3.") && !raw.starts_with("3.1") {
+                *ver = serde_json::json!("3.1.0");
+            }
         }
     }
 
+    let inline_source = json_val.clone();
     let openapi: OpenApi = serde_json::from_value(json_val)
         .map_err(|e| AppError::General(format!("Failed to parse OpenAPI AST: {}", e)))?;
 
@@ -73,156 +119,491 @@ pub fn parse_openapi_spec(yaml_content: &str) -> AppResult<Vec<ParsedModel>> {
         .as_ref()
         .ok_or_else(|| AppError::General("No components found in OpenAPI spec".into()))?;
 
-    // 3. Initialize Resolution Context with Base URI ($self) from original Shim
+    // 4. Initialize Resolution Context with Base URI ($self) from original Shim
     // If $self defined in Shim, use it as Base URI.
-    let ctx = ResolutionContext::new(shim.self_uri, components);
+    let base_uri_str = match (retrieval_uri, shim.self_uri.as_deref()) {
+        (Some(retrieval), Some(self_val)) => Some(compute_base_uri(retrieval, Some(self_val))),
+        (Some(retrieval), None) => Some(retrieval.to_string()),
+        (None, Some(self_val)) => Some(self_val.to_string()),
+        (None, None) => None,
+    };
+    let mut ctx = ResolutionContext::with_registry(base_uri_str, components, registry);
+    ctx.schema_ids = collect_schema_ids(raw_schemas.as_ref(), ctx.base_uri.as_ref());
+    ctx.schema_anchors = collect_schema_anchors(raw_schemas.as_ref(), ctx.base_uri.as_ref());
+    let inline_index = collect_inline_schema_index(&inline_source, ctx.base_uri.as_ref(), true);
+    ctx.inline_schema_ids = inline_index.ids;
+    ctx.inline_schema_anchors = inline_index.anchors;
 
     let mut models = Vec::new();
 
     {
-        for (name, ref_or_schema) in &components.schemas {
-            // Resolve local ref if usually top-level
-            let schema = resolve_ref_local(ref_or_schema, &ctx);
+        let mut handle_schema = |schema_name: &str,
+                                 schema: &Schema,
+                                 ctx_ref: &ResolutionContext<'_>|
+         -> AppResult<()> {
+            match schema {
+                // Case 1: Simple Object or AllOf (Merged Struct)
+                Schema::Object(obj) => {
+                    if let Some(variants) = extract_string_enum_variants(obj) {
+                        models.push(ParsedModel::Enum(ParsedEnum {
+                            name: schema_name.to_string(),
+                            description: obj.description.clone(),
+                            rename: None,
+                            rename_all: None,
+                            tag: None,
+                            untagged: false,
+                            variants,
+                            is_deprecated: matches!(obj.deprecated, Some(Deprecated::True)),
+                            external_docs: schema_docs.get(schema_name).cloned(),
+                            discriminator_mapping: None,
+                            discriminator_default_mapping: None,
+                        }));
+                        return Ok(());
+                    }
 
-            if let Some(s) = schema {
-                match s {
-                    // Case 1: Simple Object or AllOf (Merged Struct)
-                    Schema::Object(obj) => {
-                        if let Some(variants) = extract_string_enum_variants(obj) {
+                    // Pass Context to flattener
+                    let mut parsed_fields = flatten_schema_fields(schema, ctx_ref)?;
+                    apply_field_external_docs(&mut parsed_fields, field_docs.get(schema_name));
+
+                    // Extract description and metadata if present on the top level
+                    // Note: utoipa::openapi::Object missing external_docs access
+                    let (description, deprecated) = (
+                        obj.description.clone(),
+                        matches!(obj.deprecated, Some(Deprecated::True)),
+                    );
+
+                    let deny_unknown_fields = schema_denies_unknown_fields(schema, ctx_ref);
+                    models.push(ParsedModel::Struct(ParsedStruct {
+                        name: schema_name.to_string(),
+                        description,
+                        rename: None,
+                        rename_all: None,
+                        fields: parsed_fields,
+                        is_deprecated: deprecated,
+                        deny_unknown_fields,
+                        external_docs: schema_docs.get(schema_name).cloned(),
+                    }));
+                }
+                Schema::AllOf(_) => {
+                    // Pass Context to flattener
+                    let mut parsed_fields = flatten_schema_fields(schema, ctx_ref)?;
+                    apply_field_external_docs(&mut parsed_fields, field_docs.get(schema_name));
+
+                    // Extract description and metadata if present on the top level
+                    // Note: utoipa::openapi::Object missing external_docs access
+                    let (description, deprecated) = match schema {
+                        Schema::AllOf(a) => (a.description.clone(), false),
+                        _ => (None, false),
+                    };
+
+                    let deny_unknown_fields = schema_denies_unknown_fields(schema, ctx_ref);
+                    models.push(ParsedModel::Struct(ParsedStruct {
+                        name: schema_name.to_string(),
+                        description,
+                        rename: None,
+                        rename_all: None,
+                        fields: parsed_fields,
+                        is_deprecated: deprecated,
+                        deny_unknown_fields,
+                        external_docs: schema_docs.get(schema_name).cloned(),
+                    }));
+                }
+                // Case 2: OneOf (Enum)
+                Schema::OneOf(one_of) => {
+                    if let Some(raw_schema) = raw_schemas
+                        .as_ref()
+                        .and_then(|schemas| schemas.get(schema_name))
+                    {
+                        if let Some(variants) = extract_const_enum_variants(raw_schema) {
                             models.push(ParsedModel::Enum(ParsedEnum {
-                                name: name.clone(),
-                                description: obj.description.clone(),
+                                name: schema_name.to_string(),
+                                description: raw_schema
+                                    .get("description")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string()),
                                 rename: None,
                                 rename_all: None,
                                 tag: None,
                                 untagged: false,
                                 variants,
-                                is_deprecated: matches!(obj.deprecated, Some(Deprecated::True)),
-                                external_docs: schema_docs.get(name).cloned(),
+                                is_deprecated: false,
+                                external_docs: schema_docs.get(schema_name).cloned(),
                                 discriminator_mapping: None,
                                 discriminator_default_mapping: None,
                             }));
-                            continue;
+                            return Ok(());
                         }
+                    }
 
-                        // Pass Context to flattener
-                        let mut parsed_fields = flatten_schema_fields(s, &ctx)?;
-                        apply_field_external_docs(&mut parsed_fields, field_docs.get(name));
+                    let discriminator = one_of.discriminator.clone();
+                    let tag = discriminator.as_ref().map(|d| d.property_name.clone());
+                    // mapping is a BTreeMap, we access it directly via reference mapping
+                    let mapping = discriminator.as_ref().map(|d| &d.mapping);
+                    let is_untagged = tag.is_none();
 
-                        // Extract description and metadata if present on the top level
-                        // Note: utoipa::openapi::Object missing external_docs access
-                        let (description, deprecated) = (
-                            obj.description.clone(),
-                            matches!(obj.deprecated, Some(Deprecated::True)),
-                        );
+                    let variants = parse_variants(&one_of.items, mapping);
 
-                        let deny_unknown_fields = schema_denies_unknown_fields(s, &ctx);
-                        models.push(ParsedModel::Struct(ParsedStruct {
-                            name: name.clone(),
-                            description,
+                    // Capture formatting of mapping for documentation
+                    let mapping_cloned = mapping.cloned();
+                    let default_mapping = discriminator_defaults.get(schema_name).cloned();
+
+                    if !variants.is_empty() {
+                        models.push(ParsedModel::Enum(ParsedEnum {
+                            name: schema_name.to_string(),
+                            description: None,
                             rename: None,
                             rename_all: None,
-                            fields: parsed_fields,
-                            is_deprecated: deprecated,
-                            deny_unknown_fields,
-                            external_docs: schema_docs.get(name).cloned(),
+                            tag,
+                            untagged: is_untagged,
+                            variants,
+                            is_deprecated: false,
+                            external_docs: schema_docs.get(schema_name).cloned(),
+                            discriminator_mapping: mapping_cloned,
+                            discriminator_default_mapping: default_mapping,
                         }));
                     }
-                    Schema::AllOf(_) => {
-                        // Pass Context to flattener
-                        let mut parsed_fields = flatten_schema_fields(s, &ctx)?;
-                        apply_field_external_docs(&mut parsed_fields, field_docs.get(name));
-
-                        // Extract description and metadata if present on the top level
-                        // Note: utoipa::openapi::Object missing external_docs access
-                        let (description, deprecated) = match s {
-                            Schema::AllOf(a) => (a.description.clone(), false),
-                            _ => (None, false),
-                        };
-
-                        let deny_unknown_fields = schema_denies_unknown_fields(s, &ctx);
-                        models.push(ParsedModel::Struct(ParsedStruct {
-                            name: name.clone(),
-                            description,
-                            rename: None,
-                            rename_all: None,
-                            fields: parsed_fields,
-                            is_deprecated: deprecated,
-                            deny_unknown_fields,
-                            external_docs: schema_docs.get(name).cloned(),
-                        }));
-                    }
-                    // Case 2: OneOf (Enum)
-                    Schema::OneOf(one_of) => {
-                        let discriminator = one_of.discriminator.clone();
-                        let tag = discriminator.as_ref().map(|d| d.property_name.clone());
-                        // mapping is a BTreeMap, we access it directly via reference mapping
-                        let mapping = discriminator.as_ref().map(|d| &d.mapping);
-                        let is_untagged = tag.is_none();
-
-                        let variants = parse_variants(&one_of.items, mapping);
-
-                        // Capture formatting of mapping for documentation
-                        let mapping_cloned = mapping.cloned();
-                        let default_mapping = discriminator_defaults.get(name).cloned();
-
-                        if !variants.is_empty() {
-                            models.push(ParsedModel::Enum(ParsedEnum {
-                                name: name.clone(),
-                                description: None,
-                                rename: None,
-                                rename_all: None,
-                                tag,
-                                untagged: is_untagged,
-                                variants,
-                                is_deprecated: false,
-                                external_docs: schema_docs.get(name).cloned(),
-                                discriminator_mapping: mapping_cloned,
-                                discriminator_default_mapping: default_mapping,
-                            }));
-                        }
-                    }
-                    // Case 3: AnyOf (Enum)
-                    // Treated similarly to OneOf: untagged enum which validates "matches at least one".
-                    // In Rust serde "untagged", this creates an enum that tries variants in order.
-                    Schema::AnyOf(any_of) => {
-                        // AnyOf also supports discriminator in OAS 3.x, though less common.
-                        let discriminator = any_of.discriminator.clone();
-                        let tag = discriminator.as_ref().map(|d| d.property_name.clone());
-                        let mapping = discriminator.as_ref().map(|d| &d.mapping);
-
-                        // Default anyOf to untagged unless strict discriminator is used
-                        let is_untagged = tag.is_none();
-
-                        let variants = parse_variants(&any_of.items, mapping);
-                        let mapping_cloned = mapping.cloned();
-                        let default_mapping = discriminator_defaults.get(name).cloned();
-
-                        if !variants.is_empty() {
-                            models.push(ParsedModel::Enum(ParsedEnum {
-                                name: name.clone(),
-                                description: Some("AnyOf: Matches at least one schema".to_string()),
-                                rename: None,
-                                rename_all: None,
-                                tag,
-                                untagged: is_untagged,
-                                variants,
-                                is_deprecated: false,
-                                external_docs: schema_docs.get(name).cloned(),
-                                discriminator_mapping: mapping_cloned,
-                                discriminator_default_mapping: default_mapping,
-                            }));
-                        }
-                    }
-                    // Note: `not` schema is not currently supported by utoipa::openapi::Schema enum parsing.
-                    // If supported in future updates, we would map it to a generic Value wrapper.
-                    _ => {}
                 }
+                // Case 3: AnyOf (Enum)
+                // Treated similarly to OneOf: untagged enum which validates "matches at least one".
+                // In Rust serde "untagged", this creates an enum that tries variants in order.
+                Schema::AnyOf(any_of) => {
+                    if let Some(raw_schema) = raw_schemas
+                        .as_ref()
+                        .and_then(|schemas| schemas.get(schema_name))
+                    {
+                        if let Some(variants) = extract_const_enum_variants(raw_schema) {
+                            models.push(ParsedModel::Enum(ParsedEnum {
+                                name: schema_name.to_string(),
+                                description: raw_schema
+                                    .get("description")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string()),
+                                rename: None,
+                                rename_all: None,
+                                tag: None,
+                                untagged: false,
+                                variants,
+                                is_deprecated: false,
+                                external_docs: schema_docs.get(schema_name).cloned(),
+                                discriminator_mapping: None,
+                                discriminator_default_mapping: None,
+                            }));
+                            return Ok(());
+                        }
+                    }
+
+                    // AnyOf also supports discriminator in OAS 3.x, though less common.
+                    let discriminator = any_of.discriminator.clone();
+                    let tag = discriminator.as_ref().map(|d| d.property_name.clone());
+                    let mapping = discriminator.as_ref().map(|d| &d.mapping);
+
+                    // Default anyOf to untagged unless strict discriminator is used
+                    let is_untagged = tag.is_none();
+
+                    let variants = parse_variants(&any_of.items, mapping);
+                    let mapping_cloned = mapping.cloned();
+                    let default_mapping = discriminator_defaults.get(schema_name).cloned();
+
+                    if !variants.is_empty() {
+                        models.push(ParsedModel::Enum(ParsedEnum {
+                            name: schema_name.to_string(),
+                            description: Some("AnyOf: Matches at least one schema".to_string()),
+                            rename: None,
+                            rename_all: None,
+                            tag,
+                            untagged: is_untagged,
+                            variants,
+                            is_deprecated: false,
+                            external_docs: schema_docs.get(schema_name).cloned(),
+                            discriminator_mapping: mapping_cloned,
+                            discriminator_default_mapping: default_mapping,
+                        }));
+                    }
+                }
+                // Note: `not` schema is not currently supported by utoipa::openapi::Schema enum parsing.
+                // If supported in future updates, we would map it to a generic Value wrapper.
+                _ => {}
+            }
+            Ok(())
+        };
+
+        for (name, ref_or_schema) in &components.schemas {
+            if has_dynamic_ref {
+                if let Some(raw_map) = raw_schemas.as_ref() {
+                    let resolved_map = resolve_dynamic_refs_for_component(
+                        name,
+                        raw_map,
+                        &ctx.schema_ids,
+                        ctx.base_uri.as_ref(),
+                        shim.self_uri.as_deref(),
+                    );
+                    if !resolved_map.is_empty() {
+                        let mut comps = components.clone();
+                        apply_resolved_schemas(&mut comps, &resolved_map)?;
+                        let local_ctx = ResolutionContext {
+                            base_uri: ctx.base_uri.clone(),
+                            components: &comps,
+                            schema_ids: ctx.schema_ids.clone(),
+                            schema_anchors: ctx.schema_anchors.clone(),
+                            inline_schema_ids: ctx.inline_schema_ids.clone(),
+                            inline_schema_anchors: ctx.inline_schema_anchors.clone(),
+                            registry: ctx.registry,
+                        };
+                        if let Some(schema) = comps
+                            .schemas
+                            .get(name)
+                            .and_then(|ref_or| resolve_ref_local(ref_or, &local_ctx))
+                        {
+                            handle_schema(name, schema, &local_ctx)?;
+                        }
+                        continue;
+                    }
+                }
+            }
+
+            let schema = resolve_ref_local(ref_or_schema, &ctx);
+            if let Some(s) = schema {
+                handle_schema(name, s, &ctx)?;
             }
         }
     }
 
     Ok(models)
+}
+
+fn parse_schema_root_document(raw: &serde_json::Value) -> AppResult<Vec<ParsedModel>> {
+    let resolved_raw = if contains_dynamic_ref(raw) {
+        resolve_dynamic_refs_in_schema_root(raw, None)
+    } else {
+        raw.clone()
+    };
+
+    let name = schema_root_name(&resolved_raw);
+    let schema: Schema = serde_json::from_value(resolved_raw.clone())
+        .map_err(|e| AppError::General(format!("Failed to parse schema-root document: {}", e)))?;
+
+    let mut map = serde_json::Map::new();
+    map.insert(name.clone(), resolved_raw.clone());
+    let (schema_docs, field_docs) = collect_schema_external_docs(Some(&map));
+
+    let components = Components::new();
+    let mut ctx = ResolutionContext::new(None, &components);
+    let inline_index = collect_inline_schema_index(raw, ctx.base_uri.as_ref(), false);
+    ctx.inline_schema_ids = inline_index.ids;
+    ctx.inline_schema_anchors = inline_index.anchors;
+
+    let mut models = Vec::new();
+    match &schema {
+        Schema::Object(obj) => {
+            if let Some(variants) = extract_string_enum_variants(obj) {
+                models.push(ParsedModel::Enum(ParsedEnum {
+                    name: name.clone(),
+                    description: obj.description.clone(),
+                    rename: None,
+                    rename_all: None,
+                    tag: None,
+                    untagged: false,
+                    variants,
+                    is_deprecated: matches!(obj.deprecated, Some(Deprecated::True)),
+                    external_docs: schema_docs.get(&name).cloned(),
+                    discriminator_mapping: None,
+                    discriminator_default_mapping: None,
+                }));
+                return Ok(models);
+            }
+
+            let mut parsed_fields = flatten_schema_fields(&schema, &ctx)?;
+            apply_field_external_docs(&mut parsed_fields, field_docs.get(&name));
+
+            let deny_unknown_fields = schema_denies_unknown_fields(&schema, &ctx);
+            models.push(ParsedModel::Struct(ParsedStruct {
+                name: name.clone(),
+                description: obj.description.clone(),
+                rename: None,
+                rename_all: None,
+                fields: parsed_fields,
+                is_deprecated: matches!(obj.deprecated, Some(Deprecated::True)),
+                deny_unknown_fields,
+                external_docs: schema_docs.get(&name).cloned(),
+            }));
+        }
+        Schema::AllOf(all_of) => {
+            let mut parsed_fields = flatten_schema_fields(&schema, &ctx)?;
+            apply_field_external_docs(&mut parsed_fields, field_docs.get(&name));
+
+            let deny_unknown_fields = schema_denies_unknown_fields(&schema, &ctx);
+            models.push(ParsedModel::Struct(ParsedStruct {
+                name: name.clone(),
+                description: all_of.description.clone(),
+                rename: None,
+                rename_all: None,
+                fields: parsed_fields,
+                is_deprecated: false,
+                deny_unknown_fields,
+                external_docs: schema_docs.get(&name).cloned(),
+            }));
+        }
+        Schema::OneOf(one_of) => {
+            if let Some(variants) = extract_const_enum_variants(raw) {
+                models.push(ParsedModel::Enum(ParsedEnum {
+                    name: name.clone(),
+                    description: raw
+                        .get("description")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string()),
+                    rename: None,
+                    rename_all: None,
+                    tag: None,
+                    untagged: false,
+                    variants,
+                    is_deprecated: false,
+                    external_docs: schema_docs.get(&name).cloned(),
+                    discriminator_mapping: None,
+                    discriminator_default_mapping: None,
+                }));
+                return Ok(models);
+            }
+
+            let discriminator = one_of.discriminator.clone();
+            let tag = discriminator.as_ref().map(|d| d.property_name.clone());
+            let mapping = discriminator.as_ref().map(|d| &d.mapping);
+            let is_untagged = tag.is_none();
+            let variants = parse_variants(&one_of.items, mapping);
+
+            if !variants.is_empty() {
+                models.push(ParsedModel::Enum(ParsedEnum {
+                    name: name.clone(),
+                    description: None,
+                    rename: None,
+                    rename_all: None,
+                    tag,
+                    untagged: is_untagged,
+                    variants,
+                    is_deprecated: false,
+                    external_docs: schema_docs.get(&name).cloned(),
+                    discriminator_mapping: mapping.cloned(),
+                    discriminator_default_mapping: None,
+                }));
+            }
+        }
+        Schema::AnyOf(any_of) => {
+            let discriminator = any_of.discriminator.clone();
+            let tag = discriminator.as_ref().map(|d| d.property_name.clone());
+            let mapping = discriminator.as_ref().map(|d| &d.mapping);
+            let is_untagged = tag.is_none();
+            let variants = parse_variants(&any_of.items, mapping);
+
+            if !variants.is_empty() {
+                models.push(ParsedModel::Enum(ParsedEnum {
+                    name: name.clone(),
+                    description: None,
+                    rename: None,
+                    rename_all: None,
+                    tag,
+                    untagged: is_untagged,
+                    variants,
+                    is_deprecated: false,
+                    external_docs: schema_docs.get(&name).cloned(),
+                    discriminator_mapping: mapping.cloned(),
+                    discriminator_default_mapping: None,
+                }));
+            }
+        }
+        _ => {
+            return Err(AppError::General(format!(
+                "Schema-root document '{}' must be an object or oneOf/anyOf schema",
+                name
+            )));
+        }
+    }
+
+    Ok(models)
+}
+
+fn apply_resolved_schemas(
+    components: &mut Components,
+    resolved: &HashMap<String, Value>,
+) -> AppResult<()> {
+    for (name, value) in resolved {
+        let mut normalized = value.clone();
+        normalize_nullable_schemas(&mut normalized);
+        normalize_boolean_schemas(&mut normalized);
+        normalize_const_schemas(&mut normalized);
+        let ref_or: RefOr<Schema> = serde_json::from_value(normalized).map_err(|e| {
+            AppError::General(format!("Failed to parse resolved schema '{}': {}", name, e))
+        })?;
+        components.schemas.insert(name.clone(), ref_or);
+    }
+    Ok(())
+}
+
+fn schema_root_name(raw: &serde_json::Value) -> String {
+    if let Some(title) = raw
+        .get("title")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        return sanitize_schema_name(title);
+    }
+
+    if let Some(id) = raw
+        .get("$id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        return sanitize_schema_name(&schema_name_from_id(id));
+    }
+
+    "RootSchema".to_string()
+}
+
+fn schema_name_from_id(raw: &str) -> String {
+    let trimmed = raw.split('#').next().unwrap_or(raw).trim_end_matches('/');
+    let last = trimmed
+        .rsplit('/')
+        .next()
+        .unwrap_or(trimmed)
+        .rsplit('\\')
+        .next()
+        .unwrap_or(trimmed);
+    let stem = last.split('.').next().unwrap_or(last);
+    if stem.is_empty() {
+        "RootSchema".to_string()
+    } else {
+        stem.to_string()
+    }
+}
+
+fn sanitize_schema_name(raw: &str) -> String {
+    let mut out = String::new();
+    let mut capitalize_next = true;
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() {
+            if capitalize_next {
+                out.push(ch.to_ascii_uppercase());
+            } else {
+                out.push(ch);
+            }
+            capitalize_next = false;
+        } else {
+            capitalize_next = true;
+        }
+    }
+
+    if out.is_empty() {
+        "RootSchema".to_string()
+    } else if out
+        .chars()
+        .next()
+        .map(|c| c.is_ascii_digit())
+        .unwrap_or(false)
+    {
+        format!("Schema{}", out)
+    } else {
+        out
+    }
 }
 
 /// Collects ExternalDocs metadata from raw component schema JSON.
@@ -270,10 +651,13 @@ fn collect_schema_external_docs(
 
 fn schema_denies_unknown_fields(schema: &Schema, ctx: &ResolutionContext) -> bool {
     match schema {
-        Schema::Object(obj) => matches!(
-            obj.additional_properties,
-            Some(AdditionalProperties::FreeForm(false))
-        ),
+        Schema::Object(obj) => {
+            if let Some(props) = &obj.additional_properties {
+                matches!(**props, AdditionalProperties::FreeForm(false))
+            } else {
+                false
+            }
+        }
         Schema::AllOf(all_of) => all_of
             .items
             .iter()
@@ -376,6 +760,63 @@ fn extract_string_enum_variants(
     Some(variants)
 }
 
+fn extract_const_enum_variants(raw_schema: &Value) -> Option<Vec<ParsedVariant>> {
+    let obj = raw_schema.as_object()?;
+    let items = obj.get("oneOf").or_else(|| obj.get("anyOf"))?.as_array()?;
+
+    if items.is_empty() {
+        return None;
+    }
+
+    let mut variants = Vec::new();
+    let mut seen = HashSet::new();
+
+    for item in items {
+        let item_obj = item.as_object()?;
+        let const_val = item_obj.get("const").or_else(|| {
+            item_obj
+                .get("enum")
+                .and_then(|v| v.as_array())
+                .and_then(|vals| (vals.len() == 1).then_some(&vals[0]))
+        })?;
+        let Some(const_str) = const_val.as_str() else {
+            return None;
+        };
+
+        let base_name = item_obj
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or(const_str);
+        let base = sanitize_enum_variant(base_name);
+        let mut name = base.clone();
+        let mut suffix = 1;
+        while !seen.insert(name.clone()) {
+            suffix += 1;
+            name = format!("{}{}", base, suffix);
+        }
+
+        let description = item_obj
+            .get("description")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let deprecated = item_obj
+            .get("deprecated")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        variants.push(ParsedVariant {
+            name,
+            ty: None,
+            description,
+            rename: Some(const_str.to_string()),
+            aliases: Some(Vec::new()),
+            is_deprecated: deprecated,
+        });
+    }
+
+    Some(variants)
+}
+
 fn sanitize_enum_variant(value: &str) -> String {
     let mut out = String::new();
     let mut capitalize = true;
@@ -465,17 +906,17 @@ mod tests {
     #[test]
     fn test_parse_simple_struct() {
         let yaml = format!(
-            r#"
+            r#" 
 openapi: 3.1.0
-{}
-components:
-  schemas:
-    User:
+{} 
+components: 
+  schemas: 
+    User: 
       type: object
-      properties:
-        id:
+      properties: 
+        id: 
           type: integer
-      required: [id]
+      required: [id] 
 "#,
             HEADER_BLOCK
         );
@@ -493,26 +934,26 @@ components:
     #[test]
     fn test_flatten_all_of() {
         let yaml = format!(
-            r#"
+            r#" 
 openapi: 3.1.0
-{}
-components:
-  schemas:
-    Base:
+{} 
+components: 
+  schemas: 
+    Base: 
       type: object
-      properties:
-        id: {{ type: string, format: uuid }}
-    Extra:
+      properties: 
+        id: {{ type: string, format: uuid }} 
+    Extra: 
       type: object
-      properties:
-        info: {{ type: string }}
-    Combined:
-      allOf:
-        - $ref: '#/components/schemas/Base'
-        - $ref: '#/components/schemas/Extra'
+      properties: 
+        info: {{ type: string }} 
+    Combined: 
+      allOf: 
+        - $ref: '#/components/schemas/Base' 
+        - $ref: '#/components/schemas/Extra' 
         - type: object
-          properties:
-            local: {{ type: integer }}
+          properties: 
+            local: {{ type: integer }} 
 "#,
             HEADER_BLOCK
         );
@@ -537,22 +978,22 @@ components:
         // (with fragments) are resolved as local references.
         // It also checks that OAS 3.2.0 version string is shimmmed correctly via the parser update.
         let yaml = format!(
-            r#"
+            r#" 
 openapi: 3.2.0
 $self: https://my-api.com/v1/spec.yaml
-{}
-components:
-  schemas:
-    Local:
+{} 
+components: 
+  schemas: 
+    Local: 
       type: object
-      properties:
-        val: {{ type: integer }}
-    RemoteRef:
+      properties: 
+        val: {{ type: integer }} 
+    RemoteRef: 
       type: object
-      properties:
+      properties: 
         # This is an absolute URI matching $self, should resolve to Local
-        field:
-          $ref: 'https://my-api.com/v1/spec.yaml#/components/schemas/Local'
+        field: 
+          $ref: 'https://my-api.com/v1/spec.yaml#/components/schemas/Local' 
 "#,
             HEADER_BLOCK
         );
@@ -575,14 +1016,14 @@ components:
     #[test]
     fn test_parse_string_enum_schema() {
         let yaml = format!(
-            r#"
+            r#" 
 openapi: 3.1.0
-{}
-components:
-  schemas:
-    Status:
+{} 
+components: 
+  schemas: 
+    Status: 
       type: string
-      enum: [active, "on-hold"]
+      enum: [active, "on-hold"] 
 "#,
             HEADER_BLOCK
         );
@@ -603,25 +1044,97 @@ components:
     }
 
     #[test]
-    fn test_parse_discriminator_default_mapping() {
+    fn test_nullable_property_maps_to_option() {
+        let yaml = format!(
+            r#" 
+openapi: 3.0.0
+{} 
+components: 
+  schemas: 
+    User: 
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          x-nullable: true
+"#,
+            HEADER_BLOCK
+        );
+
+        let models = parse_openapi_spec(&yaml).unwrap();
+        let user = models
+            .iter()
+            .find(|m| m.name() == "User")
+            .expect("User schema missing");
+
+        let ParsedModel::Struct(s) = user else {
+            panic!("User should be parsed as struct");
+        };
+
+        let name_field = s.fields.iter().find(|f| f.name == "name").unwrap();
+        assert_eq!(name_field.ty, "Option<String>");
+    }
+
+    #[test]
+    fn test_parse_const_enum_oneof() {
         let yaml = format!(
             r#"
 openapi: 3.2.0
 {}
 components:
   schemas:
-    Pet:
+    ColorSpace:
       oneOf:
-        - $ref: '#/components/schemas/Cat'
-        - $ref: '#/components/schemas/Dog'
-      discriminator:
+        - const: RGB
+          title: RGB
+        - const: CMYK
+          description: Subtractive
+"#,
+            HEADER_BLOCK
+        );
+
+        let models = parse_openapi_spec(&yaml).unwrap();
+        let color_space = models
+            .iter()
+            .find(|m| m.name() == "ColorSpace")
+            .expect("ColorSpace enum missing");
+
+        let ParsedModel::Enum(en) = color_space else {
+            panic!("ColorSpace should be parsed as enum");
+        };
+
+        assert_eq!(en.variants.len(), 2);
+        assert!(en
+            .variants
+            .iter()
+            .any(|v| v.rename.as_deref() == Some("RGB")));
+        assert!(en
+            .variants
+            .iter()
+            .any(|v| v.rename.as_deref() == Some("CMYK")));
+    }
+
+    #[test]
+    fn test_parse_discriminator_default_mapping() {
+        let yaml = format!(
+            r#" 
+openapi: 3.2.0
+{} 
+components: 
+  schemas: 
+    Pet: 
+      oneOf: 
+        - $ref: '#/components/schemas/Cat' 
+        - $ref: '#/components/schemas/Dog' 
+      discriminator: 
         propertyName: petType
-        defaultMapping: '#/components/schemas/OtherPet'
-    Cat:
+        defaultMapping: '#/components/schemas/OtherPet' 
+    Cat: 
       type: object
-    Dog:
+    Dog: 
       type: object
-    OtherPet:
+    OtherPet: 
       type: object
 "#,
             HEADER_BLOCK
@@ -644,22 +1157,56 @@ components:
     }
 
     #[test]
-    fn test_schema_external_docs_propagation() {
+    fn test_external_schema_ref_with_registry() {
+        let external = r#"
+$id: https://example.com/schemas/Shared.json
+type: object
+properties:
+  name:
+    type: string
+"#;
+        let mut registry = DocumentRegistry::new();
+        registry
+            .register_schema_yaml("https://example.com/schemas/Shared.json", external)
+            .unwrap();
+
         let yaml = format!(
             r#"
-openapi: 3.1.0
+openapi: 3.2.0
 {}
 components:
   schemas:
-    User:
+    Shared:
+      $ref: https://example.com/schemas/Shared.json
+"#,
+            HEADER_BLOCK
+        );
+
+        let models = parse_openapi_spec_with_registry(&yaml, Some(&registry), None).unwrap();
+        let shared = models.iter().find(|m| m.name() == "Shared").unwrap();
+        let ParsedModel::Struct(s) = shared else {
+            panic!("Shared should be a struct")
+        };
+        assert!(s.fields.iter().any(|f| f.name == "name"));
+    }
+
+    #[test]
+    fn test_schema_external_docs_propagation() {
+        let yaml = format!(
+            r#" 
+openapi: 3.1.0
+{} 
+components: 
+  schemas: 
+    User: 
       type: object
-      externalDocs:
+      externalDocs: 
         url: https://example.com/user
         description: User docs
-      properties:
-        id:
+      properties: 
+        id: 
           type: string
-          externalDocs:
+          externalDocs: 
             url: https://example.com/user/id
             description: Id docs
 "#,
@@ -689,16 +1236,16 @@ components:
     #[test]
     fn test_additional_properties_false_sets_deny_unknown_fields() {
         let yaml = format!(
-            r#"
+            r#" 
 openapi: 3.1.0
-{}
-components:
-  schemas:
-    User:
+{} 
+components: 
+  schemas: 
+    User: 
       type: object
       additionalProperties: false
-      properties:
-        id:
+      properties: 
+        id: 
           type: string
 "#,
             HEADER_BLOCK
@@ -720,26 +1267,26 @@ components:
     #[test]
     fn test_all_of_additional_properties_false_sets_deny_unknown_fields() {
         let yaml = format!(
-            r#"
+            r#" 
 openapi: 3.1.0
-{}
-components:
-  schemas:
-    Base:
+{} 
+components: 
+  schemas: 
+    Base: 
       type: object
       additionalProperties: false
-      properties:
-        id:
+      properties: 
+        id: 
           type: string
-    Extra:
+    Extra: 
       type: object
-      properties:
-        note:
+      properties: 
+        note: 
           type: string
-    Combined:
-      allOf:
-        - $ref: '#/components/schemas/Base'
-        - $ref: '#/components/schemas/Extra'
+    Combined: 
+      allOf: 
+        - $ref: '#/components/schemas/Base' 
+        - $ref: '#/components/schemas/Extra' 
 "#,
             HEADER_BLOCK
         );
@@ -755,5 +1302,45 @@ components:
 
         assert!(s.deny_unknown_fields);
         assert!(s.fields.iter().all(|f| f.name != "additional_properties"));
+    }
+
+    #[test]
+    fn test_parse_schema_root_with_title() {
+        let yaml = r#"
+title: User
+type: object
+properties:
+  id:
+    type: integer
+"#;
+
+        let models = parse_openapi_spec(yaml).unwrap();
+        assert_eq!(models.len(), 1);
+        let ParsedModel::Struct(s) = &models[0] else {
+            panic!("Schema root should parse as struct")
+        };
+        assert_eq!(s.name, "User");
+        assert_eq!(s.fields.len(), 1);
+        assert_eq!(s.fields[0].name, "id");
+    }
+
+    #[test]
+    fn test_parse_schema_root_with_id_fallback() {
+        let yaml = r#"
+$id: https://example.com/schemas/Pet.json
+type: object
+properties:
+  name:
+    type: string
+"#;
+
+        let models = parse_openapi_spec(yaml).unwrap();
+        assert_eq!(models.len(), 1);
+        let ParsedModel::Struct(s) = &models[0] else {
+            panic!("Schema root should parse as struct")
+        };
+        assert_eq!(s.name, "Pet");
+        assert_eq!(s.fields.len(), 1);
+        assert_eq!(s.fields[0].name, "name");
     }
 }

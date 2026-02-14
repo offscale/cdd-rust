@@ -5,7 +5,10 @@
 //! Logic for generating Rust type strings that Actix uses to extract data
 //! from requests (Path, Query, Json, etc.).
 
-use crate::oas::models::{ParamSource, SecurityRequirement, SecuritySchemeKind};
+use crate::oas::models::{
+    ContentMediaType, ParamSource, SecurityRequirement, SecurityRequirementGroup,
+    SecuritySchemeKind,
+};
 use crate::strategies::actix::utils::{to_pascal_case, to_snake_case};
 
 /// Generates the type string for path parameters.
@@ -29,8 +32,17 @@ pub fn typed_query_extractor(inner_type: &str) -> String {
 }
 
 /// Generates the type string for strict Query String extraction (OAS 3.2).
-pub fn query_string_extractor(inner_type: &str) -> String {
-    format!("web::Query<{}>", inner_type)
+///
+/// For non-form media types, Actix does not provide a native extractor, so we
+/// surface the raw query string for callers to parse explicitly.
+pub fn query_string_extractor(
+    inner_type: &str,
+    content_media_type: Option<&ContentMediaType>,
+) -> String {
+    match content_media_type {
+        Some(ContentMediaType::FormUrlEncoded) | None => format!("web::Query<{}>", inner_type),
+        Some(ContentMediaType::Json) | Some(ContentMediaType::Other(_)) => "String".to_string(),
+    }
 }
 
 /// Generates the type string for header extraction.
@@ -76,12 +88,23 @@ pub fn bytes_extractor(_body_type: &str) -> String {
 }
 
 /// Generates the type string for Security extraction (Guard/ReqData).
-pub fn security_extractor(requirements: &[SecurityRequirement]) -> String {
+///
+/// If any requirement group is anonymous (`{}`), no extractor is generated.
+/// Otherwise, the first scheme in the first non-empty group is used.
+pub fn security_extractor(requirements: &[SecurityRequirementGroup]) -> String {
     if requirements.is_empty() {
         return "".to_string();
     }
 
-    let req = &requirements[0];
+    if requirements.iter().any(|group| group.is_anonymous()) {
+        return "".to_string();
+    }
+
+    let Some(group) = requirements.iter().find(|group| !group.schemes.is_empty()) else {
+        return "".to_string();
+    };
+
+    let req = &group.schemes[0];
     let base_name = to_snake_case(&req.scheme_name);
 
     // Use scheme info if available to generate strict types
@@ -113,10 +136,10 @@ pub fn security_extractor(requirements: &[SecurityRequirement]) -> String {
             },
 
             // 3. Complex Flows (OAuth2)
-            SecuritySchemeKind::OAuth2 => generate_typed_req_data(req, "OAuth2"),
+            SecuritySchemeKind::OAuth2 { .. } => generate_typed_req_data(req, "OAuth2"),
 
             // 4. Complex Flows (OIDC)
-            SecuritySchemeKind::OpenIdConnect => generate_typed_req_data(req, "Oidc"),
+            SecuritySchemeKind::OpenIdConnect { .. } => generate_typed_req_data(req, "Oidc"),
 
             // Other schemes
             _ => generate_typed_req_data(req, "Authenticated"),
@@ -170,12 +193,21 @@ fn generate_typed_req_data(req: &SecurityRequirement, type_name: &str) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::oas::models::{SecuritySchemeInfo, SecuritySchemeKind};
+    use crate::oas::models::{
+        OAuthFlow, OAuthFlows, SecurityRequirementGroup, SecuritySchemeInfo, SecuritySchemeKind,
+    };
 
     #[test]
     fn test_extractors() {
         assert_eq!(path_extractor(&["Uuid".into()]), "web::Path<Uuid>");
-        assert_eq!(query_string_extractor("Filter"), "web::Query<Filter>");
+        assert_eq!(
+            query_string_extractor("Filter", Some(&ContentMediaType::FormUrlEncoded)),
+            "web::Query<Filter>"
+        );
+        assert_eq!(
+            query_string_extractor("Filter", Some(&ContentMediaType::Json)),
+            "String"
+        );
         assert_eq!(
             typed_query_extractor("SearchQuery"),
             "web::Query<SearchQuery>"
@@ -210,9 +242,10 @@ mod tests {
                     bearer_format: Some("JWT".into()),
                 },
                 description: None,
+                deprecated: false,
             }),
         };
-        let code = security_extractor(&[req]);
+        let code = security_extractor(&[SecurityRequirementGroup { schemes: vec![req] }]);
         assert_eq!(
             code,
             "jwt_auth: actix_web_httpauth::extractors::bearer::BearerAuth"
@@ -225,11 +258,27 @@ mod tests {
             scheme_name: "oauth".to_string(),
             scopes: vec!["read:users".into(), "write:users".into()],
             scheme: Some(SecuritySchemeInfo {
-                kind: SecuritySchemeKind::OAuth2,
+                kind: SecuritySchemeKind::OAuth2 {
+                    flows: OAuthFlows {
+                        implicit: Some(OAuthFlow {
+                            authorization_url: Some("https://auth.example.com/authorize".into()),
+                            device_authorization_url: None,
+                            token_url: None,
+                            refresh_url: None,
+                            scopes: Default::default(),
+                        }),
+                        password: None,
+                        client_credentials: None,
+                        authorization_code: None,
+                        device_authorization: None,
+                    },
+                    oauth2_metadata_url: None,
+                },
                 description: None,
+                deprecated: false,
             }),
         };
-        let code = security_extractor(&[req]);
+        let code = security_extractor(&[SecurityRequirementGroup { schemes: vec![req] }]);
 
         // Expect specific OAuth2 type wrapping the scopes tuple
         assert_eq!(
@@ -244,11 +293,15 @@ mod tests {
             scheme_name: "sso".to_string(),
             scopes: vec![],
             scheme: Some(SecuritySchemeInfo {
-                kind: SecuritySchemeKind::OpenIdConnect,
+                kind: SecuritySchemeKind::OpenIdConnect {
+                    open_id_connect_url:
+                        "https://auth.example.com/.well-known/openid-configuration".to_string(),
+                },
                 description: None,
+                deprecated: false,
             }),
         };
-        let code = security_extractor(&[req]);
+        let code = security_extractor(&[SecurityRequirementGroup { schemes: vec![req] }]);
 
         assert_eq!(code, "oidc: web::ReqData<security::Oidc>");
     }
@@ -264,9 +317,16 @@ mod tests {
                     in_loc: ParamSource::Header,
                 },
                 description: None,
+                deprecated: false,
             }),
         };
-        let code = security_extractor(&[req]);
+        let code = security_extractor(&[SecurityRequirementGroup { schemes: vec![req] }]);
         assert_eq!(code, "api_key: web::ReqData<security::ApiKey>");
+    }
+
+    #[test]
+    fn test_security_extractor_optional_anonymous() {
+        let code = security_extractor(&[SecurityRequirementGroup::anonymous()]);
+        assert!(code.is_empty());
     }
 }

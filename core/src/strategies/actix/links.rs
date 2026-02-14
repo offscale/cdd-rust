@@ -23,37 +23,48 @@ pub fn generate_link_construction(link: &ParsedLink) -> (String, String) {
 
     if link.parameters.is_empty() {
         // Static link
-        code.push_str(&format!("    let {} = \"{}\";\n", var_name, uri_template));
+        code.push_str(&format!(
+            "    let {} = \"{}\";\n",
+            var_name,
+            escape_rust_string(&uri_template)
+        ));
     } else {
-        // Dynamic link formatting
-        let mut format_args = Vec::new();
-        let rust_template = uri_template.clone();
+        let mut replacements: Vec<(String, String)> = Vec::new();
 
         for (param_name, value) in &link.parameters {
             let source_var = match value {
                 LinkParamValue::Expression(expr) => resolve_runtime_expr(expr),
                 LinkParamValue::Literal(lit) => literal_to_rust_expr(lit),
             };
-
-            // If the template contains {param_name}, we can use format! args.
-            // OAS Rule: Parameters can also be passed to operation args, not just template subst.
-            if rust_template.contains(&format!("{{{}}}", param_name)) {
-                format_args.push(format!("{} = {}", param_name, source_var));
+            let template_key = normalize_link_param_key(param_name);
+            let placeholder = format!("{{{}}}", template_key);
+            if uri_template.contains(&placeholder) {
+                replacements.push((placeholder, source_var));
             }
         }
 
-        if !format_args.is_empty() {
+        if !replacements.is_empty() {
             code.push_str(&format!(
-                "    let {} = format!(\"{}\", {});\n",
+                "    let mut {} = \"{}\".to_string();\n",
                 var_name,
-                rust_template,
-                format_args.join(", ")
+                escape_rust_string(&uri_template)
             ));
+            for (placeholder, source_var) in replacements {
+                code.push_str(&format!(
+                    "    {} = {}.replace(\"{}\", &format!(\"{{}}\", {}));\n",
+                    var_name,
+                    var_name,
+                    escape_rust_string(&placeholder),
+                    source_var
+                ));
+            }
         } else {
             // Fallback: Parameters defined but not used in template (likely query params or body transfer)
             code.push_str(&format!(
                 "    let {} = \"{}\"; // Unused Params: {:?}\n",
-                var_name, uri_template, link.parameters
+                var_name,
+                escape_rust_string(&uri_template),
+                link.parameters
             ));
         }
     }
@@ -63,8 +74,18 @@ pub fn generate_link_construction(link: &ParsedLink) -> (String, String) {
 
 fn resolve_link_template(link: &ParsedLink) -> String {
     let op_ref = link
-        .operation_ref
-        .clone()
+        .resolved_operation_ref
+        .as_ref()
+        .cloned()
+        .or_else(|| {
+            link.operation_ref.as_ref().and_then(|raw| {
+                if raw.starts_with('/') || is_absolute_url(raw) {
+                    Some(raw.clone())
+                } else {
+                    None
+                }
+            })
+        })
         .unwrap_or_else(|| "/TODO/unknown-path".to_string());
 
     let Some(server_url) = link.server_url.as_ref() else {
@@ -76,6 +97,16 @@ fn resolve_link_template(link: &ParsedLink) -> String {
     }
 
     join_server_and_path(server_url, &op_ref)
+}
+
+/// Normalizes qualified link parameter keys (e.g. `path.id`) to the unqualified name (`id`).
+fn normalize_link_param_key(name: &str) -> &str {
+    for prefix in ["path.", "query.", "header.", "cookie.", "querystring."] {
+        if let Some(stripped) = name.strip_prefix(prefix) {
+            return stripped;
+        }
+    }
+    name
 }
 
 fn is_absolute_url(value: &str) -> bool {
@@ -124,8 +155,10 @@ mod tests {
             description: None,
             operation_id: None,
             operation_ref: Some("/users/1".to_string()),
+            resolved_operation_ref: None,
             parameters: HashMap::new(),
             request_body: None,
+            server: None,
             server_url: None,
         };
 
@@ -146,15 +179,18 @@ mod tests {
             description: None,
             operation_id: None,
             operation_ref: Some("/users/{id}".to_string()),
+            resolved_operation_ref: None,
             parameters: params,
             request_body: None,
+            server: None,
             server_url: None,
         };
 
         let (code, var_name) = generate_link_construction(&link);
         assert_eq!(var_name, "link_user");
-        assert!(code.contains("format!(\"/users/{id}\""));
-        assert!(code.contains("id = response_body.id"));
+        assert!(code.contains(
+            "link_user = link_user.replace(\"{id}\", &format!(\"{}\", response_body.id))"
+        ));
     }
 
     #[test]
@@ -169,8 +205,10 @@ mod tests {
             description: None,
             operation_id: None,
             operation_ref: Some("/users".to_string()),
+            resolved_operation_ref: None,
             parameters: params,
             request_body: None,
+            server: None,
             server_url: None,
         };
 
@@ -186,8 +224,10 @@ mod tests {
             description: None,
             operation_id: None,
             operation_ref: None,
+            resolved_operation_ref: None,
             parameters: HashMap::new(),
             request_body: None,
+            server: None,
             server_url: None,
         };
 
@@ -203,8 +243,10 @@ mod tests {
             description: None,
             operation_id: None,
             operation_ref: Some("/users/{id}".to_string()),
+            resolved_operation_ref: None,
             parameters: HashMap::new(),
             request_body: None,
+            server: None,
             server_url: Some("https://api.example.com/v1".to_string()),
         };
 
@@ -219,8 +261,10 @@ mod tests {
             description: None,
             operation_id: None,
             operation_ref: Some("https://other.example.com/users/{id}".to_string()),
+            resolved_operation_ref: None,
             parameters: HashMap::new(),
             request_body: None,
+            server: None,
             server_url: Some("https://api.example.com/v1".to_string()),
         };
 
@@ -242,13 +286,38 @@ mod tests {
             description: None,
             operation_id: None,
             operation_ref: Some("/users/{id}".to_string()),
+            resolved_operation_ref: None,
             parameters: params,
             request_body: Some(LinkRequestBody::Literal(serde_json::json!({"extra": true}))),
+            server: None,
             server_url: None,
         };
 
         let (code, var_name) = generate_link_construction(&link);
         assert_eq!(var_name, "link_literal");
-        assert!(code.contains("id = \"42\""));
+        assert!(code.contains("replace(\"{id}\", &format!(\"{}\", \"42\"))"));
+    }
+
+    #[test]
+    fn test_generate_dynamic_link_with_qualified_param_name() {
+        let mut params = HashMap::new();
+        params.insert(
+            "path.id".to_string(),
+            LinkParamValue::Expression(RuntimeExpression::new("$request.path.id")),
+        );
+        let link = ParsedLink {
+            name: "Qualified".to_string(),
+            description: None,
+            operation_id: None,
+            operation_ref: Some("/users/{id}".to_string()),
+            resolved_operation_ref: None,
+            parameters: params,
+            request_body: None,
+            server: None,
+            server_url: None,
+        };
+
+        let (code, _var_name) = generate_link_construction(&link);
+        assert!(code.contains("replace(\"{id}\", &format!(\"{}\", id))"));
     }
 }
