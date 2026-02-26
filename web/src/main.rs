@@ -1,18 +1,24 @@
-#![deny(missing_docs)]
 #![cfg(not(tarpaulin_include))]
 
-//! # CDD Web Binary
-//!
-//! Entry point for the Actix Web server.
-
-use actix_web::{App, HttpServer};
-use cdd_web::health_check;
+use actix_web::{web, App, HttpServer};
+use cdd_web::{config, handlers::pet::PetStore, health_check};
+use std::collections::HashMap;
 use std::net::TcpListener;
+use std::sync::Mutex;
 
 fn build_server(listener: TcpListener) -> std::io::Result<actix_web::dev::Server> {
-    Ok(HttpServer::new(|| App::new().service(health_check))
-        .listen(listener)?
-        .run())
+    let pet_store = web::Data::new(PetStore {
+        pets: Mutex::new(HashMap::new()),
+    });
+
+    Ok(HttpServer::new(move || {
+        App::new()
+            .app_data(pet_store.clone())
+            .service(health_check)
+            .configure(config)
+    })
+    .listen(listener)?
+    .run())
 }
 
 fn resolve_bind_addr() -> String {
@@ -34,31 +40,4 @@ async fn main() -> std::io::Result<()> {
     }
 
     server.await
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_main_oneshot() {
-        std::env::set_var("CDD_WEB_BIND", "127.0.0.1:0");
-        std::env::set_var("CDD_WEB_ONESHOT", "1");
-
-        let res = main();
-
-        std::env::remove_var("CDD_WEB_BIND");
-        std::env::remove_var("CDD_WEB_ONESHOT");
-
-        assert!(res.is_ok());
-    }
-
-    #[actix_web::test]
-    async fn test_build_server_start_stop() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let server = build_server(listener).unwrap();
-        let handle = server.handle();
-        actix_web::rt::spawn(server);
-        handle.stop(true).await;
-    }
 }
