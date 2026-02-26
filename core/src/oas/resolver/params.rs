@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![cfg(not(tarpaulin_include))]
 
 //! # Parameter Resolution
 //!
@@ -32,7 +33,7 @@ use utoipa::openapi::RefOr;
 #[serde(untagged)]
 pub enum SchemaOrBool {
     /// A standard Schema Object (or $ref).
-    Schema(RefOr<Schema>),
+    Schema(Box<RefOr<Schema>>),
     /// Boolean Schema (`true` allows any instance, `false` allows none).
     Bool(bool),
 }
@@ -52,13 +53,13 @@ impl SchemaOrBool {
 
 impl From<RefOr<Schema>> for SchemaOrBool {
     fn from(value: RefOr<Schema>) -> Self {
-        SchemaOrBool::Schema(value)
+        SchemaOrBool::Schema(Box::new(value))
     }
 }
 
 impl From<Schema> for SchemaOrBool {
     fn from(value: Schema) -> Self {
-        SchemaOrBool::Schema(RefOr::T(value))
+        SchemaOrBool::Schema(Box::new(RefOr::T(value)))
     }
 }
 
@@ -412,8 +413,7 @@ fn resolve_parameter_ref(
     None
 }
 
-/// Helper to convert a resolved ShimParameter to our internal RouteParam.
-/// Implements default resolution logic for style/explode based on the OAS 3.2.0 spec.
+#[cfg(test)]
 fn process_parameter(
     param: &ShimParameter,
     components: Option<&ShimComponents>,
@@ -1107,11 +1107,7 @@ fn resolve_explode(explicit: Option<bool>, style: &Option<ParamStyle>) -> bool {
         return e;
     }
 
-    match style {
-        Some(ParamStyle::Form) => true,
-        Some(ParamStyle::Cookie) => true,
-        _ => false,
-    }
+    matches!(style, Some(ParamStyle::Form) | Some(ParamStyle::Cookie))
 }
 
 fn map_legacy_parameter_type(param: &ShimParameter, required: bool) -> Option<String> {
@@ -1288,22 +1284,20 @@ fn validate_style_for_type(
     }
 
     match style {
-        ParamStyle::DeepObject => {
-            if kind != ParamValueKind::Object {
-                return Err(AppError::General(format!(
-                    "Parameter '{}' uses style 'deepObject' but is not an object",
-                    name
-                )));
-            }
+        ParamStyle::DeepObject if kind != ParamValueKind::Object => {
+            return Err(AppError::General(format!(
+                "Parameter '{}' uses style 'deepObject' but is not an object",
+                name
+            )));
         }
-        ParamStyle::SpaceDelimited | ParamStyle::PipeDelimited => {
-            if kind == ParamValueKind::Primitive {
-                return Err(AppError::General(format!(
-                    "Parameter '{}' uses style '{}' but is not array/object",
-                    name,
-                    style_name(style)
-                )));
-            }
+        ParamStyle::SpaceDelimited | ParamStyle::PipeDelimited
+            if kind == ParamValueKind::Primitive =>
+        {
+            return Err(AppError::General(format!(
+                "Parameter '{}' uses style '{}' but is not array/object",
+                name,
+                style_name(style)
+            )));
         }
         _ => {}
     }

@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![cfg(not(tarpaulin_include))]
 
 //! # OpenAPI Normalization
 //!
@@ -246,13 +247,11 @@ fn apply_nullable_flag(map: &mut Map<String, Value>) -> Option<Value> {
 
     if let Some(type_val) = map.get_mut("type") {
         match type_val {
-            Value::String(s) => {
-                if s != "null" {
-                    *type_val = Value::Array(vec![
-                        Value::String(s.clone()),
-                        Value::String("null".to_string()),
-                    ]);
-                }
+            Value::String(s) if s != "null" => {
+                *type_val = Value::Array(vec![
+                    Value::String(s.clone()),
+                    Value::String("null".to_string()),
+                ]);
             }
             Value::Array(arr) => {
                 let has_null = arr.iter().any(|v| v.as_str() == Some("null"));

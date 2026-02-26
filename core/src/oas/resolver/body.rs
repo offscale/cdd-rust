@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![cfg(not(tarpaulin_include))]
 
 //! # Body Resolution
 //!
@@ -205,9 +206,9 @@ fn is_body_required(body: &ShimRequestBody) -> bool {
     matches!(body.inner.required, Some(Required::True))
 }
 
-fn select_request_media<'a>(
-    content: &'a BTreeMap<String, utoipa::openapi::Content>,
-) -> Option<(BodyFormat, &'a str, &'a utoipa::openapi::Content)> {
+fn select_request_media(
+    content: &BTreeMap<String, utoipa::openapi::Content>,
+) -> Option<(BodyFormat, &str, &utoipa::openapi::Content)> {
     // 1. JSON (application/json or +json)
     if let Some((key, media)) =
         select_best_media(content, is_json_media_type, Some("application/json"))

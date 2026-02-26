@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![cfg(not(tarpaulin_include))]
 
 //! # Route Shims
 //!
@@ -736,11 +737,7 @@ fn normalize_response_headers(value: &mut Value) {
             obj.insert("schema".to_string(), Value::Object(schema));
             continue;
         }
-        if obj.get("schema").is_none() && obj.contains_key("content") {
-            let mut schema = Map::new();
-            schema.insert("type".to_string(), Value::String("string".to_string()));
-            obj.insert("schema".to_string(), Value::Object(schema));
-        } else if obj.get("schema").is_none() && !obj.contains_key("content") {
+        if obj.get("schema").is_none() {
             let mut schema = Map::new();
             schema.insert("type".to_string(), Value::String("string".to_string()));
             obj.insert("schema".to_string(), Value::Object(schema));

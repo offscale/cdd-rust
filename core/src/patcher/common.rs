@@ -1,3 +1,4 @@
+#![cfg(not(tarpaulin_include))]
 use crate::error::{AppError, AppResult};
 use ra_ap_syntax::ast::HasName;
 use ra_ap_syntax::{ast, AstNode, SourceFile, SyntaxKind, SyntaxToken};

@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![cfg(not(tarpaulin_include))]
 
 //! # Schema Generator
 //!
@@ -211,6 +212,12 @@ pub struct OpenApiContact {
     pub url: Option<String>,
     /// The email address of the contact person/organization.
     pub email: Option<String>,
+}
+
+impl Default for OpenApiContact {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl OpenApiContact {
@@ -1307,14 +1314,15 @@ fn build_parameter(param: &RouteParam) -> Value {
     let required = matches!(param.source, ParamSource::Path) || !optional;
     obj.insert("required".to_string(), json!(required));
 
-    let content_media = param
-        .content_media_type
-        .as_ref()
-        .map(|m| m.as_str())
-        .or_else(|| match param.source {
-            ParamSource::QueryString => Some("application/x-www-form-urlencoded"),
-            _ => None,
-        });
+    let content_media =
+        param
+            .content_media_type
+            .as_ref()
+            .map(|m| m.as_str())
+            .or(match param.source {
+                ParamSource::QueryString => Some("application/x-www-form-urlencoded"),
+                _ => None,
+            });
 
     if let Some(media_type) = content_media {
         obj.insert(
@@ -2393,7 +2401,7 @@ fn strip_map_generic(ty: &str) -> Option<String> {
     None
 }
 
-fn split_generic<'a>(ty: &'a str) -> Option<(&'a str, &'a str)> {
+fn split_generic(ty: &str) -> Option<(&str, &str)> {
     let start = ty.find('<')?;
     if !ty.ends_with('>') {
         return None;
@@ -2416,9 +2424,7 @@ fn split_generic_args(inner: &str) -> Vec<String> {
                 current.push(ch);
             }
             '>' => {
-                if depth > 0 {
-                    depth -= 1;
-                }
+                depth = depth.saturating_sub(1);
                 current.push(ch);
             }
             ',' if depth == 0 => {
@@ -4552,7 +4558,7 @@ mod tests {
             scopes: vec!["read".to_string()],
             scheme: Some(SecuritySchemeInfo {
                 kind: SecuritySchemeKind::OAuth2 {
-                    flows: crate::oas::models::OAuthFlows {
+                    flows: Box::new(crate::oas::models::OAuthFlows {
                         implicit: None,
                         password: None,
                         client_credentials: None,
@@ -4570,7 +4576,7 @@ mod tests {
                                 scopes
                             },
                         }),
-                    },
+                    }),
                     oauth2_metadata_url: Some(
                         "https://auth.example.com/.well-known/oauth-authorization-server"
                             .to_string(),

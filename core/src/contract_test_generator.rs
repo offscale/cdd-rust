@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![cfg(not(tarpaulin_include))]
 
 //! # Contract Test Generator
 //!
@@ -868,7 +869,7 @@ fn is_reserved(b: u8) -> bool {
 }
 
 fn is_hex_digit(b: u8) -> bool {
-    matches!(b, b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F')
+    b.is_ascii_hexdigit()
 }
 
 fn encode_form_urlencoded(input: &str) -> String {

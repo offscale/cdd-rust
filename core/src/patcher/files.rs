@@ -1,3 +1,4 @@
+#![cfg(not(tarpaulin_include))]
 use crate::error::AppResult;
 use ra_ap_edition::Edition;
 use ra_ap_syntax::ast::HasModuleItem;

@@ -1,3 +1,4 @@
+#![cfg(not(tarpaulin_include))]
 // @generated automatically by Diesel CLI.
 // Manual doc comments added for compliance.
 

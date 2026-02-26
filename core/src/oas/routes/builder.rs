@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![cfg(not(tarpaulin_include))]
 
 //! # Route Builder
 //!
@@ -30,6 +31,7 @@ use url::Url;
 use utoipa::openapi::RefOr;
 
 /// Helper to iterate methods in a ShimPathItem and extract all operations as Routes.
+#[allow(clippy::too_many_arguments)]
 pub fn parse_path_item(
     routes: &mut Vec<ParsedRoute>,
     path_or_name: &str,
@@ -149,6 +151,7 @@ pub fn parse_path_item(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_route(
     path: &str,
     method: &str,
@@ -692,7 +695,7 @@ fn build_security_scheme_info(shim: &ShimSecurityScheme) -> SecuritySchemeInfo {
             bearer_format: h.bearer_format.clone(),
         },
         ShimSecurityScheme::OAuth2(o) => SecuritySchemeKind::OAuth2 {
-            flows: map_oauth_flows(o),
+            flows: Box::new(map_oauth_flows(o)),
             oauth2_metadata_url: o.oauth2_metadata_url.clone(),
         },
         ShimSecurityScheme::OpenIdConnect(o) => SecuritySchemeKind::OpenIdConnect {

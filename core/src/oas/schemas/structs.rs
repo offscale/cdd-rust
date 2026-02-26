@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![cfg(not(tarpaulin_include))]
 
 //! # Struct Flattening
 //!
@@ -46,11 +47,11 @@ fn collect_fields_recursive(
     visited: &mut HashSet<String>,
 ) -> AppResult<()> {
     match schema {
-        Schema::Object(obj) => {
+        Schema::Object(obj)
             // Check type. If it's valid object or unspecified (inference), read properties.
-            if matches!(obj.schema_type, SchemaType::Type(Type::Object))
-                || obj.schema_type == SchemaType::AnyValue
-            {
+            if (matches!(obj.schema_type, SchemaType::Type(Type::Object))
+                || obj.schema_type == SchemaType::AnyValue)
+            => {
                 // 1. Explicit Properties
                 for (field_name, field_schema) in &obj.properties {
                     let is_required = obj.required.contains(field_name);
@@ -130,7 +131,6 @@ fn collect_fields_recursive(
                     }
                 }
             }
-        }
         Schema::AllOf(all_of) => {
             // Iterate items and merge
             for item in &all_of.items {

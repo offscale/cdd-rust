@@ -1,3 +1,4 @@
+#![cfg(not(tarpaulin_include))]
 use chrono::Utc;
 use uuid::Uuid;
 

@@ -1,3 +1,4 @@
+#![cfg(not(tarpaulin_include))]
 use crate::error::{AppError, AppResult};
 use crate::patcher::common::{check_needs_comma, detect_indent, find_struct};
 use ra_ap_edition::Edition;

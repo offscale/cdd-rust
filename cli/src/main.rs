@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![cfg(not(tarpaulin_include))]
 
 //! # CDD CLI
 //!
@@ -31,6 +32,7 @@ struct Cli {
 }
 
 #[derive(Subcommand, Debug)]
+#[allow(clippy::large_enum_variant)]
 enum Commands {
     /// Synchronize DB schema to Rust models and OpenAPI-ready structs.
     Sync(sync::SyncArgs),

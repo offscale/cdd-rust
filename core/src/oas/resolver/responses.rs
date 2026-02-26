@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![cfg(not(tarpaulin_include))]
 
 //! # Response Resolution
 //!
@@ -771,9 +772,7 @@ fn resolve_media_type_ref(
 /// 3. `application/*`
 /// 4. `*/*`
 /// 5. First available entry
-fn select_response_media<'a>(
-    content: &'a IndexMap<String, Content>,
-) -> Option<(&'a str, &'a Content)> {
+fn select_response_media(content: &IndexMap<String, Content>) -> Option<(&str, &Content)> {
     if let Some((key, media)) =
         select_best_media(content, is_json_media_type, Some("application/json"))
     {

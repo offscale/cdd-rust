@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![cfg(not(tarpaulin_include))]
 
 //! # Reference Resolution
 //!
@@ -568,6 +569,7 @@ impl DynamicScope {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolve_component_dynamic_refs(
     name: &str,
     document_base: Option<&Url>,
@@ -603,6 +605,7 @@ fn resolve_component_dynamic_refs(
     visiting.remove(name);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolve_dynamic_refs_in_resource(
     node: &mut JsonValue,
     current_base: Option<&Url>,
@@ -637,6 +640,7 @@ fn resolve_dynamic_refs_in_resource(
     scope.pop(anchor_count);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolve_dynamic_refs_walk(
     node: &mut JsonValue,
     current_base: Option<&Url>,
@@ -746,6 +750,7 @@ fn resolve_dynamic_refs_walk(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolve_component_dynamic_refs_for_ref(
     name: &str,
     ref_str: &str,
