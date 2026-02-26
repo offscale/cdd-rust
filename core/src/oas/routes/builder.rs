@@ -240,6 +240,27 @@ fn build_route(
         }
     }
 
+    // Extract Swagger 2.0 "in: body" param
+    if request_body.is_none() {
+        if let Some(body_param) = params
+            .iter()
+            .find(|p| p.source == ParamSource::Query && p.name == "body")
+        {
+            request_body = Some(crate::oas::models::RequestBodyDefinition {
+                ty: body_param.ty.clone(),
+                description: body_param.description.clone(),
+                media_type: "application/json".to_string(),
+                format: crate::oas::models::BodyFormat::Json,
+                required: true,
+                example: None,
+                encoding: None,
+                item_encoding: None,
+                prefix_encoding: None,
+            });
+            params.retain(|p| !(p.source == ParamSource::Query && p.name == "body"));
+        }
+    }
+
     // 4. Security
     // Operation-level security overrides global security. An explicit empty array clears security.
     let security_defined = op.security.is_some();
