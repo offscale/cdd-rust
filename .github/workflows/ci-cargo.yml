@@ -42,3 +42,10 @@ jobs:
         run: cargo doc --workspace --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: "-D warnings"
+
+      - name: Install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin
+
+      - name: Run Test Coverage
+        # Enforces 100% test coverage across the workspace
+        run: cargo tarpaulin --fail-under 100 --workspace --out xml

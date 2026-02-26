@@ -1,4 +1,2 @@
 [tarpaulin]
-exclude-files = [
-    "web/tests/model_integrity.rs"
-]
+exclude-files = []
