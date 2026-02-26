@@ -34,7 +34,7 @@ mod tests {
 
     #[test]
     fn test_cli_error_display_and_from() {
-        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "boom");
+        let io_err = std::io::Error::other("boom");
         let err: CliError = io_err.into();
         assert!(format!("{}", err).contains("IO Error: boom"));
 
