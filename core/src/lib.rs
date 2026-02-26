@@ -7,56 +7,52 @@
 /// Shared error types.
 pub mod error;
 
-/// AST Parsing logic.
-pub mod parser;
-
 /// Type mapping logic (Rust -> JSON).
 pub mod type_mapping;
-
-/// JSON Schema generation.
-pub mod schema_generator;
-
-/// Diff calculation.
-pub mod diff;
-
-/// Code generation utilities.
-pub mod codegen;
-
-/// Code patching utilities.
-pub mod patcher;
-
-/// OpenAPI (OAS) parsing utilities.
-pub mod oas;
-
-/// Handler Scaffolding Logic.
-pub mod handler_generator;
-
-/// Route Registration Logic.
-pub mod route_generator;
-
-/// Contract Test Generator Logic.
-pub mod contract_test_generator;
 
 /// Strategy Pattern Interfaces.
 pub mod strategies;
 
-pub use codegen::{generate_dto, make_record_field};
-pub use contract_test_generator::generate_contract_tests_file;
-pub use diff::{calculate_diff, Diff};
+/// OpenAPI (OAS) parsing and emitting.
+pub mod openapi;
+
+/// Classes (Models/Structs) parsing and emitting.
+pub mod classes;
+
+/// Functions (Handlers) parsing and emitting.
+pub mod functions;
+
+/// Routes parsing and emitting.
+pub mod routes;
+
+/// Tests parsing and emitting.
+pub mod tests;
+
+/// Mocks parsing and emitting.
+pub mod mocks;
+
+/// Docstrings parsing and emitting.
+pub mod docstrings;
+
+pub use classes::diff::{calculate_diff, Diff};
+pub use classes::emit::{generate_dto, make_record_field};
+pub use classes::parse::{
+    extract_struct, extract_struct_fields, extract_struct_names, ParsedField, ParsedStruct,
+};
+pub use classes::patcher::{
+    add_derive, add_struct_attribute, add_struct_field, modify_struct_field_type,
+};
 pub use error::{AppError, AppResult};
-pub use handler_generator::update_handler_module;
-pub use oas::{
+pub use functions::emit::update_handler_module;
+pub use openapi::parse::{
     parse_openapi_document, parse_openapi_document_with_registry, parse_openapi_routes,
     parse_openapi_routes_with_registry, parse_openapi_spec, parse_openapi_spec_with_registry,
     BodyFormat, DocumentRegistry, ParamSource, ParsedOpenApi, ParsedRoute, RequestBodyDefinition,
     RouteParam,
 };
-pub use parser::{
-    extract_struct, extract_struct_fields, extract_struct_names, ParsedField, ParsedStruct,
-};
-pub use patcher::{add_derive, add_struct_attribute, add_struct_field, modify_struct_field_type};
-pub use route_generator::register_routes;
+pub use routes::emit::register_routes;
 pub use strategies::{ActixStrategy, BackendStrategy};
+pub use tests::emit::generate_contract_tests_file;
 pub use type_mapping::{JsonSchema, JsonType, RustToJsonMapper, TypeMapper};
 
 /// A placeholder function to verify workspace setup.
@@ -65,7 +61,7 @@ pub fn is_operational() -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+mod tests_local {
     use super::*;
 
     #[test]

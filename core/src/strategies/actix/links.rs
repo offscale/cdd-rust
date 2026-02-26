@@ -6,7 +6,7 @@
 //! Logic for generating runtime code that constructs HATEOAS links
 //! based on OpenAPI Link objects.
 
-use crate::oas::models::{LinkParamValue, ParsedLink};
+use crate::openapi::parse::models::{LinkParamValue, ParsedLink};
 use crate::strategies::actix::utils::{resolve_runtime_expr, to_snake_case};
 use url::Url;
 
@@ -145,8 +145,8 @@ fn escape_rust_string(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::oas::models::RuntimeExpression;
-    use crate::oas::models::{LinkParamValue, LinkRequestBody};
+    use crate::openapi::parse::models::RuntimeExpression;
+    use crate::openapi::parse::models::{LinkParamValue, LinkRequestBody};
     use std::collections::HashMap;
 
     #[test]

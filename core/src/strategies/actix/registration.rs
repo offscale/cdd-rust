@@ -5,7 +5,7 @@
 //! Logic for generating the `cfg.service(...)` statements used in Actix's
 //! configuration function.
 
-use crate::oas::ParsedRoute;
+use crate::openapi::parse::ParsedRoute;
 
 /// Generates the route registration code statement.
 pub fn route_registration_statement(route: &ParsedRoute, handler_full_path: &str) -> String {
@@ -35,8 +35,8 @@ pub fn route_registration_statement(route: &ParsedRoute, handler_full_path: &str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::oas::models::RouteKind;
-    use crate::oas::ParsedRoute;
+    use crate::openapi::parse::models::RouteKind;
+    use crate::openapi::parse::ParsedRoute;
     use std::collections::BTreeMap;
 
     #[test]

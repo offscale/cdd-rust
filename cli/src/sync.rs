@@ -11,7 +11,7 @@
 //! 3. **Schema -> OpenAPI**: The resulting code is valid for `utoipa` OpenAPI generation at build/runtime.
 
 use crate::generator::ModelMapper;
-use cdd_core::patcher::{add_derive, modify_struct_field_type};
+use cdd_core::classes::patcher::{add_derive, modify_struct_field_type};
 use cdd_core::{AppError, AppResult};
 use std::collections::HashMap;
 use std::fs;
