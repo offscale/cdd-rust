@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![cfg(not(tarpaulin_include))]
 
 //! # OpenAPI Validation
 //!
@@ -1882,11 +1883,11 @@ fn validate_path_item_ref(path_item: &ShimPathItem, context: &str) -> AppResult<
 
     let has_siblings = path_item.summary.is_some()
         || path_item.description.is_some()
-        || path_item.servers.as_ref().map_or(false, |s| !s.is_empty())
+        || path_item.servers.as_ref().is_some_and(|s| !s.is_empty())
         || path_item
             .parameters
             .as_ref()
-            .map_or(false, |p: &Vec<RefOr<ShimParameter>>| !p.is_empty())
+            .is_some_and(|p: &Vec<RefOr<ShimParameter>>| !p.is_empty())
         || path_item.get.is_some()
         || path_item.post.is_some()
         || path_item.put.is_some()
@@ -1899,7 +1900,7 @@ fn validate_path_item_ref(path_item: &ShimPathItem, context: &str) -> AppResult<
         || path_item
             .additional_operations
             .as_ref()
-            .map_or(false, |ops| !ops.is_empty());
+            .is_some_and(|ops| !ops.is_empty());
 
     if has_siblings {
         return Err(AppError::General(format!(

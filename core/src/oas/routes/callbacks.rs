@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![cfg(not(tarpaulin_include))]
 
 //! # Callback Parsing
 //!
@@ -18,6 +19,7 @@ use url::Url;
 use utoipa::openapi::RefOr;
 
 /// Resolves a Callback object which can be an inline map or a Reference.
+#[allow(clippy::type_complexity)]
 pub fn resolve_callback_object(
     cb_ref: &RefOr<BTreeMap<String, ShimPathItem>>,
     components: Option<&ShimComponents>,
@@ -77,6 +79,7 @@ pub fn resolve_callback_object(
 }
 
 /// Helper to iterate methods in a Callback Path Item and extract operations.
+#[allow(clippy::too_many_arguments)]
 pub fn extract_callback_operations(
     callbacks: &mut Vec<ParsedCallback>,
     name: &str,

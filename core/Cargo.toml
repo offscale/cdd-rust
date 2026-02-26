@@ -26,3 +26,5 @@ indexmap = "^2.12"
 # Strict RFC 3986 URI resolution
 url = "2.5"
 percent-encoding = "2.3"
+[lints]
+workspace = true

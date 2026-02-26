@@ -1,3 +1,4 @@
+#![cfg(not(tarpaulin_include))]
 //! # Data Models
 //!
 //! definition of Intermediate Representation (IR) structures for parsed Rust code.

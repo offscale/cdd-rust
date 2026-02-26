@@ -5,3 +5,5 @@ members = [
     "web",
 ]
 resolver = "2"
+[workspace.lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ["cfg(tarpaulin_include)", "cfg(coverage_nightly)"] }

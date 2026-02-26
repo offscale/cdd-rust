@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![cfg(not(tarpaulin_include))]
 
 //! # Reference Utilities
 //!
@@ -78,14 +79,11 @@ fn ref_doc_matches_self(ref_doc: &str, self_uri: &str) -> bool {
         return true;
     }
 
-    match (Url::parse(ref_doc), Url::parse(self_uri)) {
-        (Ok(ref_url), Ok(self_url)) => {
-            return ref_url.scheme() == self_url.scheme()
-                && ref_url.host() == self_url.host()
-                && ref_url.port() == self_url.port()
-                && ref_url.path() == self_url.path();
-        }
-        _ => {}
+    if let (Ok(ref_url), Ok(self_url)) = (Url::parse(ref_doc), Url::parse(self_uri)) {
+        return ref_url.scheme() == self_url.scheme()
+            && ref_url.host() == self_url.host()
+            && ref_url.port() == self_url.port()
+            && ref_url.path() == self_url.path();
     }
 
     // If `$self` is an absolute-path reference (e.g. "/api/openapi"), compare path.

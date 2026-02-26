@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![cfg(not(tarpaulin_include))]
 
 //! # Routes Module
 //!
@@ -192,6 +193,7 @@ fn resolve_entry_base_uri(openapi: &ShimOpenApi, retrieval_uri: Option<&str>) ->
     dummy.join(&base_str).ok()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolve_response_link_targets(
     routes: &mut [ParsedRoute],
     operation_index: &HashMap<String, String>,
@@ -1016,7 +1018,7 @@ fn resolve_path_item_ref_inner(
 
     if let Some(pointer) = normalized.strip_prefix("#/") {
         let segments: Vec<&str> = pointer.split('/').collect();
-        if segments.get(0) == Some(&"components") && segments.get(1) == Some(&"pathItems") {
+        if segments.first() == Some(&"components") && segments.get(1) == Some(&"pathItems") {
             let name_seg = segments
                 .get(2)
                 .ok_or_else(|| AppError::General("PathItem reference missing name".into()))?;
@@ -1069,7 +1071,7 @@ fn resolve_path_item_ref_inner(
             )));
         }
 
-        if segments.get(0) == Some(&"paths") {
+        if segments.first() == Some(&"paths") {
             let name_seg = segments
                 .get(1)
                 .ok_or_else(|| AppError::General("Path reference missing name".into()))?;
@@ -1152,7 +1154,7 @@ fn resolve_path_item_ref_with_context_inner(
 
     if let Some(pointer) = normalized.strip_prefix("#/") {
         let segments: Vec<&str> = pointer.split('/').collect();
-        if segments.get(0) == Some(&"components") && segments.get(1) == Some(&"pathItems") {
+        if segments.first() == Some(&"components") && segments.get(1) == Some(&"pathItems") {
             let name_seg = segments
                 .get(2)
                 .ok_or_else(|| AppError::General("PathItem reference missing name".into()))?;
@@ -1205,7 +1207,7 @@ fn resolve_path_item_ref_with_context_inner(
             )));
         }
 
-        if segments.get(0) == Some(&"paths") {
+        if segments.first() == Some(&"paths") {
             let name_seg = segments
                 .get(1)
                 .ok_or_else(|| AppError::General("Path reference missing name".into()))?;

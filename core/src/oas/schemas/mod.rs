@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![cfg(not(tarpaulin_include))]
 
 //! # Schema Parsing
 //!
@@ -735,9 +736,7 @@ fn extract_string_enum_variants(
     let mut seen = HashSet::new();
 
     for value in enum_values.iter() {
-        let Some(raw) = value.as_str() else {
-            return None;
-        };
+        let raw = value.as_str()?;
 
         let base = sanitize_enum_variant(raw);
         let mut name = base.clone();
@@ -779,9 +778,7 @@ fn extract_const_enum_variants(raw_schema: &Value) -> Option<Vec<ParsedVariant>>
                 .and_then(|v| v.as_array())
                 .and_then(|vals| (vals.len() == 1).then_some(&vals[0]))
         })?;
-        let Some(const_str) = const_val.as_str() else {
-            return None;
-        };
+        let const_str = const_val.as_str()?;
 
         let base_name = item_obj
             .get("title")

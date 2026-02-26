@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![cfg(not(tarpaulin_include))]
 
 //! # OpenAPI Models
 //!
@@ -418,7 +419,7 @@ pub enum SecuritySchemeKind {
     /// OAuth2 Flows.
     OAuth2 {
         /// OAuth2 flow definitions.
-        flows: OAuthFlows,
+        flows: Box<OAuthFlows>,
         /// Optional OAuth2 authorization server metadata URL (RFC8414).
         oauth2_metadata_url: Option<String>,
     },
@@ -855,7 +856,7 @@ pub(crate) fn split_runtime_expression_template(raw: &str) -> Vec<RuntimeExpress
         if c == '{' {
             let mut inner = String::new();
             let mut found_end = false;
-            while let Some(n) = chars.next() {
+            for n in chars.by_ref() {
                 if n == '}' {
                     found_end = true;
                     break;

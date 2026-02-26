@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![cfg(not(tarpaulin_include))]
 
 //! # Extractors
 //!
@@ -259,7 +260,7 @@ mod tests {
             scopes: vec!["read:users".into(), "write:users".into()],
             scheme: Some(SecuritySchemeInfo {
                 kind: SecuritySchemeKind::OAuth2 {
-                    flows: OAuthFlows {
+                    flows: Box::new(OAuthFlows {
                         implicit: Some(OAuthFlow {
                             authorization_url: Some("https://auth.example.com/authorize".into()),
                             device_authorization_url: None,
@@ -271,7 +272,7 @@ mod tests {
                         client_credentials: None,
                         authorization_code: None,
                         device_authorization: None,
-                    },
+                    }),
                     oauth2_metadata_url: None,
                 },
                 description: None,

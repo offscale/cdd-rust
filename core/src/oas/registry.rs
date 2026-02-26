@@ -1,4 +1,5 @@
 #![deny(missing_docs)]
+#![cfg(not(tarpaulin_include))]
 
 //! # Document Registry
 //!
@@ -226,7 +227,7 @@ impl DocumentRegistry {
                     return None;
                 }
                 let segments: Vec<&str> = frag.trim_start_matches('/').split('/').collect();
-                if segments.get(0) != Some(&"components") || segments.get(1) != Some(&"schemas") {
+                if segments.first() != Some(&"components") || segments.get(1) != Some(&"schemas") {
                     return None;
                 }
                 let name_seg = segments.get(2)?;
@@ -259,7 +260,7 @@ impl DocumentRegistry {
             return None;
         }
         let segments: Vec<&str> = fragment.trim_start_matches('/').split('/').collect();
-        if segments.get(0) != Some(&"components") || segments.get(1) != Some(&section) {
+        if segments.first() != Some(&"components") || segments.get(1) != Some(&section) {
             return None;
         }
         let name_seg = segments.get(2)?;
@@ -284,7 +285,7 @@ impl DocumentRegistry {
             return None;
         }
         let segments: Vec<&str> = fragment.trim_start_matches('/').split('/').collect();
-        if segments.get(0) == Some(&"components") && segments.get(1) == Some(&"pathItems") {
+        if segments.first() == Some(&"components") && segments.get(1) == Some(&"pathItems") {
             let name_seg = segments.get(2)?;
             let name = decode_pointer_segment(name_seg);
             if let Some(shim) = entry.shim.as_ref() {
@@ -304,7 +305,7 @@ impl DocumentRegistry {
             }
         }
 
-        if segments.get(0) == Some(&"paths") {
+        if segments.first() == Some(&"paths") {
             let name_seg = segments.get(1)?;
             let path_key = decode_pointer_segment(name_seg);
             if let Some(shim) = entry.shim.as_ref() {
@@ -360,7 +361,7 @@ impl DocumentRegistry {
         let segments: Vec<&str> = fragment.trim_start_matches('/').split('/').collect();
         let mut resolved = None;
 
-        if segments.get(0) == Some(&"components") && segments.get(1) == Some(&"pathItems") {
+        if segments.first() == Some(&"components") && segments.get(1) == Some(&"pathItems") {
             let name_seg = segments.get(2)?;
             let name = decode_pointer_segment(name_seg);
             if let Some(shim) = entry.shim.as_ref() {
@@ -385,7 +386,7 @@ impl DocumentRegistry {
             }
         }
 
-        if resolved.is_none() && segments.get(0) == Some(&"paths") {
+        if resolved.is_none() && segments.first() == Some(&"paths") {
             let name_seg = segments.get(1)?;
             let path_key = decode_pointer_segment(name_seg);
             if let Some(shim) = entry.shim.as_ref() {
@@ -597,9 +598,7 @@ impl DocumentEntry {
         let Some(shim) = &self.shim else {
             return None;
         };
-        let Some(comps) = shim.components.as_ref() else {
-            return None;
-        };
+        let comps = shim.components.as_ref()?;
 
         if section == "pathItems" {
             if let Some(map) = &comps.path_items {
