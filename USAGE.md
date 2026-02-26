@@ -14,7 +14,9 @@ This performs the following:
 
 1. Reads `schema.rs`.
 2. Generates rust structs in `models/` using `diesel/dsync` logic.
-3. **Patches** the files to add `#![allow(missing_docs)]`, `use utoipa::ToSchema;`, and derive macros.
+3. **Patches** the files to add `use utoipa::ToSchema;` and derive macros.
+
+*(Note: The generator strictly respects your `#![deny(missing_docs)]` constraints without injecting artificial `allow(missing_docs)` exceptions, encouraging proper model documentation).*
 
 ## 2. Scaffold (OpenAPI ➔ Handlers)
 

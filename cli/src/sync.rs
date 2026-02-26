@@ -168,10 +168,7 @@ fn process_file(path: &Path, type_overrides: &HashMap<String, String>) -> AppRes
     }
 
     // 2. Add File Header Attributes (allow missing docs)
-    let lint_allow = "#![allow(missing_docs)]\n";
-    if !new_content.contains("#![allow(missing_docs)]") {
-        new_content = format!("{}{}", lint_allow, new_content);
-    }
+    // Removed to comply with 100% doc coverage without exceptions.
 
     // 3. Add Imports if needed
     if !new_content.contains("use utoipa::ToSchema;") {
@@ -228,7 +225,6 @@ pub struct User {
 
         let new_code = fs::read_to_string(&file_path).unwrap();
 
-        assert!(new_code.contains("#![allow(missing_docs)]"));
         assert!(new_code.contains("use utoipa::ToSchema;"));
         assert!(new_code.contains("use serde::{Deserialize, Serialize};"));
         assert!(new_code.contains(

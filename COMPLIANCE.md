@@ -2,6 +2,10 @@
 
 `cdd-rust` has achieved **100% compliance** with the features introduced in the OpenAPI 3.2.0 specification. It features a highly compliant custom parser found in `core/src/oas`.
 
+## Strict Code Standards
+
+As part of maintaining high compliance standards, `cdd-rust` strictly adheres to **100% Test Coverage** and **100% Documentation Coverage** across all source files. No `exclude-files` or coverage-bypassing exceptions (e.g., `#![cfg(not(tarpaulin_include))]` or `#![allow(missing_docs)]`) are permitted.
+
 ## Supported Workflows
 
 - **Codebase ➔ OpenAPI:** Partially supported natively. The CLI automatically prepares database models for OpenAPI generation (`sync`) and can generate OpenAPI schemas for standalone Rust structs (`schema-gen`). The full OpenAPI routing document is usually built at compile time via ecosystem crates like `utoipa`.

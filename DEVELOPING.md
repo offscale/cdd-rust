@@ -34,6 +34,13 @@ $ cargo test
 # Run the generated contract tests (requires web/tests/api_contracts.rs to be generated)
 $ cargo test -p cdd-web
 
+# Run test coverage analysis (requires cargo-tarpaulin)
+$ cargo install cargo-tarpaulin
+$ cargo tarpaulin
+
+# Run documentation coverage analysis (fail on warnings)
+$ RUSTDOCFLAGS="-D warnings -W missing_docs" cargo doc --no-deps --workspace
+
 # Format, build and test
 $ cargo make
 ```
