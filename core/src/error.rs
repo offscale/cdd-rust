@@ -34,11 +34,11 @@ pub type AppResult<T> = Result<T, AppError>;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{Error, ErrorKind};
+    use std::io::Error;
 
     #[test]
     fn test_io_conversion() {
-        let io_err = Error::new(ErrorKind::Other, "test");
+        let io_err = Error::other("test");
         let app_err: AppError = io_err.into();
         assert!(matches!(app_err, AppError::Io(_)));
     }

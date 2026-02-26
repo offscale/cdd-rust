@@ -1655,7 +1655,7 @@ mod tests {
             .unwrap();
         let enc = def.encoding.unwrap();
         let file = enc.get("file").unwrap();
-        assert!(file.headers.get("Content-Type").is_none());
+        assert!(!file.headers.contains_key("Content-Type"));
         assert_eq!(
             file.headers.get("X-Trace-Id").map(|s| s.as_str()),
             Some("Uuid")

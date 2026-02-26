@@ -61,3 +61,93 @@ pub async fn delete_pet(pet_id: web::Path<i64>, store: web::Data<PetStore>) -> i
 pub async fn upload_file() -> impl Responder {
     HttpResponse::Ok().finish()
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{test, App};
+
+    #[actix_web::test]
+    async fn test_pet_handlers() {
+        let store = web::Data::new(PetStore {
+            pets: Mutex::new(HashMap::new()),
+        });
+
+        let app = test::init_service(
+            App::new()
+                .app_data(store.clone())
+                .route("/pet", web::post().to(add_pet))
+                .route("/pet", web::put().to(update_pet))
+                .route("/pet/findByStatus", web::get().to(find_pets_by_status))
+                .route("/pet/findByTags", web::get().to(find_pets_by_tags))
+                .route("/pet/{petId}", web::get().to(get_pet_by_id))
+                .route("/pet/{petId}", web::post().to(update_pet_with_form))
+                .route("/pet/{petId}", web::delete().to(delete_pet))
+                .route("/pet/{petId}/uploadImage", web::post().to(upload_file)),
+        )
+        .await;
+
+        let req = test::TestRequest::post()
+            .uri("/pet")
+            .set_json(serde_json::json!({"id": 1, "name": "Fido"}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
+        let req = test::TestRequest::post()
+            .uri("/pet")
+            .set_json(serde_json::json!({"name": "NoId"}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_client_error());
+
+        let req = test::TestRequest::put()
+            .uri("/pet")
+            .set_json(serde_json::json!({"id": 1, "name": "Fido Updated"}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
+        let req = test::TestRequest::put()
+            .uri("/pet")
+            .set_json(serde_json::json!({"name": "NoId"}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_client_error());
+
+        let req = test::TestRequest::get()
+            .uri("/pet/findByStatus")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
+        let req = test::TestRequest::get().uri("/pet/findByTags").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
+        let req = test::TestRequest::get().uri("/pet/1").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
+        let req = test::TestRequest::get().uri("/pet/2").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_client_error());
+
+        let req = test::TestRequest::post().uri("/pet/1").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
+        let req = test::TestRequest::delete().uri("/pet/1").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
+        let req = test::TestRequest::delete().uri("/pet/2").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_client_error());
+
+        let req = test::TestRequest::post()
+            .uri("/pet/1/uploadImage")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+    }
+}

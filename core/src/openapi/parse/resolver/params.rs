@@ -1380,7 +1380,7 @@ mod tests {
         let processed = process_parameter(&param, None, true).unwrap();
         assert_eq!(processed.source, ParamSource::Query);
         assert_eq!(processed.style, Some(ParamStyle::Form));
-        assert_eq!(processed.explode, true); // Form defaults to true
+        assert!(processed.explode); // Form defaults to true
     }
 
     #[test]
@@ -1773,7 +1773,7 @@ mod tests {
         let processed = process_parameter(&param, None, true).unwrap();
         assert_eq!(processed.source, ParamSource::Path);
         assert_eq!(processed.style, Some(ParamStyle::Simple));
-        assert_eq!(processed.explode, false); // Simple defaults to false
+        assert!(!processed.explode); // Simple defaults to false
     }
 
     #[test]
@@ -1802,7 +1802,7 @@ mod tests {
         let processed = process_parameter(&param, None, true).unwrap();
         assert_eq!(processed.source, ParamSource::Cookie);
         assert_eq!(processed.style, Some(ParamStyle::Cookie));
-        assert_eq!(processed.explode, true);
+        assert!(processed.explode);
     }
 
     #[test]
@@ -2164,7 +2164,7 @@ mod tests {
 
         let processed = process_parameter(&param, None, true).unwrap();
         assert_eq!(processed.style, Some(ParamStyle::Simple));
-        assert_eq!(processed.explode, true);
+        assert!(processed.explode);
     }
 
     #[test]
@@ -2194,7 +2194,7 @@ mod tests {
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].name, "limit");
         assert_eq!(resolved[0].style, Some(ParamStyle::Form));
-        assert_eq!(resolved[0].explode, false);
+        assert!(!resolved[0].explode);
     }
 
     #[test]
@@ -3097,7 +3097,6 @@ mod tests {
             example: None,
             examples: None,
             raw,
-            ..Default::default()
         };
 
         let processed = process_parameter(&param, Some(&components), true).unwrap();
@@ -3139,7 +3138,6 @@ mod tests {
             example: None,
             examples: None,
             raw,
-            ..Default::default()
         };
 
         let processed = process_parameter(&param, None, true).unwrap();
@@ -3183,7 +3181,6 @@ mod tests {
             example: None,
             examples: None,
             raw,
-            ..Default::default()
         };
 
         let processed = process_parameter(&param, None, true).unwrap();
@@ -3228,7 +3225,6 @@ mod tests {
             example: None,
             examples: None,
             raw,
-            ..Default::default()
         };
 
         let processed = process_parameter(&param, None, true).unwrap();

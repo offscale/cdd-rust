@@ -1738,7 +1738,7 @@ paths:
         assert_eq!(routes.len(), 1);
         let scheme = routes[0].security[0]
             .schemes
-            .get(0)
+            .first()
             .and_then(|s| s.scheme.as_ref())
             .expect("security scheme missing");
 
