@@ -7,9 +7,9 @@
 use std::fs;
 use std::path::PathBuf;
 
-use cdd_core::contract_test_generator::generate_contract_tests_file;
-use cdd_core::oas::parse_openapi_routes;
+use cdd_core::openapi::parse::parse_openapi_routes;
 use cdd_core::strategies::BackendStrategy;
+use cdd_core::tests::emit::generate_contract_tests_file;
 use cdd_core::{AppError, AppResult};
 
 /// Arguments for the test generation command.

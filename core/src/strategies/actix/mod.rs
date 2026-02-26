@@ -13,8 +13,8 @@ pub mod scaffolding;
 pub mod testing;
 pub mod utils;
 
-use crate::oas::models::{ParsedLink, ResponseHeader};
-use crate::oas::ParsedRoute;
+use crate::openapi::parse::models::{ParsedLink, ResponseHeader};
+use crate::openapi::parse::ParsedRoute;
 use crate::strategies::BackendStrategy;
 
 /// Strategy for generating Actix Web compatible code.
@@ -59,7 +59,7 @@ impl BackendStrategy for ActixStrategy {
     fn query_string_extractor(
         &self,
         inner_type: &str,
-        content_media_type: Option<&crate::oas::models::ContentMediaType>,
+        content_media_type: Option<&crate::openapi::parse::models::ContentMediaType>,
     ) -> String {
         extractors::query_string_extractor(inner_type, content_media_type)
     }
@@ -94,7 +94,7 @@ impl BackendStrategy for ActixStrategy {
 
     fn security_extractor(
         &self,
-        requirements: &[crate::oas::models::SecurityRequirementGroup],
+        requirements: &[crate::openapi::parse::models::SecurityRequirementGroup],
     ) -> String {
         extractors::security_extractor(requirements)
     }
@@ -115,7 +115,7 @@ impl BackendStrategy for ActixStrategy {
         testing::test_app_init(app_factory)
     }
 
-    fn test_body_setup_code(&self, body: &crate::oas::RequestBodyDefinition) -> String {
+    fn test_body_setup_code(&self, body: &crate::openapi::parse::RequestBodyDefinition) -> String {
         testing::test_body_setup_code(body)
     }
 
@@ -139,8 +139,8 @@ impl BackendStrategy for ActixStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::oas::models::{LinkParamValue, ParsedLink, RouteKind, RuntimeExpression};
-    use crate::oas::ParsedRoute;
+    use crate::openapi::parse::models::{LinkParamValue, ParsedLink, RouteKind, RuntimeExpression};
+    use crate::openapi::parse::ParsedRoute;
     use std::collections::{BTreeMap, HashMap};
 
     #[test]

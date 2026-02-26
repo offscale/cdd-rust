@@ -6,7 +6,7 @@
 //! Helper functions for case conversion and runtime expression resolution used
 //! by the Actix strategy modules.
 
-use crate::oas::models::{
+use crate::openapi::parse::models::{
     split_runtime_expression_template, RuntimeExpression, RuntimeExpressionSegment,
 };
 
@@ -216,7 +216,7 @@ fn resolve_json_pointer(root_var: &str, pointer: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::oas::models::RuntimeExpression;
+    use crate::openapi::parse::models::RuntimeExpression;
 
     fn rx(s: &str) -> RuntimeExpression {
         RuntimeExpression::new(s)

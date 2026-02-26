@@ -6,7 +6,7 @@
 //! Logic for generating Rust type strings that Actix uses to extract data
 //! from requests (Path, Query, Json, etc.).
 
-use crate::oas::models::{
+use crate::openapi::parse::models::{
     ContentMediaType, ParamSource, SecurityRequirement, SecurityRequirementGroup,
     SecuritySchemeKind,
 };
@@ -194,7 +194,7 @@ fn generate_typed_req_data(req: &SecurityRequirement, type_name: &str) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::oas::models::{
+    use crate::openapi::parse::models::{
         OAuthFlow, OAuthFlows, SecurityRequirementGroup, SecuritySchemeInfo, SecuritySchemeKind,
     };
 

@@ -6,9 +6,9 @@
 //! Generates a JSON Schema document from a Rust struct or enum.
 //! This implements the "Reflect" workflow (Rust -> Schema).
 
+use cdd_core::classes::parse::extract_model;
 use cdd_core::error::{AppError, AppResult};
-use cdd_core::parser::extract_model;
-use cdd_core::schema_generator::{
+use cdd_core::openapi::emit::{
     generate_json_schema, generate_openapi_document, OpenApiContact, OpenApiInfo, OpenApiLicense,
 };
 use std::fs;

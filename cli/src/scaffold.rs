@@ -11,9 +11,9 @@
 //! 3. Generates or Updates module files (e.g., `handlers/users.rs`) with `async fn` signatures.
 //! 4. (Optional) Injects route registrations into a shared config function (e.g., in `lib.rs`).
 
-use cdd_core::handler_generator::update_handler_module;
-use cdd_core::oas::{parse_openapi_routes, ParsedRoute};
-use cdd_core::route_generator::register_routes;
+use cdd_core::functions::emit::update_handler_module;
+use cdd_core::openapi::parse::{parse_openapi_routes, ParsedRoute};
+use cdd_core::routes::emit::register_routes;
 use cdd_core::strategies::BackendStrategy;
 use cdd_core::{AppError, AppResult};
 use std::collections::HashMap;
@@ -167,7 +167,7 @@ fn group_routes_by_tag(routes: &[ParsedRoute]) -> HashMap<String, Vec<ParsedRout
 
 /// Wrapper for core snake_case utility specific to module naming conventions.
 fn to_snake_case(s: &str) -> String {
-    cdd_core::oas::routes::naming::to_snake_case(s)
+    cdd_core::openapi::parse::routes::naming::to_snake_case(s)
 }
 
 #[cfg(test)]

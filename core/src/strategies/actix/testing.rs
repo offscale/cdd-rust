@@ -5,7 +5,7 @@
 //!
 //! Logic for generating integration test code helpers and methods.
 
-use crate::oas::models::{EncodingInfo, ExampleValue, ParamStyle};
+use crate::openapi::parse::models::{EncodingInfo, ExampleValue, ParamStyle};
 
 /// Returns imports for test files.
 pub fn test_imports() -> String {
@@ -32,17 +32,17 @@ pub fn test_app_init(app_factory: &str) -> String {
 }
 
 /// Generates body setup stub.
-pub fn test_body_setup_code(body: &crate::oas::RequestBodyDefinition) -> String {
+pub fn test_body_setup_code(body: &crate::openapi::parse::RequestBodyDefinition) -> String {
     match body.format {
-        crate::oas::BodyFormat::Json => json_body_setup(body),
-        crate::oas::BodyFormat::Form => form_body_setup(body),
-        crate::oas::BodyFormat::Multipart => multipart_body_setup(body),
-        crate::oas::BodyFormat::Text => text_body_setup(body),
-        crate::oas::BodyFormat::Binary => binary_body_setup(body),
+        crate::openapi::parse::BodyFormat::Json => json_body_setup(body),
+        crate::openapi::parse::BodyFormat::Form => form_body_setup(body),
+        crate::openapi::parse::BodyFormat::Multipart => multipart_body_setup(body),
+        crate::openapi::parse::BodyFormat::Text => text_body_setup(body),
+        crate::openapi::parse::BodyFormat::Binary => binary_body_setup(body),
     }
 }
 
-fn json_body_setup(body: &crate::oas::RequestBodyDefinition) -> String {
+fn json_body_setup(body: &crate::openapi::parse::RequestBodyDefinition) -> String {
     if let Some(example) = &body.example {
         if example.is_serialized() {
             let payload = serialized_payload_expr(example);
@@ -75,7 +75,7 @@ fn json_body_setup(body: &crate::oas::RequestBodyDefinition) -> String {
     )
 }
 
-fn form_body_setup(body: &crate::oas::RequestBodyDefinition) -> String {
+fn form_body_setup(body: &crate::openapi::parse::RequestBodyDefinition) -> String {
     if let Some(example) = &body.example {
         if example.is_serialized() {
             let payload = serialized_payload_expr(example);
@@ -115,7 +115,7 @@ fn form_body_setup(body: &crate::oas::RequestBodyDefinition) -> String {
     )
 }
 
-fn multipart_body_setup(body: &crate::oas::RequestBodyDefinition) -> String {
+fn multipart_body_setup(body: &crate::openapi::parse::RequestBodyDefinition) -> String {
     let media = if body.media_type.is_empty() {
         "multipart/form-data"
     } else {
@@ -155,7 +155,7 @@ fn multipart_body_setup(body: &crate::oas::RequestBodyDefinition) -> String {
 }
 
 fn build_multipart_payload(
-    body: &crate::oas::RequestBodyDefinition,
+    body: &crate::openapi::parse::RequestBodyDefinition,
     boundary: &str,
 ) -> Option<String> {
     let example = body.example.as_ref()?;
@@ -178,7 +178,7 @@ fn build_multipart_payload(
 }
 
 fn build_multipart_fallback_payload(
-    body: &crate::oas::RequestBodyDefinition,
+    body: &crate::openapi::parse::RequestBodyDefinition,
     boundary: &str,
 ) -> String {
     if let Some(encoding) = body.encoding.as_ref() {
@@ -422,7 +422,7 @@ fn first_content_type(value: &str) -> Option<String> {
     }
 }
 
-fn text_body_setup(body: &crate::oas::RequestBodyDefinition) -> String {
+fn text_body_setup(body: &crate::openapi::parse::RequestBodyDefinition) -> String {
     let media = if body.media_type.is_empty() {
         "text/plain"
     } else {
@@ -445,7 +445,7 @@ fn text_body_setup(body: &crate::oas::RequestBodyDefinition) -> String {
     )
 }
 
-fn binary_body_setup(body: &crate::oas::RequestBodyDefinition) -> String {
+fn binary_body_setup(body: &crate::openapi::parse::RequestBodyDefinition) -> String {
     let media = if body.media_type.is_empty() {
         "application/octet-stream"
     } else {
@@ -1574,11 +1574,11 @@ mod tests {
         assert!(init.contains("test::init_service"));
         assert!(init.contains("crate::create_app"));
 
-        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+        let body = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
             ty: "Payload".into(),
             description: None,
             media_type: "application/json".into(),
-            format: crate::oas::BodyFormat::Json,
+            format: crate::openapi::parse::BodyFormat::Json,
             required: true,
             encoding: None,
             prefix_encoding: None,
@@ -1606,11 +1606,11 @@ mod tests {
 
     #[test]
     fn test_body_setup_variants() {
-        let text_body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+        let text_body = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
             ty: "String".into(),
             description: None,
             media_type: "text/plain".into(),
-            format: crate::oas::BodyFormat::Text,
+            format: crate::openapi::parse::BodyFormat::Text,
             required: true,
             encoding: None,
             prefix_encoding: None,
@@ -1620,11 +1620,11 @@ mod tests {
         assert!(text_body.contains("text/plain"));
         assert!(text_body.contains("set_payload(\"dummy\")"));
 
-        let binary_body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+        let binary_body = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
             ty: "Vec<u8>".into(),
             description: None,
             media_type: "application/octet-stream".into(),
-            format: crate::oas::BodyFormat::Binary,
+            format: crate::openapi::parse::BodyFormat::Binary,
             required: true,
             encoding: None,
             prefix_encoding: None,
@@ -1637,18 +1637,20 @@ mod tests {
 
     #[test]
     fn test_body_setup_uses_example_json() {
-        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+        let body = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
             ty: "Payload".into(),
             description: None,
             media_type: "application/json".into(),
-            format: crate::oas::BodyFormat::Json,
+            format: crate::openapi::parse::BodyFormat::Json,
             required: true,
             encoding: None,
             prefix_encoding: None,
             item_encoding: None,
-            example: Some(crate::oas::ExampleValue::data(serde_json::json!({
-                "hello": "world"
-            }))),
+            example: Some(crate::openapi::parse::ExampleValue::data(
+                serde_json::json!({
+                    "hello": "world"
+                }),
+            )),
         });
         assert!(body.contains("from_str::<serde_json::Value>"));
         assert!(body.contains("hello"));
@@ -1656,18 +1658,18 @@ mod tests {
 
     #[test]
     fn test_body_setup_uses_serialized_example() {
-        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+        let body = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
             ty: "Payload".into(),
             description: None,
             media_type: "application/json".into(),
-            format: crate::oas::BodyFormat::Json,
+            format: crate::openapi::parse::BodyFormat::Json,
             required: true,
             encoding: None,
             prefix_encoding: None,
             item_encoding: None,
-            example: Some(crate::oas::ExampleValue::serialized(serde_json::json!(
-                "{\"ok\":true}"
-            ))),
+            example: Some(crate::openapi::parse::ExampleValue::serialized(
+                serde_json::json!("{\"ok\":true}"),
+            )),
         });
         assert!(body.contains("set_payload"));
         assert!(body.contains("{\\\"ok\\\":true}"));
@@ -1675,16 +1677,16 @@ mod tests {
 
     #[test]
     fn test_multipart_body_setup_uses_serialized_example() {
-        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+        let body = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
             ty: "Upload".into(),
             description: None,
             media_type: "multipart/form-data".into(),
-            format: crate::oas::BodyFormat::Multipart,
+            format: crate::openapi::parse::BodyFormat::Multipart,
             required: true,
             encoding: None,
             prefix_encoding: None,
             item_encoding: None,
-            example: Some(crate::oas::ExampleValue::serialized(serde_json::json!(
+            example: Some(crate::openapi::parse::ExampleValue::serialized(serde_json::json!(
                 "--boundary\r\nContent-Disposition: form-data; name=\"field\"\r\n\r\nvalue\r\n--boundary--"
             ))),
         });
@@ -1698,7 +1700,7 @@ mod tests {
         let mut enc = std::collections::HashMap::new();
         enc.insert(
             "file".to_string(),
-            crate::oas::models::EncodingInfo {
+            crate::openapi::parse::models::EncodingInfo {
                 content_type: Some("image/png".to_string()),
                 headers: std::collections::HashMap::new(),
                 style: None,
@@ -1709,19 +1711,21 @@ mod tests {
                 item_encoding: None,
             },
         );
-        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+        let body = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
             ty: "Upload".into(),
             description: None,
             media_type: "multipart/form-data".into(),
-            format: crate::oas::BodyFormat::Multipart,
+            format: crate::openapi::parse::BodyFormat::Multipart,
             required: true,
             encoding: Some(enc),
             prefix_encoding: None,
             item_encoding: None,
-            example: Some(crate::oas::ExampleValue::data(serde_json::json!({
-                "file": "pngbytes",
-                "meta": { "id": 1 }
-            }))),
+            example: Some(crate::openapi::parse::ExampleValue::data(
+                serde_json::json!({
+                    "file": "pngbytes",
+                    "meta": { "id": 1 }
+                }),
+            )),
         });
         assert!(body.contains("Content-Disposition: form-data; name=\\\"file\\\""));
         assert!(body.contains("Content-Type: image/png"));
@@ -1738,7 +1742,7 @@ mod tests {
         let mut enc = std::collections::HashMap::new();
         enc.insert(
             "file".to_string(),
-            crate::oas::models::EncodingInfo {
+            crate::openapi::parse::models::EncodingInfo {
                 content_type: Some("image/png".to_string()),
                 headers,
                 style: None,
@@ -1749,18 +1753,20 @@ mod tests {
                 item_encoding: None,
             },
         );
-        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+        let body = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
             ty: "Upload".into(),
             description: None,
             media_type: "multipart/form-data".into(),
-            format: crate::oas::BodyFormat::Multipart,
+            format: crate::openapi::parse::BodyFormat::Multipart,
             required: true,
             encoding: Some(enc),
             prefix_encoding: None,
             item_encoding: None,
-            example: Some(crate::oas::ExampleValue::data(serde_json::json!({
-                "file": "pngbytes"
-            }))),
+            example: Some(crate::openapi::parse::ExampleValue::data(
+                serde_json::json!({
+                    "file": "pngbytes"
+                }),
+            )),
         });
         assert!(body.contains("X-Trace-Id"));
         assert_eq!(body.matches("Content-Type: image/png").count(), 1);
@@ -1771,7 +1777,7 @@ mod tests {
         let mut enc = std::collections::HashMap::new();
         enc.insert(
             "file".to_string(),
-            crate::oas::models::EncodingInfo {
+            crate::openapi::parse::models::EncodingInfo {
                 content_type: Some("image/png".to_string()),
                 headers: std::collections::HashMap::new(),
                 style: None,
@@ -1782,11 +1788,11 @@ mod tests {
                 item_encoding: None,
             },
         );
-        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+        let body = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
             ty: "Upload".into(),
             description: None,
             media_type: "multipart/form-data".into(),
-            format: crate::oas::BodyFormat::Multipart,
+            format: crate::openapi::parse::BodyFormat::Multipart,
             required: true,
             encoding: Some(enc),
             prefix_encoding: None,
@@ -1800,19 +1806,21 @@ mod tests {
 
     #[test]
     fn test_form_body_setup_urlencoded_example() {
-        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+        let body = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
             ty: "Form".into(),
             description: None,
             media_type: "application/x-www-form-urlencoded".into(),
-            format: crate::oas::BodyFormat::Form,
+            format: crate::openapi::parse::BodyFormat::Form,
             required: true,
             encoding: None,
             prefix_encoding: None,
             item_encoding: None,
-            example: Some(crate::oas::ExampleValue::data(serde_json::json!({
-                "foo": "a + b",
-                "bar": true
-            }))),
+            example: Some(crate::openapi::parse::ExampleValue::data(
+                serde_json::json!({
+                    "foo": "a + b",
+                    "bar": true
+                }),
+            )),
         });
         assert!(body.contains("Content-Type"));
         assert!(body.contains("foo=a+%2B+b"));
@@ -1821,11 +1829,11 @@ mod tests {
 
     #[test]
     fn test_form_body_setup_urlencoded_default_payload() {
-        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+        let body = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
             ty: "Form".into(),
             description: None,
             media_type: "application/x-www-form-urlencoded".into(),
-            format: crate::oas::BodyFormat::Form,
+            format: crate::openapi::parse::BodyFormat::Form,
             required: true,
             encoding: None,
             prefix_encoding: None,
@@ -1853,11 +1861,11 @@ mod tests {
                 item_encoding: None,
             },
         );
-        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+        let body = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
             ty: "Form".into(),
             description: None,
             media_type: "application/x-www-form-urlencoded".into(),
-            format: crate::oas::BodyFormat::Form,
+            format: crate::openapi::parse::BodyFormat::Form,
             required: true,
             encoding: Some(encoding),
             prefix_encoding: None,
@@ -1883,18 +1891,20 @@ mod tests {
                 item_encoding: None,
             },
         );
-        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+        let body = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
             ty: "Form".into(),
             description: None,
             media_type: "application/x-www-form-urlencoded".into(),
-            format: crate::oas::BodyFormat::Form,
+            format: crate::openapi::parse::BodyFormat::Form,
             required: true,
             encoding: Some(encoding),
             prefix_encoding: None,
             item_encoding: None,
-            example: Some(crate::oas::ExampleValue::data(serde_json::json!({
-                "payload": { "a": 1, "b": "x" }
-            }))),
+            example: Some(crate::openapi::parse::ExampleValue::data(
+                serde_json::json!({
+                    "payload": { "a": 1, "b": "x" }
+                }),
+            )),
         });
         assert!(body.contains("payload=%7B%22a%22%3A1%2C%22b%22%3A%22x%22%7D"));
     }
@@ -1915,18 +1925,20 @@ mod tests {
                 item_encoding: None,
             },
         );
-        let body = test_body_setup_code(&crate::oas::RequestBodyDefinition {
+        let body = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
             ty: "Form".into(),
             description: None,
             media_type: "application/x-www-form-urlencoded".into(),
-            format: crate::oas::BodyFormat::Form,
+            format: crate::openapi::parse::BodyFormat::Form,
             required: true,
             encoding: Some(encoding),
             prefix_encoding: None,
             item_encoding: None,
-            example: Some(crate::oas::ExampleValue::data(serde_json::json!({
-                "path": "a/b"
-            }))),
+            example: Some(crate::openapi::parse::ExampleValue::data(
+                serde_json::json!({
+                    "path": "a/b"
+                }),
+            )),
         });
         assert!(body.contains("path=a/b"));
     }

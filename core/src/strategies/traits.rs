@@ -6,9 +6,9 @@
 //! Defines the interface required to generate code for a specific web framework
 //! (e.g. Actix, Axum, Poem, etc.).
 
-use crate::oas::models::{ContentMediaType, ParsedLink, ResponseHeader};
-use crate::oas::ParsedRoute;
-use crate::oas::RequestBodyDefinition;
+use crate::openapi::parse::models::{ContentMediaType, ParsedLink, ResponseHeader};
+use crate::openapi::parse::ParsedRoute;
+use crate::openapi::parse::RequestBodyDefinition;
 
 /// A strategy trait for decoupling framework-specific code generation.
 ///
@@ -118,7 +118,7 @@ pub trait BackendStrategy {
     /// based on scheme.
     fn security_extractor(
         &self,
-        requirements: &[crate::oas::models::SecurityRequirementGroup],
+        requirements: &[crate::openapi::parse::models::SecurityRequirementGroup],
     ) -> String;
 
     /// Generates the route registration code statement.

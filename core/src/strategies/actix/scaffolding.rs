@@ -5,8 +5,8 @@
 //!
 //! Logic for generating handler signatures, imports, and function bodies.
 
-use crate::oas::models::ParsedLink;
-use crate::oas::models::ResponseHeader;
+use crate::openapi::parse::models::ParsedLink;
+use crate::openapi::parse::models::ResponseHeader;
 use crate::strategies::actix::links::generate_link_construction;
 
 /// Returns standard imports for Actix handlers.
@@ -99,7 +99,7 @@ pub fn handler_signature(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::oas::models::{
+    use crate::openapi::parse::models::{
         LinkParamValue, LinkRequestBody, ParsedLink, ResponseHeader, RuntimeExpression,
     };
     use std::collections::{BTreeMap, HashMap};

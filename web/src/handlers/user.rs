@@ -23,6 +23,8 @@ pub async fn delete_user() -> impl Responder {
 }
 /// Creates list of users with given input array
 ///
-pub async fn create_users_with_array_input(body: web::Json<Vec<User>>) -> impl Responder {
-    todo!()
+pub async fn create_users_with_array_input(
+    _body: web::Json<Vec<crate::models::User>>,
+) -> impl Responder {
+    HttpResponse::NotImplemented().finish()
 }
