@@ -12,8 +12,8 @@ Each compiler is written in its target language, is whitespace and comment sensi
 The CLI—at a minimum—has:
 - `cdd_rust --help`
 - `cdd_rust --version`
-- `cdd_rust sync`
-- `cdd_rust scaffold`
+- `cdd_rust from_openapi -i spec.json`
+- `cdd_rust to_openapi -f path/to/code`
 - `cdd_rust to_docs_json --no-imports --no-wrapping -i spec.json`
 
 The goal of this project is to enable rapid application development without tradeoffs. Tradeoffs of Protocol Buffers / Thrift etc. are an untouchable "generated" directory and package, compile-time and/or runtime overhead. Tradeoffs of Java or JavaScript for everything are: overhead in hardware access, offline mode, ML inefficiency, and more. And neither of these alterantive approaches are truly integrated into your target system, test frameworks, and bigger abstractions you build in your app. Tradeoffs in CDD are code duplication (but CDD handles the synchronisation for you).
