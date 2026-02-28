@@ -18,11 +18,14 @@ use clap::{Parser, Subcommand};
 use crate::generator::DieselMapper;
 
 mod error;
+mod from_openapi;
 mod generator;
 mod scaffold;
 mod schema_gen;
 mod sync;
 mod test_gen;
+mod to_docs_json;
+mod to_openapi;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about = "CDD Toolchain CLI")]
@@ -43,6 +46,15 @@ enum Commands {
     /// Generates a JSON Schema from a Rust struct or enum.
     #[clap(name = "schema-gen")]
     SchemaGen(schema_gen::SchemaGenArgs),
+    /// Generates a JSON output with documentation code snippets for an OpenAPI spec.
+    #[clap(name = "to_docs_json")]
+    ToDocsJson(to_docs_json::ToDocsJsonArgs),
+    /// Generates code from an OpenAPI specification.
+    #[clap(name = "from_openapi")]
+    FromOpenApi(from_openapi::FromOpenApiArgs),
+    /// Generates an OpenAPI specification from source code.
+    #[clap(name = "to_openapi")]
+    ToOpenApi(to_openapi::ToOpenApiArgs),
 }
 
 fn main() -> AppResult<()> {
@@ -66,6 +78,15 @@ fn main() -> AppResult<()> {
         }
         Commands::SchemaGen(args) => {
             schema_gen::execute(args)?;
+        }
+        Commands::ToDocsJson(args) => {
+            to_docs_json::execute(args)?;
+        }
+        Commands::FromOpenApi(args) => {
+            from_openapi::execute(args)?;
+        }
+        Commands::ToOpenApi(args) => {
+            to_openapi::execute(args)?;
         }
     }
 
