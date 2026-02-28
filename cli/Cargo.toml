@@ -3,6 +3,10 @@ name = "cdd-cli"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "cdd-rust"
+path = "src/main.rs"
+
 [dependencies]
 cdd-core = { path = "../core" }
 clap = { version = "^4", features = ["derive"] }
@@ -11,6 +15,8 @@ walkdir = "^2.5"
 derive_more = { version = "^2.1", features = ["from", "display"] }
 serde_json = { version = "^1", features = ["preserve_order"] }
 serde_yaml = "^0.9"
+serde = { version = "1.0.228", features = ["derive"] }
+ureq = "3.2.0"
 
 [dev-dependencies]
 tempfile = "^3"

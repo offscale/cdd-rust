@@ -1,74 +1,94 @@
 # cdd-rust Architecture
 
-The internal architecture separates the core AST/OpenAPI parsing logic from the target code generation. This allows the
-tool to support multiple web frameworks and ORMs through the `BackendStrategy` and `ModelMapper` traits.
+<!-- BADGES_START -->
+<!-- Replace these placeholders with your repository-specific badges -->
+[![License](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![CI/CD](https://github.com/offscale/cdd-rust/workflows/CI/badge.svg)](https://github.com/offscale/cdd-rust/actions)
+[![Coverage](https://codecov.io/gh/offscale/cdd-rust/branch/master/graph/badge.svg)](https://codecov.io/gh/offscale/cdd-rust)
+<!-- BADGES_END -->
+
+The **cdd-rust** tool acts as a dedicated compiler and transpiler. Its fundamental architecture follows standard compiler design principles, divided into three distinct phases: **Frontend (Parsing)**, **Intermediate Representation (IR)**, and **Backend (Emitting)**.
+
+This decoupled design ensures that any format capable of being parsed into the IR can subsequently be emitted into any supported output format, whether that is a server-side route, a client-side SDK, a database ORM, or an OpenAPI specification.
+
+## 🏗 High-Level Overview
 
 ```mermaid
-graph LR
-%% --- NODES --- 
-    InputOAS(<strong>OpenAPI Spec</strong><br/><em>YAML</em>)
-    InputSrc(<strong>Rust Source</strong><br/><em>Files / Schema</em>)
+graph TD
+    %% Styling Definitions
+    classDef frontend fill:#57caff,stroke:#4285f4,stroke-width:2px,color:#20344b,font-family:Roboto Mono
+    classDef core fill:#ffd427,stroke:#f9ab00,stroke-width:3px,color:#20344b,font-family:Google Sans,font-weight:bold
+    classDef backend fill:#5cdb6d,stroke:#34a853,stroke-width:2px,color:#20344b,font-family:Roboto Mono
+    classDef endpoint fill:#ffffff,stroke:#20344b,stroke-width:1px,color:#20344b,font-family:Google Sans
 
-    subgraph Core [Layer 1: Core]
-        direction TB
-        P_OAS(<strong>OAS Parser</strong><br/><em>serde_yaml</em>)
-        P_AST(<strong>AST Parser</strong><br/><em>ra_ap_syntax</em>)
+    subgraph Frontend [Parsers]
+        A[OpenAPI .yaml/.json]:::endpoint --> P1(OpenAPI Parser):::frontend
+        B[Rust Models / Source]:::endpoint --> P2(Rust Parser):::frontend
+        C[Server Routes / Frameworks]:::endpoint --> P3(Framework Parser):::frontend
+        D[Client SDKs / ORMs]:::endpoint --> P4(Ext Parser):::frontend
     end
 
-    subgraph Analysis [Layer 2: Analysis]
-        IR(<strong>Intermediate Representation</strong><br/><em>ParsedRoute / ParsedStruct</em>)
+    subgraph Core [Intermediate Representation]
+        IR((CDD IR)):::core
     end
 
-    subgraph Gen [Layer 3: Generation]
-        Base(<strong>Generator Engine</strong><br/><em>Traits: BackendStrategy & ModelMapper</em>)
-
-    %% The Fork
-        subgraph Targets [Targets]
-            direction TB
-            T_Actix(<strong>Actix</strong><br/><em>ActixStrategy</em>)
-            T_Diesel(<strong>Diesel</strong><br/><em>DieselMapper</em>)
-            T_OutputOAS(<strong>OpenAPI</strong><br/><em>Spec Generation</em>)
-            T_Future(<strong>Axum / SQLx</strong><br/><em>Future Strategies</em>)
-        end
+    subgraph Backend [Emitters]
+        E1(OpenAPI Emitter):::backend --> X[OpenAPI .yaml/.json]:::endpoint
+        E2(Rust Emitter):::backend --> Y[Rust Models / Structs]:::endpoint
+        E3(Server Emitter):::backend --> Z[Server Routes / Controllers]:::endpoint
+        E4(Client Emitter):::backend --> W[Client SDKs / API Calls]:::endpoint
+        E5(Data Emitter):::backend --> V[ORM Models / CLI Parsers]:::endpoint
     end
 
-%% --- EDGES --- 
-    InputOAS --> P_OAS
-    InputSrc --> P_AST
+    P1 --> IR
+    P2 --> IR
+    P3 --> IR
+    P4 --> IR
 
-    P_OAS --> IR
-    P_AST --> IR
-
-    IR --> Base
-
-    Base -- "Scaffold / Test" --> T_Actix
-    Base -- "Sync Models" --> T_Diesel
-    Base -- "Reflect" --> T_OutputOAS
-    Base -. "Extension" .-> T_Future
-
-%% --- STYLING --- 
-    classDef blue fill:#4285f4,stroke:#ffffff,color:#ffffff,stroke-width:0px
-    classDef yellow fill:#f9ab00,stroke:#ffffff,color:#20344b,stroke-width:0px
-    classDef green fill:#34a853,stroke:#ffffff,color:#ffffff,stroke-width:0px
-    classDef white fill:#ffffff,stroke:#20344b,color:#20344b,stroke-width:2px
-    classDef future fill:#f1f3f4,stroke:#20344b,color:#20344b,stroke-width:2px,stroke-dasharray: 5 5
-
-    class InputOAS,InputSrc white
-    class P_OAS,P_AST blue
-    class IR yellow
-    class Base green
-    class T_Actix,T_Diesel,T_OutputOAS white
-    class T_Future future
+    IR --> E1
+    IR --> E2
+    IR --> E3
+    IR --> E4
+    IR --> E5
 ```
 
-The project is workspace-based to separate core logic from the command-line interface.
+## 🧩 Core Components
 
-| Crate          | Purpose                                                                                                                                                                                    |
-|----------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **`cdd-core`** | **The Engine.** Contains the `ra_ap_syntax` parsers, the OpenAPI 3.x parser (with 3.2 shims), AST diffing logic, and the Backend Strategy traits (currently implementing `ActixStrategy`). |
-| **`cdd-cli`**  | **The Interface.** Provides the `sync`, `scaffold`, `schema-gen` and `test-gen` commands.                                                                                                  |
-| **`cdd-web`**  | **The Reference.** An Actix+Diesel implementation demonstrating the generated code and tests in action.                                                                                    |
+### 1. The Frontend (Parsers)
 
-## Testing and Compliance
+The Frontend's responsibility is to read an input source and translate it into the universal CDD Intermediate Representation (IR).
 
-The codebase is strictly enforced to achieve **100% test coverage** and **100% documentation coverage** without relying on configuration bypasses (such as `tarpaulin.toml` exceptions or injected `#![allow(missing_docs)]` pragmas). Continuous Integration (CI) enforces these targets.
+* **Static Analysis (AST-Driven)**: For `Rust` source code, the tool **does not** use dynamic reflection or execute the code. Instead, it reads the source files, generates an Abstract Syntax Tree (AST) using `ra_ap_syntax` (from rust-analyzer), and navigates the tree to extract classes, structs, functions, type signatures, API client definitions, server routes, and docstrings.
+* **OpenAPI Parsing**: For OpenAPI and JSON Schema inputs, the parser normalizes the structure, resolving internal `$ref`s and extracting properties, endpoints (client or server perspectives), and metadata into the IR.
+
+### 2. Intermediate Representation (IR)
+
+The Intermediate Representation is the crucial "glue" of the architecture. It is a normalized, language-agnostic data structure that represents concepts like:
+* **Models**: Entities containing typed properties, required fields, defaults, and descriptions.
+* **Endpoints / Operations**: HTTP verbs, paths, path/query/body parameters, and responses. In the IR, an operation is an abstract concept that can represent *either* a Server Route receiving a request *or* an API Client dispatching a request.
+* **Metadata**: Tooling hints, docstrings, and validations.
+
+By standardizing on a single IR (heavily inspired by OpenAPI / JSON Schema primitives), the system guarantees that parsing logic and emitting logic remain completely decoupled.
+
+### 3. The Backend (Emitters)
+
+The Backend's responsibility is to take the universal IR and generate valid target output. Emitters can be written to support various environments (e.g., Client vs Server, Web vs CLI).
+
+* **Code Generation**: Emitters iterate over the IR and generate idiomatic `Rust` source code. 
+  * A **Server Emitter** creates routing controllers and request-validation logic using `actix-web`.
+  * A **Client Emitter** can generate documentation snippets or test configurations.
+* **Database & CLI Generation**: Emitters can also target ORM models (via `dsync` for Diesel) or command-line parsers by mapping IR properties to database columns or CLI arguments.
+* **Specification Generation**: Emitters translating back to OpenAPI serialize the IR into standard OpenAPI 3.x JSON or YAML, rigorously formatting descriptions, type constraints, and endpoint schemas based on what was parsed from the source code.
+
+## 🔄 Extensibility
+
+Because of the IR-centric design, adding support for a new `Rust` framework (e.g., a new Client library, Web framework, or ORM) requires minimal effort:
+1. **To support parsing a new framework**: Write a parser that converts the framework's AST/DSL into the CDD IR. Once written, the framework can automatically be exported to OpenAPI, Client SDKs, CLI parsers, or any other existing output target.
+2. **To support emitting a new framework**: Write an emitter that converts the CDD IR into the framework's DSL/AST. Once written, the framework can automatically be generated from OpenAPI or any other supported input.
+
+## 🛡 Design Principles
+
+1. **A Single Source of Truth**: Developers should be able to maintain their definitions in whichever format is most ergonomic for their team (OpenAPI files, Native Code, Client libraries, ORM models) and generate the rest.
+2. **Zero-Execution Parsing**: Ensure security and resilience by strictly statically analyzing inputs. The compiler must never need to run the target code to understand its structure.
+3. **Lossless Conversion**: Maximize the retention of metadata (e.g., type annotations, docstrings, default values, validators) during the transition `Source -> IR -> Target`.
+4. **Symmetric Operations**: An Endpoint in the IR holds all the information necessary to generate both the Server-side controller that fulfills it, and the Client-side SDK method that calls it.
