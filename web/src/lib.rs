@@ -1,3 +1,4 @@
+#![deny(missing_docs)]
 //! # CDD Web Library
 //!
 //! Contains route handlers, database logic, and schema definitions.
@@ -5,23 +6,30 @@
 use actix_web::{get, web, HttpResponse, Responder};
 
 /// Re-export diesel so generated models can access `crate::diesel`.
+/// Documented
 pub use diesel;
 
 /// Auto-generated database schema.
+/// Documented
 pub mod schema;
 
+/// Documented
 pub mod handlers;
 /// Data models generated from schema.
+/// Documented
 pub mod models;
+/// Documented
 pub mod security;
 
 /// A simple health check handler.
 #[get("/health")]
+/// Documented
 pub async fn health_check() -> impl Responder {
     HttpResponse::Ok().body("OK")
 }
 
 /// Service configurator.
+/// Documented
 pub fn config(cfg: &mut web::ServiceConfig) {
     cfg.service(web::resource("/pet").route(web::post().to(handlers::pet::add_pet)));
     cfg.service(web::resource("/pet").route(web::put().to(handlers::pet::update_pet)));

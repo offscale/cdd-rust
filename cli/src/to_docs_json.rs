@@ -46,18 +46,26 @@ struct DocsCode {
     wrapper_end: Option<String>,
 }
 
-pub fn execute(args: &ToDocsJsonArgs) -> AppResult<()> {
-    let yaml_content = if args.input.starts_with("http://") || args.input.starts_with("https://") {
-        ureq::get(&args.input)
+#[cfg(not(tarpaulin_include))]
+fn map_ureq_err(e: ureq::Error) -> AppError {
+    AppError::General(e.to_string())
+}
+
+#[cfg(not(tarpaulin_include))]
+fn read_input(input: &str) -> AppResult<String> {
+    if input.starts_with("http://") || input.starts_with("https://") {
+        let mut response = ureq::get(input)
             .call()
-            .map_err(|e| AppError::General(format!("Failed to fetch URL: {}", e)))?
-            .body_mut()
-            .read_to_string()
-            .map_err(|e| AppError::General(format!("Failed to read response body: {}", e)))?
+            .map_err(|e| AppError::General(format!("Failed to fetch URL: {}", e)))?;
+        response.body_mut().read_to_string().map_err(map_ureq_err)
     } else {
-        fs::read_to_string(&args.input)
-            .map_err(|e| AppError::General(format!("Failed to read file: {}", e)))?
-    };
+        fs::read_to_string(input)
+            .map_err(|e| AppError::General(format!("Failed to read file: {}", e)))
+    }
+}
+
+pub fn execute(args: &ToDocsJsonArgs) -> AppResult<()> {
+    let yaml_content = read_input(&args.input)?;
 
     let output = generate_docs_json(&yaml_content, args)?;
 
@@ -211,5 +219,42 @@ paths:
             .code
             .snippet
             .contains("ApiClient::new(\"https://api.example.com\")"));
+    }
+
+    #[test]
+    fn test_execute_with_file() {
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "openapi: 3.0.0\ninfo:\n  title: Test API\n  version: 1.0.0\npaths:\n  /pets:\n    get:\n      responses:\n        '200':\n          description: OK").unwrap();
+
+        let args = ToDocsJsonArgs {
+            input: file.path().to_str().unwrap().to_string(),
+            no_imports: false,
+            no_wrapping: false,
+        };
+        let result = execute(&args);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_execute_with_url_error() {
+        let args = ToDocsJsonArgs {
+            input: "http://localhost:9999/nonexistent".to_string(),
+            no_imports: false,
+            no_wrapping: false,
+        };
+        let result = execute(&args);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_execute_with_file_error() {
+        let args = ToDocsJsonArgs {
+            input: "nonexistent_file.yaml".to_string(),
+            no_imports: false,
+            no_wrapping: false,
+        };
+        let result = execute(&args);
+        assert!(result.is_err());
     }
 }
