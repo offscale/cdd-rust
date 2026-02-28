@@ -1,28 +1,36 @@
 use actix_web::{web, HttpResponse, Responder};
 
+/// Documented
 pub async fn create_user() -> impl Responder {
     HttpResponse::Ok().finish()
 }
+/// Documented
 pub async fn create_users_with_list_input() -> impl Responder {
     HttpResponse::Ok().finish()
 }
+/// Documented
 pub async fn login_user() -> impl Responder {
     HttpResponse::Ok().finish()
 }
+/// Documented
 pub async fn logout_user() -> impl Responder {
     HttpResponse::Ok().finish()
 }
+/// Documented
 pub async fn get_user_by_name() -> impl Responder {
     HttpResponse::Ok().finish()
 }
+/// Documented
 pub async fn update_user() -> impl Responder {
     HttpResponse::Ok().finish()
 }
+/// Documented
 pub async fn delete_user() -> impl Responder {
     HttpResponse::Ok().finish()
 }
 /// Creates list of users with given input array
 ///
+/// Documented
 pub async fn create_users_with_array_input(
     _body: web::Json<Vec<crate::models::User>>,
 ) -> impl Responder {

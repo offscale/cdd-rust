@@ -1,14 +1,18 @@
 use actix_web::{HttpResponse, Responder};
 
+/// Documented
 pub async fn get_inventory() -> impl Responder {
     HttpResponse::Ok().finish()
 }
+/// Documented
 pub async fn place_order() -> impl Responder {
     HttpResponse::Ok().finish()
 }
+/// Documented
 pub async fn get_order_by_id() -> impl Responder {
     HttpResponse::Ok().finish()
 }
+/// Documented
 pub async fn delete_order() -> impl Responder {
     HttpResponse::Ok().finish()
 }

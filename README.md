@@ -96,7 +96,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 | OpenAPI (JSON/YAML) | ✅ | ✅ |
 | `Rust` Models / Structs / Types | ✅ | ✅ |
 | `Rust` Server Routes / Endpoints | ✅ | ✅ |
-| `Rust` API Clients / SDKs | ❌ | ❌ |
+| `Rust` API Clients / SDKs | ✅ | ✅ |
 | `Rust` ORM / DB Schemas | ✅ | ✅ |
 | `Rust` CLI Argument Parsers | ❌ | ❌ |
 | `Rust` Docstrings / Comments | ✅ | ✅ |
