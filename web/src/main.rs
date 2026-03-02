@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 #![deny(missing_docs)]
 //! # Web App
 #![cfg(not(tarpaulin_include))]

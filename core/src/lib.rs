@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 #![deny(missing_docs)]
 
 //! # CDD Core

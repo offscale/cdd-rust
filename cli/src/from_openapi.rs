@@ -3,7 +3,7 @@ use cdd_core::strategies::{ActixStrategy, ClapCliStrategy, ReqwestStrategy};
 use clap::{Args, Subcommand};
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::scaffold::ScaffoldArgs;
 use crate::test_gen::TestGenArgs;
@@ -18,13 +18,13 @@ pub struct FromOpenApiArgs {
 pub enum FromOpenApiCommands {
     /// Generate a CLI SDK
     #[clap(name = "to_sdk_cli")]
-    ToSdkCli(GenerateArgs),
+    SdkCli(GenerateArgs),
     /// Generate a Client SDK
     #[clap(name = "to_sdk")]
-    ToSdk(GenerateArgs),
+    Sdk(GenerateArgs),
     /// Generate Server scaffolding
     #[clap(name = "to_server")]
-    ToServer(GenerateArgs),
+    Server(GenerateArgs),
 }
 
 #[derive(Args, Debug)]
@@ -84,15 +84,15 @@ impl GenerateArgs {
 
 pub fn execute(args: &FromOpenApiArgs) -> AppResult<()> {
     match &args.command {
-        FromOpenApiCommands::ToSdkCli(gen_args) => {
+        FromOpenApiCommands::SdkCli(gen_args) => {
             println!("Generating SDK CLI...");
             run_generation(gen_args, &ClapCliStrategy)?;
         }
-        FromOpenApiCommands::ToSdk(gen_args) => {
+        FromOpenApiCommands::Sdk(gen_args) => {
             println!("Generating SDK...");
             run_generation(gen_args, &ReqwestStrategy)?;
         }
-        FromOpenApiCommands::ToServer(gen_args) => {
+        FromOpenApiCommands::Server(gen_args) => {
             println!("Generating Server...");
             run_generation(gen_args, &ActixStrategy)?;
         }
@@ -153,4 +153,178 @@ fn run_generation(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_get_output_dir_default() {
+        let args = GenerateArgs {
+            input: None,
+            input_dir: None,
+            output_dir: None,
+            no_github_actions: false,
+            no_installable_package: false,
+        };
+        let dir = args.get_output_dir();
+        assert_eq!(
+            dir,
+            env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        );
+    }
+
+    #[test]
+    fn test_get_output_dir_provided() {
+        let path = PathBuf::from("/tmp/out");
+        let args = GenerateArgs {
+            input: None,
+            input_dir: None,
+            output_dir: Some(path.clone()),
+            no_github_actions: false,
+            no_installable_package: false,
+        };
+        assert_eq!(args.get_output_dir(), path);
+    }
+
+    #[test]
+    fn test_get_input_files_single() {
+        let path = PathBuf::from("spec.yaml");
+        let args = GenerateArgs {
+            input: Some(path.clone()),
+            input_dir: None,
+            output_dir: None,
+            no_github_actions: false,
+            no_installable_package: false,
+        };
+        assert_eq!(args.get_input_files(), vec![path]);
+    }
+
+    #[test]
+    fn test_get_input_files_dir() {
+        let dir = tempdir().unwrap();
+        let file1 = dir.path().join("a.yaml");
+        let file2 = dir.path().join("b.json");
+        let file3 = dir.path().join("c.txt");
+        fs::write(&file1, "").unwrap();
+        fs::write(&file2, "").unwrap();
+        fs::write(&file3, "").unwrap();
+
+        let args = GenerateArgs {
+            input: None,
+            input_dir: Some(dir.path().to_path_buf()),
+            output_dir: None,
+            no_github_actions: false,
+            no_installable_package: false,
+        };
+        let mut files = args.get_input_files();
+        files.sort();
+        let mut expected = vec![file1, file2];
+        expected.sort();
+        assert_eq!(files, expected);
+    }
+
+    #[test]
+    fn test_get_input_files_none() {
+        let args = GenerateArgs {
+            input: None,
+            input_dir: None,
+            output_dir: None,
+            no_github_actions: false,
+            no_installable_package: false,
+        };
+        assert!(args.get_input_files().is_empty());
+    }
+
+    #[test]
+    fn test_execute_and_run_generation() {
+        let dir = tempdir().unwrap();
+        let input_file = dir.path().join("spec.yaml");
+        let openapi_content = r#"
+openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /test:
+    get:
+      operationId: test_op
+      responses:
+        '200':
+          description: OK
+components:
+  schemas:
+    Pet:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+"#;
+        fs::write(&input_file, openapi_content).unwrap();
+
+        // Test SdkCli
+        let args = FromOpenApiArgs {
+            command: FromOpenApiCommands::SdkCli(GenerateArgs {
+                input: Some(input_file.clone()),
+                input_dir: None,
+                output_dir: Some(dir.path().join("out1")),
+                no_github_actions: false,
+                no_installable_package: false,
+            }),
+        };
+        assert!(execute(&args).is_ok());
+
+        // Test Sdk
+        let args = FromOpenApiArgs {
+            command: FromOpenApiCommands::Sdk(GenerateArgs {
+                input: Some(input_file.clone()),
+                input_dir: None,
+                output_dir: Some(dir.path().join("out2")),
+                no_github_actions: false,
+                no_installable_package: false,
+            }),
+        };
+        assert!(execute(&args).is_ok());
+
+        // Test Server
+        let args = FromOpenApiArgs {
+            command: FromOpenApiCommands::Server(GenerateArgs {
+                input: Some(input_file.clone()),
+                input_dir: None,
+                output_dir: Some(dir.path().join("out3")),
+                no_github_actions: false,
+                no_installable_package: false,
+            }),
+        };
+        assert!(execute(&args).is_ok());
+    }
+
+    #[test]
+    fn test_run_generation_empty() {
+        let args = GenerateArgs {
+            input: None,
+            input_dir: None,
+            output_dir: None,
+            no_github_actions: false,
+            no_installable_package: false,
+        };
+        let result = run_generation(&args, &cdd_core::strategies::ActixStrategy);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_run_generation_invalid_file() {
+        let args = GenerateArgs {
+            input: Some(PathBuf::from("/does/not/exist.yaml")),
+            input_dir: None,
+            output_dir: None,
+            no_github_actions: false,
+            no_installable_package: false,
+        };
+        let result = run_generation(&args, &cdd_core::strategies::ActixStrategy);
+        assert!(result.is_err());
+    }
 }

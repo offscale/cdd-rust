@@ -271,4 +271,28 @@ paths:
         let result = execute(&args);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_execute_with_invalid_output_path() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("test.yaml");
+        let openapi_yaml = r#"
+openapi: 3.0.0
+info:
+  title: Sample API
+  version: 1.0.0
+paths: {}
+"#;
+        std::fs::write(&file, openapi_yaml).unwrap();
+
+        let args = ToDocsJsonArgs {
+            input: file.to_string_lossy().to_string(),
+            no_imports: false,
+            no_wrapping: false,
+            output: Some("/nonexistent_dir/output.json".to_string()),
+        };
+        let result = execute(&args);
+        assert!(result.is_err());
+    }
 }

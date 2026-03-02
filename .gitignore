@@ -1,3 +1,4 @@
+lcov*
 /out
 /target
 /Cargo.lock
