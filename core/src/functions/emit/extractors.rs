@@ -299,6 +299,10 @@ pub(crate) fn generate_function(
     if !docs.is_empty() {
         code.push_str(&docs);
     }
+    let extra_docs = strategy.extra_handler_docs(route);
+    if !extra_docs.is_empty() {
+        code.push_str(&extra_docs);
+    }
     if route.deprecated {
         code.push_str("#[deprecated]\n");
     }

@@ -1,46 +1,22 @@
-# Developer Guide
-
-Install the latest version of [Rust](https://www.rust-lang.org). We tend to use nightly
-versions (required for `ra_ap_syntax` compatibility feature flags in some contexts). [CLI tool for installing Rust](https://rustup.rs).
-
-We use [rust-clippy](https://github.com/rust-lang-nursery/rust-clippy) linters to improve code quality.
+# Developing cdd-rust
 
 ## Prerequisites
 
-* Rust (Nightly toolchain)
-* PostgreSQL (if running the reference web implementation)
+- Rust 1.75 or later
+- Cargo
+- `make`
 
-## Step-by-step guide
+## Building
 
-```bash
-# Install Rust (nightly) 
-$ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain nightly
+Run `make build` to build the CLI and libraries.
 
-# Install cargo-make (cross-platform feature-rich reimplementation of Make) 
-$ cargo install --force cargo-make
+## Testing
 
-# Install rustfmt (Rust formatter) 
-$ rustup component add rustfmt
+Run `make test` to execute the full test suite.
+We enforce 100% test coverage and 100% documentation coverage.
 
-# Clone this repo
-$ git clone https://github.com/offscale/cdd-rust && cd cdd-rust
+## Project Structure
 
-# Build the project
-$ cargo build
-
-# Run unit tests
-$ cargo test
-
-# Run the generated contract tests (requires web/tests/api_contracts.rs to be generated)
-$ cargo test -p cdd-web
-
-# Run test coverage analysis (requires cargo-tarpaulin)
-$ cargo install cargo-tarpaulin
-$ cargo tarpaulin
-
-# Run documentation coverage analysis (fail on warnings)
-$ RUSTDOCFLAGS="-D warnings -W missing_docs" cargo doc --no-deps --workspace
-
-# Format, build and test
-$ cargo make
-```
+- `core/`: Parsing, emitting, and the intermediate representation logic.
+- `cli/`: The command-line interface logic and JSON-RPC server.
+- `web/`: Example models and routes.

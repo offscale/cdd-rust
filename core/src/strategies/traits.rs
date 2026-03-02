@@ -39,6 +39,11 @@ pub trait BackendStrategy {
         response_links: Option<&[ParsedLink]>,
     ) -> String;
 
+    /// Optional extra doc comments to insert above the handler.
+    fn extra_handler_docs(&self, _route: &ParsedRoute) -> String {
+        String::new()
+    }
+
     /// Generates the type string for path parameter extraction.
     ///
     /// # Arguments
