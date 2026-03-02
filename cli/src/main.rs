@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 #![deny(missing_docs)]
 #![cfg(not(tarpaulin_include))]
 

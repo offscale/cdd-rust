@@ -171,4 +171,52 @@ mod tests {
         let result_cli = execute(&args, &TargetMode::Cli);
         assert!(result_cli.is_ok());
     }
+
+    #[test]
+    fn test_to_openapi_execute_yaml() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let input_file = dir.path().join("input.rs");
+        let output_file = dir.path().join("output.yaml");
+
+        let handler_code = r#"
+        #[openapi]
+        #[get("/test")]
+        async fn test_handler() -> impl Responder { HttpResponse::Ok().finish() }
+        "#;
+        std::fs::write(&input_file, handler_code).unwrap();
+
+        let args = ToOpenApiArgs {
+            file: input_file,
+            output: output_file.clone(),
+        };
+
+        let result = execute(&args, &crate::TargetMode::Server);
+        assert!(result.is_ok());
+        assert!(std::fs::read_to_string(output_file)
+            .unwrap()
+            .contains("openapi:"));
+    }
+
+    #[test]
+    fn test_to_openapi_execute_write_error() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let input_file = dir.path().join("input.rs");
+
+        let handler_code = r#"
+        #[openapi]
+        #[get("/test")]
+        async fn test_handler() -> impl Responder { HttpResponse::Ok().finish() }
+        "#;
+        std::fs::write(&input_file, handler_code).unwrap();
+
+        let args = ToOpenApiArgs {
+            file: input_file,
+            output: std::path::PathBuf::from("/nonexistent_dir/output.yaml"),
+        };
+
+        let result = execute(&args, &crate::TargetMode::Server);
+        assert!(result.is_err());
+    }
 }
