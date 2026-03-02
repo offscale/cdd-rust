@@ -8,16 +8,20 @@ use std::fs;
 #[derive(Args, Debug)]
 pub struct ToDocsJsonArgs {
     /// Path or URL to the OpenAPI specification.
-    #[clap(short, long)]
+    #[clap(short, long, env = "CDD_INPUT")]
     pub input: String,
 
     /// If provided, omit the imports field in the code object.
-    #[clap(long)]
+    #[clap(long, env = "CDD_NO_IMPORTS")]
     pub no_imports: bool,
 
     /// If provided, omit the wrapper_start and wrapper_end fields in the code object.
-    #[clap(long)]
+    #[clap(long, env = "CDD_NO_WRAPPING")]
     pub no_wrapping: bool,
+
+    /// Output file for the generated JSON.
+    #[clap(short, long, env = "CDD_OUTPUT")]
+    pub output: Option<String>,
 }
 
 #[derive(Serialize, Debug)]
@@ -72,7 +76,12 @@ pub fn execute(args: &ToDocsJsonArgs) -> AppResult<()> {
     let json = serde_json::to_string_pretty(&output)
         .map_err(|e| AppError::General(format!("JSON Serialization error: {}", e)))?;
 
-    println!("{}", json);
+    if let Some(ref output_path) = args.output {
+        fs::write(output_path, json)
+            .map_err(|e| AppError::General(format!("Failed to write to file: {}", e)))?;
+    } else {
+        println!("{}", json);
+    }
 
     Ok(())
 }
@@ -165,6 +174,7 @@ paths:
             input: "dummy".into(),
             no_imports: false,
             no_wrapping: false,
+            output: None,
         };
 
         let output = generate_docs_json(yaml, &args).unwrap();
@@ -207,6 +217,7 @@ paths:
             input: "dummy".into(),
             no_imports: true,
             no_wrapping: true,
+            output: None,
         };
 
         let output = generate_docs_json(yaml, &args).unwrap();
@@ -231,6 +242,7 @@ paths:
             input: file.path().to_str().unwrap().to_string(),
             no_imports: false,
             no_wrapping: false,
+            output: None,
         };
         let result = execute(&args);
         assert!(result.is_ok());
@@ -242,6 +254,7 @@ paths:
             input: "http://localhost:9999/nonexistent".to_string(),
             no_imports: false,
             no_wrapping: false,
+            output: None,
         };
         let result = execute(&args);
         assert!(result.is_err());
@@ -253,6 +266,7 @@ paths:
             input: "nonexistent_file.yaml".to_string(),
             no_imports: false,
             no_wrapping: false,
+            output: None,
         };
         let result = execute(&args);
         assert!(result.is_err());

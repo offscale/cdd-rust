@@ -3,12 +3,13 @@ name: CI
 on:
   push:
     branches: [ "master" ]
+    tags:
+      - 'v*'
   pull_request:
     branches: [ "master" ]
 
 env:
   CARGO_TERM_COLOR: always
-  # Ensure we don't need a real DB for basic unit tests
   DATABASE_URL: postgres://user:password@localhost/dummy
 
 jobs:
@@ -17,11 +18,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Set up Rust
         run: |
-          rustup override set nightly
+          rustup override set stable
           rustup component add rustfmt
           rustup component add clippy
 
@@ -32,13 +33,17 @@ jobs:
         run: cargo clippy --workspace -- -D warnings
 
       - name: Build Workspace
-        run: cargo build --verbose --workspace
+        run: cargo build --verbose --workspace --release
+
+      - name: Build WASM
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo build -p cdd-cli --release --target wasm32-unknown-unknown --verbose
 
       - name: Run Tests
         run: cargo test --verbose --workspace
 
       - name: Check Documentation
-        # This compiles the docs and respects #![deny(missing_docs)]
         run: cargo doc --workspace --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: "-D warnings"
@@ -47,5 +52,12 @@ jobs:
         run: cargo install cargo-tarpaulin
 
       - name: Run Test Coverage
-        # Enforces 100% test coverage across the workspace
         run: cargo tarpaulin --fail-under 100 --workspace --out xml
+
+      - name: Upload artifacts (if tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            target/release/cdd-rust
+            target/wasm32-unknown-unknown/release/cdd-rust.wasm

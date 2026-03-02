@@ -11,9 +11,9 @@
 //! - `scaffold`: Generates handler scaffolding from OpenAPI specs.
 //! - `schema-gen`: Generates JSON Schemas from Rust structs.
 
-use cdd_core::strategies::ActixStrategy;
+use cdd_core::strategies::{ActixStrategy, ClapCliStrategy, ReqwestStrategy};
 use cdd_core::AppResult;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::generator::DieselMapper;
 
@@ -22,16 +22,38 @@ mod from_openapi;
 mod generator;
 mod scaffold;
 mod schema_gen;
+mod server_json_rpc;
 mod sync;
 mod test_gen;
 mod to_docs_json;
 mod to_openapi;
+
+/// Target generation mode.
+#[derive(ValueEnum, Clone, Debug, PartialEq)]
+pub enum TargetMode {
+    /// Generate Actix Web server scaffolding
+    Server,
+    /// Generate Reqwest client scaffolding
+    Client,
+    /// Generate Clap CLI scaffolding
+    Cli,
+}
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about = "CDD Toolchain CLI")]
 struct Cli {
     #[clap(subcommand)]
     command: Commands,
+
+    /// Target mode (server or client).
+    #[clap(
+        short,
+        long,
+        env = "CDD_TARGET",
+        default_value = "server",
+        global = true
+    )]
+    target: TargetMode,
 }
 
 #[derive(Subcommand, Debug)]
@@ -55,6 +77,9 @@ enum Commands {
     /// Generates an OpenAPI specification from source code.
     #[clap(name = "to_openapi")]
     ToOpenApi(to_openapi::ToOpenApiArgs),
+    /// Expose CLI interface as JSON-RPC server over HTTP.
+    #[clap(name = "serve_json_rpc")]
+    ServerJsonRpc(server_json_rpc::ServerJsonRpcArgs),
 }
 
 fn main() -> AppResult<()> {
@@ -62,20 +87,19 @@ fn main() -> AppResult<()> {
 
     match &cli.command {
         Commands::Sync(args) => {
-            // Injecting Diesel/dsync mapper
             let mapper = DieselMapper;
             sync::execute(args, &mapper)?;
         }
-        Commands::TestGen(args) => {
-            // Injecting Actix Web strategy
-            let strategy = ActixStrategy;
-            test_gen::execute(args, &strategy)?;
-        }
-        Commands::Scaffold(args) => {
-            // Injecting Actix Web strategy
-            let strategy = ActixStrategy;
-            scaffold::execute(args, &strategy)?;
-        }
+        Commands::TestGen(args) => match cli.target {
+            TargetMode::Server => test_gen::execute(args, &ActixStrategy)?,
+            TargetMode::Client => test_gen::execute(args, &ReqwestStrategy)?,
+            TargetMode::Cli => test_gen::execute(args, &ClapCliStrategy)?,
+        },
+        Commands::Scaffold(args) => match cli.target {
+            TargetMode::Server => scaffold::execute(args, &ActixStrategy)?,
+            TargetMode::Client => scaffold::execute(args, &ReqwestStrategy)?,
+            TargetMode::Cli => scaffold::execute(args, &ClapCliStrategy)?,
+        },
         Commands::SchemaGen(args) => {
             schema_gen::execute(args)?;
         }
@@ -86,7 +110,10 @@ fn main() -> AppResult<()> {
             from_openapi::execute(args)?;
         }
         Commands::ToOpenApi(args) => {
-            to_openapi::execute(args)?;
+            to_openapi::execute(args, &cli.target)?;
+        }
+        Commands::ServerJsonRpc(args) => {
+            server_json_rpc::execute(args)?;
         }
     }
 

@@ -1,15 +1,15 @@
 [package]
 name = "cdd-cli"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 
 [[bin]]
-name = "cdd_rust"
+name = "cdd-rust"
 path = "src/main.rs"
 
 [dependencies]
 cdd-core = { path = "../core" }
-clap = { version = "^4", features = ["derive"] }
+clap = { version = "^4", features = ["derive", "env"] }
 dsync = "^0.1"
 walkdir = "^2.5"
 derive_more = { version = "^2.1", features = ["from", "display"] }
@@ -17,6 +17,9 @@ serde_json = { version = "^1", features = ["preserve_order"] }
 serde_yaml = "^0.9"
 serde = { version = "1.0.228", features = ["derive"] }
 ureq = "3.2.0"
+actix-web = "4.13.0"
+actix-rt = "2.11.0"
+tokio = "1.49.0"
 
 [dev-dependencies]
 tempfile = "^3"

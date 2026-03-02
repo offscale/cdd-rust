@@ -58,7 +58,7 @@ graph TD
 
 The Frontend's responsibility is to read an input source and translate it into the universal CDD Intermediate Representation (IR).
 
-* **Static Analysis (AST-Driven)**: For `Rust` source code, the tool **does not** use dynamic reflection or execute the code. Instead, it reads the source files, generates an Abstract Syntax Tree (AST) using `ra_ap_syntax` (from rust-analyzer), and navigates the tree to extract classes, structs, functions, type signatures, API client definitions, server routes, and docstrings.
+* **Static Analysis (AST-Driven)**: For `Rust` source code, the tool **does not** use dynamic reflection or execute the code. Instead, it reads the source files, generates an Abstract Syntax Tree (AST) using `ra_ap_syntax`, and navigates the tree to extract classes, structs, functions, type signatures, API client definitions, server routes, and docstrings.
 * **OpenAPI Parsing**: For OpenAPI and JSON Schema inputs, the parser normalizes the structure, resolving internal `$ref`s and extracting properties, endpoints (client or server perspectives), and metadata into the IR.
 
 ### 2. Intermediate Representation (IR)
@@ -74,15 +74,15 @@ By standardizing on a single IR (heavily inspired by OpenAPI / JSON Schema primi
 
 The Backend's responsibility is to take the universal IR and generate valid target output. Emitters can be written to support various environments (e.g., Client vs Server, Web vs CLI).
 
-* **Code Generation**: Emitters iterate over the IR and generate idiomatic `Rust` source code. 
-  * A **Server Emitter** creates routing controllers and request-validation logic using `actix-web`.
-  * A **Client Emitter** can generate documentation snippets or test configurations.
-* **Database & CLI Generation**: Emitters can also target ORM models (via `dsync` for Diesel) or command-line parsers by mapping IR properties to database columns or CLI arguments.
-* **Specification Generation**: Emitters translating back to OpenAPI serialize the IR into standard OpenAPI 3.x JSON or YAML, rigorously formatting descriptions, type constraints, and endpoint schemas based on what was parsed from the source code.
+* **Code Generation**: Emitters iterate over the IR and generate idiomatic `Rust` source code using token replacement and syntax manipulation. 
+  * A **Server Emitter** creates routing controllers and request-validation logic.
+  * A **Client Emitter** creates API wrappers, fetch functions, and response-parsing logic.
+* **Database & CLI Generation**: Emitters can also target ORM models or command-line parsers by mapping IR properties to database columns or CLI arguments.
+* **Specification Generation**: Emitters translating back to OpenAPI serialize the IR into standard OpenAPI 3.2.0 JSON or YAML, rigorously formatting descriptions, type constraints, and endpoint schemas based on what was parsed from the source code.
 
 ## 🔄 Extensibility
 
-Because of the IR-centric design, adding support for a new `Rust` framework (e.g., a new Client library, Web framework, or ORM) requires minimal effort:
+Because of the IR-centric design, adding support for a new `Rust` framework (e.g., a new Client library, Web framework like Axum/Actix, or ORM like Diesel/SeaORM) requires minimal effort:
 1. **To support parsing a new framework**: Write a parser that converts the framework's AST/DSL into the CDD IR. Once written, the framework can automatically be exported to OpenAPI, Client SDKs, CLI parsers, or any other existing output target.
 2. **To support emitting a new framework**: Write an emitter that converts the CDD IR into the framework's DSL/AST. Once written, the framework can automatically be generated from OpenAPI or any other supported input.
 
