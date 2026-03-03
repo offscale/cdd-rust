@@ -1,22 +1,29 @@
-# Developing cdd-rust
+# Developing `cdd-rust`
 
-## Prerequisites
+To develop `cdd-rust`, you will need to clone the repository and run standard Cargo tooling.
 
-- Rust 1.75 or later
-- Cargo
-- `make`
+1.  **Clone the Repository:**
+    ```bash
+    git clone https://github.com/offscale/cdd-rust.git
+    cd cdd-rust
+    ```
 
-## Building
+2.  **Use Make Targets:**
+    The project includes a `Makefile` / `make.bat`. Use it for common operations:
+    ```bash
+    make build        # Build debug and release
+    make test         # Run unit and integration tests across the workspace
+    make build_docs   # Compile docs locally
+    ```
 
-Run `make build` to build the CLI and libraries.
+3.  **Project Structure:**
+    -   `core/`: Contains the parsing, emitting, and intermediate representation logic.
+    -   `cli/`: The binary interface.
+    -   `web/`: Actix-web dummy server used in testing.
 
-## Testing
-
-Run `make test` to execute the full test suite.
-We enforce 100% test coverage and 100% documentation coverage.
-
-## Project Structure
-
-- `core/`: Parsing, emitting, and the intermediate representation logic.
-- `cli/`: The command-line interface logic and JSON-RPC server.
-- `web/`: Example models and routes.
+4.  **Running CI Locally:**
+    We enforce `clippy` and `rustfmt` cleanly on all modules:
+    ```bash
+    cargo fmt -- --check
+    cargo clippy --workspace -- -D warnings
+    ```

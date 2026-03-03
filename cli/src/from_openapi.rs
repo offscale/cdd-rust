@@ -114,6 +114,59 @@ fn run_generation(
     let out_dir = args.get_output_dir();
     fs::create_dir_all(&out_dir).unwrap_or_default();
 
+    if !args.no_installable_package {
+        let cargo_toml_path = out_dir.join("Cargo.toml");
+        if !cargo_toml_path.exists() {
+            let cargo_toml = format!(
+                r#"[package]
+name = "{}"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+tokio = {{ version = "1", features = ["full"] }}
+serde = {{ version = "1.0", features = ["derive"] }}
+serde_json = "1.0"
+reqwest = {{ version = "0.11", features = ["json"] }}
+actix-web = "4.0"
+diesel = {{ version = "2.0", features = ["postgres"] }}
+clap = {{ version = "4.0", features = ["derive"] }}
+"#,
+                out_dir
+                    .file_name()
+                    .unwrap_or_else(|| std::ffi::OsStr::new("generated_package"))
+                    .to_string_lossy()
+            );
+            fs::write(cargo_toml_path, cargo_toml).unwrap_or_default();
+        }
+    }
+
+    if !args.no_github_actions {
+        let gh_workflows_dir = out_dir.join(".github").join("workflows");
+        fs::create_dir_all(&gh_workflows_dir).unwrap_or_default();
+        let ci_yml_path = gh_workflows_dir.join("ci.yml");
+        if !ci_yml_path.exists() {
+            let ci_yml = r#"name: CI
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Build
+        run: cargo build --verbose
+      - name: Run tests
+        run: cargo test --verbose
+"#;
+            fs::write(ci_yml_path, ci_yml).unwrap_or_default();
+        }
+    }
+
     for input in inputs {
         let yaml_content = fs::read_to_string(&input)
             .map_err(|e| AppError::General(format!("Failed to read OpenAPI {:?}: {}", input, e)))?;

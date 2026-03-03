@@ -71,7 +71,8 @@ target\release\cdd-rust.exe %RUN_ARGS%
 GOTO :EOF
 
 :build_wasm
-cargo build --target wasm32-unknown-unknown --release
+ECHO Attempting WASM build. See WASM.md for current limitations.
+cargo build -p cdd-cli --target wasm32-unknown-unknown --release || ECHO WASM build is currently unsupported. See WASM.md for details.
 GOTO :EOF
 
 :build_docker

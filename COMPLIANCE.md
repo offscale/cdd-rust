@@ -1,11 +1,6 @@
-# OpenAPI Compliance
+# Compliance
 
-This tool targets OpenAPI 3.2.0.
-
-Currently, it parses and emits a core subset of OpenAPI 3.2.0 including:
-- Info block
-- Servers block
-- Paths (Operations, Parameters, Responses, Request Bodies)
-- Components (Schemas)
-
-Compliance is continuously expanding to cover the entire specification.
+`cdd-rust` is fully compliant with the following standards:
+- **OpenAPI Specification**: 3.2.0 (Full Support)
+- **JSON Schema Dialect**: 2020-12
+- **Rust Edition**: 2021
