@@ -1,23 +1,11 @@
-# WASM Support
+# WebAssembly (WASM) Support
 
-`cdd-rust` supports WebAssembly (WASM) as a primary build target to enable:
-1. Unified CLI runnable on systems without language runtimes
-2. Unified Web Interface for `cdd-*` components.
+Currently, compiling this project to WebAssembly (WASM) is **not possible**.
 
-## Status
+## Reason
 
-| WASM Target | Supported | Notes |
-|-------------|-----------|-------|
-| `wasm32-unknown-unknown` | ✅ | Core parsing and generation logic compiles to WASM out of the box. |
+The CLI and core library heavily depend on asynchronous networking and multi-threading runtimes provided by `tokio` and `actix-web`. Specifically:
+- `actix-web` requires a full multi-threaded Tokio runtime with networking capabilities to scaffold and generate/test the server.
+- The underlying `mio` library, which powers Tokio's I/O event loop, does not support WASM targets (`wasm32-unknown-unknown` or `wasm32-unknown-emscripten`) because WebAssembly lacks standard socket/networking APIs.
 
-## Building
-
-To build the project for WASM:
-
-```sh
-make build_wasm
-# or manually:
-cargo build --target wasm32-unknown-unknown --release
-```
-
-The output will be placed in `target/wasm32-unknown-unknown/release/`.
+To support WASM in the future, the project would need to decouple the code generation and AST parsing logic completely from the Actix and Tokio dependencies, or utilize a WASI runtime with networking extensions (like WasmEdge) once they become fully standardized and supported by the Rust async ecosystem.

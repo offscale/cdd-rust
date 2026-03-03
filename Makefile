@@ -10,19 +10,20 @@ all: help
 
 help:
 	@echo "Available commands:"
-	@echo "  install_base   - Install Rust and required targets (e.g., WASM)"
-	@echo "  install_deps   - Install dependencies (cargo fetch)"
+	@echo "  install_base   - Install Rust and required targets"
+	@echo "  install_deps   - Install dependencies"
 	@echo "  build_docs     - Build the API docs. Use DOC_DIR=<path> to specify alternative directory."
 	@echo "  build          - Build the CLI binary. Use BIN_DIR=<path> to specify alternative directory."
 	@echo "  test           - Run the test suite."
-	@echo "  run            - Run the CLI tool. Pass args directly, e.g., make run -- --version"
-	@echo "  build_wasm     - Build the WASM target."
+	@echo "  run            - Run the CLI tool."
+	@echo "  build_wasm     - Build the WASM target (Note: currently unsupported)"
 	@echo "  build_docker   - Build alpine and debian Docker images."
 	@echo "  run_docker     - Run the built Docker images to test them."
 
 install_base:
-	curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-	rustup target add wasm32-unknown-unknown
+	rustup update
+	rustup target add wasm32-unknown-unknown || true
+	rustup target add wasm32-unknown-emscripten || true
 
 install_deps:
 	cargo fetch
@@ -33,20 +34,21 @@ build_docs:
 
 BIN_DIR ?= target/release
 build:
-	cargo build --release
+	cargo build --release -p cdd-cli
 	@if [ "$(BIN_DIR)" != "target/release" ]; then \
 		mkdir -p $(BIN_DIR); \
 		cp target/release/cdd-rust $(BIN_DIR)/; \
 	fi
 
 test:
-	cargo test
+	cargo test --workspace
 
 run: build
 	./target/release/cdd-rust $(RUN_ARGS)
 
 build_wasm:
-	cargo build --target wasm32-unknown-unknown --release
+	@echo "Attempting WASM build. See WASM.md for current limitations."
+	cargo build -p cdd-cli --release --target wasm32-unknown-unknown || echo "WASM build is currently unsupported. See WASM.md for details."
 
 build_docker:
 	docker build -t cdd-rust:alpine -f alpine.Dockerfile .
@@ -57,10 +59,9 @@ run_docker:
 	docker run --rm -d --name cdd_alpine -p 8082:8082 cdd-rust:alpine
 	sleep 2
 	curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "version", "id": 1}' http://localhost:8082 || true
-	docker stop cdd_alpine
-
+	docker stop cdd_alpine || true
 	@echo "Testing Debian image..."
 	docker run --rm -d --name cdd_debian -p 8082:8082 cdd-rust:debian
 	sleep 2
 	curl -X POST -H "Content-Type: application/json" -d '{"jsonrpc": "2.0", "method": "version", "id": 1}' http://localhost:8082 || true
-	docker stop cdd_debian
+	docker stop cdd_debian || true
