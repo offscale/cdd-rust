@@ -123,3 +123,150 @@ at your option.
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
 dual licensed as above, without any additional terms or conditions.
+
+## CLI Help
+
+```
+$ ./target/release/cdd-rust --help
+CDD Toolchain CLI
+
+Usage: cdd-rust [OPTIONS] <COMMAND>
+
+Commands:
+  sync            Synchronize DB schema to Rust models and OpenAPI-ready structs
+  test-gen        Generates integration tests based on OpenAPI contracts
+  scaffold        Scaffolds handler functions from OpenAPI Routes
+  schema-gen      Generates a JSON Schema from a Rust struct or enum
+  to_docs_json    Generates a JSON output with documentation code snippets for an OpenAPI spec
+  from_openapi    Generates code from an OpenAPI specification
+  to_openapi      Generates an OpenAPI specification from source code
+  serve_json_rpc  Expose CLI interface as JSON-RPC server over HTTP
+  help            Print this message or the help of the given subcommand(s)
+
+Options:
+  -t, --target <TARGET>
+          Target mode (server or client)
+
+          Possible values:
+          - server: Generate Actix Web server scaffolding
+          - client: Generate Reqwest client scaffolding
+          - cli:    Generate Clap CLI scaffolding
+          
+          [env: CDD_TARGET=]
+          [default: server]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+```
+
+### `from_openapi`
+
+```
+$ ./target/release/cdd-rust from_openapi --help
+Generates code from an OpenAPI specification
+
+Usage: cdd-rust from_openapi [OPTIONS] <COMMAND>
+
+Commands:
+  to_sdk_cli  Generate a CLI SDK
+  to_sdk      Generate a Client SDK
+  to_server   Generate Server scaffolding
+  help        Print this message or the help of the given subcommand(s)
+
+Options:
+  -t, --target <TARGET>
+          Target mode (server or client)
+
+          Possible values:
+          - server: Generate Actix Web server scaffolding
+          - client: Generate Reqwest client scaffolding
+          - cli:    Generate Clap CLI scaffolding
+          
+          [env: CDD_TARGET=]
+          [default: server]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `to_openapi`
+
+```
+$ ./target/release/cdd-rust to_openapi --help
+Generates an OpenAPI specification from source code
+
+Usage: cdd-rust to_openapi [OPTIONS] --input <INPUT>
+
+Options:
+  -i, --input <INPUT>
+          Path to the code directory or file to parse
+          
+          [env: CDD_INPUT=]
+
+  -o, --output <OUTPUT>
+          Output file for the generated OpenAPI spec
+          
+          [env: CDD_OUTPUT=]
+          [default: spec.json]
+
+  -t, --target <TARGET>
+          Target mode (server or client)
+
+          Possible values:
+          - server: Generate Actix Web server scaffolding
+          - client: Generate Reqwest client scaffolding
+          - cli:    Generate Clap CLI scaffolding
+          
+          [env: CDD_TARGET=]
+          [default: server]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+### `to_docs_json`
+
+```
+$ ./target/release/cdd-rust to_docs_json --help
+Generates a JSON output with documentation code snippets for an OpenAPI spec
+
+Usage: cdd-rust to_docs_json [OPTIONS] --input <INPUT>
+
+Options:
+  -i, --input <INPUT>
+          Path or URL to the OpenAPI specification
+          
+          [env: CDD_INPUT=]
+
+      --no-imports
+          If provided, omit the imports field in the code object
+          
+          [env: CDD_NO_IMPORTS=]
+
+      --no-wrapping
+          If provided, omit the wrapper_start and wrapper_end fields in the code object
+          
+          [env: CDD_NO_WRAPPING=]
+
+  -o, --output <OUTPUT>
+          Output file for the generated JSON
+          
+          [env: CDD_OUTPUT=]
+
+  -t, --target <TARGET>
+          Target mode (server or client)
+
+          Possible values:
+          - server: Generate Actix Web server scaffolding
+          - client: Generate Reqwest client scaffolding
+          - cli:    Generate Clap CLI scaffolding
+          
+          [env: CDD_TARGET=]
+          [default: server]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
