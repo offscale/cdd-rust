@@ -4,7 +4,7 @@
 
 //! # CDD CLI
 //!
-//! Command Line Interface for the Contract-Driven Development toolchain.
+//! Command Line Interface for the Compiler Driven Development toolchain.
 //!
 //! Supported Commands:
 //! - `sync`: Pipeline DB -> Diesel -> Model -> Schema -> OpenAPI.
