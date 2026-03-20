@@ -232,7 +232,6 @@ paths:
             .contains("ApiClient::new(\"https://api.example.com\")"));
     }
 
-
     #[test]
     fn test_generate_docs_json_with_webhook() {
         let yaml = r#"
