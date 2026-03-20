@@ -11,8 +11,8 @@ use walkdir::WalkDir;
 #[derive(Args, Debug)]
 pub struct ToOpenApiArgs {
     /// Path to the code directory or file to parse.
-    #[clap(short = 'f', long, env = "CDD_FILE")]
-    pub file: PathBuf,
+    #[clap(short = 'i', long, env = "CDD_INPUT")]
+    pub input: PathBuf,
 
     /// Output file for the generated OpenAPI spec.
     #[clap(short = 'o', long, env = "CDD_OUTPUT", default_value = "spec.json")]
@@ -20,12 +20,12 @@ pub struct ToOpenApiArgs {
 }
 
 pub fn execute(args: &ToOpenApiArgs, target: &TargetMode) -> AppResult<()> {
-    println!("Extracting OpenAPI specification from {:?}", args.file);
+    println!("Extracting OpenAPI specification from {:?}", args.input);
 
-    if !args.file.exists() {
+    if !args.input.exists() {
         return Err(AppError::General(format!(
             "Path not found: {:?}",
-            args.file
+            args.input
         )));
     }
 
@@ -33,7 +33,7 @@ pub fn execute(args: &ToOpenApiArgs, target: &TargetMode) -> AppResult<()> {
     let mut parsed_routes = Vec::new();
 
     // Walk directory and parse models and routes
-    let walker = WalkDir::new(&args.file).into_iter();
+    let walker = WalkDir::new(&args.input).into_iter();
     for entry in walker.filter_map(|e| e.ok()) {
         let path = entry.path();
         if path.extension().is_some_and(|ext| ext == "rs") {
@@ -120,7 +120,7 @@ mod tests {
             .unwrap();
 
         let args = ToOpenApiArgs {
-            file: src_dir,
+            input: src_dir,
             output: dir.path().join("spec.json"),
         };
 
@@ -131,7 +131,7 @@ mod tests {
     #[test]
     fn test_to_openapi_file_not_found() {
         let args = ToOpenApiArgs {
-            file: PathBuf::from("does_not_exist_dir"),
+            input: PathBuf::from("does_not_exist_dir"),
             output: PathBuf::from("spec.json"),
         };
         let result = execute(&args, &TargetMode::Server);
@@ -158,7 +158,7 @@ mod tests {
             .unwrap();
 
         let args = ToOpenApiArgs {
-            file: src_dir.clone(),
+            input: src_dir.clone(),
             output: dir.path().join("spec.json"),
         };
 
@@ -187,7 +187,7 @@ mod tests {
         std::fs::write(&input_file, handler_code).unwrap();
 
         let args = ToOpenApiArgs {
-            file: input_file,
+            input: input_file,
             output: output_file.clone(),
         };
 
@@ -212,7 +212,7 @@ mod tests {
         std::fs::write(&input_file, handler_code).unwrap();
 
         let args = ToOpenApiArgs {
-            file: input_file,
+            input: input_file,
             output: std::path::PathBuf::from("/nonexistent_dir/output.yaml"),
         };
 
