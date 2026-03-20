@@ -232,6 +232,34 @@ paths:
             .contains("ApiClient::new(\"https://api.example.com\")"));
     }
 
+
+    #[test]
+    fn test_generate_docs_json_with_webhook() {
+        let yaml = r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+webhooks:
+  newPet:
+    post:
+      responses:
+        '200':
+          description: OK
+"#;
+        let args = ToDocsJsonArgs {
+            input: "dummy".into(),
+            no_imports: false,
+            no_wrapping: false,
+            output: None,
+        };
+
+        let output = generate_docs_json(yaml, &args).unwrap();
+        // The webhook should be skipped, so operations should be empty
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0].operations.len(), 0);
+    }
+
     #[test]
     fn test_execute_with_file() {
         use std::io::Write;
