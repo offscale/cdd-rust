@@ -118,10 +118,7 @@ pub fn parse_openapi_spec_with_registry(
         .map_err(|e| AppError::General(format!("Failed to parse OpenAPI AST: {}", e)))?;
 
     let default_components = utoipa::openapi::Components::new();
-    let components = openapi
-        .components
-        .as_ref()
-        .unwrap_or(&default_components);
+    let components = openapi.components.as_ref().unwrap_or(&default_components);
 
     // 4. Initialize Resolution Context with Base URI ($self) from original Shim
     // If $self defined in Shim, use it as Base URI.
