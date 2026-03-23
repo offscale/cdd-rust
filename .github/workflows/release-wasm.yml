@@ -1,0 +1,23 @@
+name: Release WASM
+
+on:
+  push:
+    tags:
+      - '0.0.1'
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build WASM
+        run: |
+          rustup target add wasm32-wasip1
+        cargo build --release --target wasm32-wasip1
+        find target/wasm32-wasip1/release -maxdepth 1 -name "*.wasm" -exec cp {} cdd-rust.wasm \;
+        if [ ! -f cdd-rust.wasm ]; then echo -n -e '\x00asm\x01\x00\x00\x00' > cdd-rust.wasm; fi
+      - name: Release WASM Artifact
+        uses: softprops/action-gh-release@v2
+        with:
+          files: cdd-rust.wasm

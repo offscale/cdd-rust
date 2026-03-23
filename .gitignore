@@ -7,3 +7,13 @@ lcov*
 .env
 *.xml
 *.html
+
+*.wasm
+node_modules/
+dist/
+build/
+__pycache__/
+*.o
+*.so
+target/
+.idea/
