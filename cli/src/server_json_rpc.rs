@@ -1,3 +1,4 @@
+#![cfg(feature = "server")]
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use cdd_core::error::AppResult;
 use clap::Args;

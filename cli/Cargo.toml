@@ -16,12 +16,17 @@ derive_more = { version = "^2.1", features = ["from", "display"] }
 serde_json = { version = "^1", features = ["preserve_order"] }
 serde_yaml = "^0.9"
 serde = { version = "1.0.228", features = ["derive"] }
-ureq = "3.2.0"
-actix-web = "4.13.0"
-actix-rt = "2.11.0"
-tokio = "1.49.0"
+ureq = { version = "3", optional = true }
+actix-web = { version = "4", optional = true, default-features = false }
+actix-rt = { version = "2", optional = true, default-features = false }
+tokio = { version = "1", optional = true, default-features = false }
 
 [dev-dependencies]
 tempfile = "^3"
 [lints]
 workspace = true
+
+[features]
+default = ["server", "client"]
+server = ["actix-web", "actix-rt", "tokio"]
+client = ["ureq"]
