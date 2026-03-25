@@ -50,16 +50,17 @@ struct DocsCode {
     wrapper_end: Option<String>,
 }
 
-
-
 #[cfg(not(tarpaulin_include))]
 #[cfg(feature = "client")]
 fn read_input(input: &str) -> AppResult<String> {
     if input.starts_with("http://") || input.starts_with("https://") {
-        let mut response = ureq::get(input)
+        let response = ureq::get(input)
             .call()
             .map_err(|e| AppError::General(format!("Failed to fetch URL: {}", e)))?;
-        response.into_string().map_err(|e| AppError::General(format!("Failed to read HTTP body: {}", e)))
+        response
+            .into_body()
+            .read_to_string()
+            .map_err(|e| AppError::General(format!("Failed to read HTTP body: {}", e)))
     } else {
         std::fs::read_to_string(input)
             .map_err(|e| AppError::General(format!("Failed to read file: {}", e)))
@@ -70,7 +71,9 @@ fn read_input(input: &str) -> AppResult<String> {
 #[cfg(not(feature = "client"))]
 fn read_input(input: &str) -> AppResult<String> {
     if input.starts_with("http://") || input.starts_with("https://") {
-        Err(AppError::General("Client feature is not compiled, cannot fetch HTTP URLs".to_string()))
+        Err(AppError::General(
+            "Client feature is not compiled, cannot fetch HTTP URLs".to_string(),
+        ))
     } else {
         std::fs::read_to_string(input)
             .map_err(|e| AppError::General(format!("Failed to read file: {}", e)))
