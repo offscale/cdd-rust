@@ -81,7 +81,7 @@ enum Commands {
     ToOpenApi(to_openapi::ToOpenApiArgs),
     /// Expose CLI interface as JSON-RPC server over HTTP.
     #[clap(name = "serve_json_rpc")]
-        #[cfg(feature = "server")]
+    #[cfg(feature = "server")]
     ServerJsonRpc(server_json_rpc::ServerJsonRpcArgs),
     #[cfg(not(feature = "server"))]
     ServerJsonRpc,
@@ -117,13 +117,15 @@ fn main() -> AppResult<()> {
         Commands::ToOpenApi(args) => {
             to_openapi::execute(args, &cli.target)?;
         }
-                #[cfg(feature = "server")]
+        #[cfg(feature = "server")]
         Commands::ServerJsonRpc(args) => {
             server_json_rpc::execute(args)?;
         }
         #[cfg(not(feature = "server"))]
         Commands::ServerJsonRpc => {
-            return Err(cdd_core::error::AppError::General("Server feature is not compiled".to_string()));
+            return Err(cdd_core::error::AppError::General(
+                "Server feature is not compiled".to_string(),
+            ));
         }
     }
 
