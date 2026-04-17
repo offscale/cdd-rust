@@ -47,9 +47,9 @@ run: build
 	./target/release/cdd-rust $(RUN_ARGS)
 
 build_wasm:
-	@echo "Attempting WASM build. See WASM.md for current limitations."
-	cargo build -p cdd-cli --release --target wasm32-unknown-unknown || echo "WASM build is currently unsupported. See WASM.md for details."
-
+        @echo "Building WASM target..."
+        rustup target add wasm32-wasip1
+        cargo build -p cdd-cli --release --target wasm32-wasip1 --no-default-features
 build_docker:
 	docker build -t cdd-rust:alpine -f alpine.Dockerfile .
 	docker build -t cdd-rust:debian -f debian.Dockerfile .
