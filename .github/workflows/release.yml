@@ -47,7 +47,9 @@ jobs:
         with:
           targets: wasm32-wasip1
       - name: Install binaryen
-        run: sudo apt-get update && sudo apt-get install -y binaryen
+        run: |
+          wget -qO- https://github.com/WebAssembly/binaryen/releases/download/version_129/binaryen-version_129-x86_64-linux.tar.gz | tar xvz
+          echo "$PWD/binaryen-version_129/bin" >> $GITHUB_PATH
       - name: Build WASM
         run: |
           make build_wasm
