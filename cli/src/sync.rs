@@ -109,7 +109,8 @@ fn process_models_for_openapi(
         let path = entry.path();
 
         // Only process Rust files, skip mod.rs (orphans usually valid)
-        if path.extension().is_some_and(|ext| ext == "rs") && path.file_name().unwrap() != "mod.rs"
+        if path.extension().is_some_and(|ext| ext == "rs")
+            && path.file_name().expect("expected value") != "mod.rs"
         {
             process_file(path, type_overrides)?;
         }
@@ -118,6 +119,7 @@ fn process_models_for_openapi(
     Ok(())
 }
 
+/// Processes a single file to inject derives and patch types.
 fn process_file(path: &Path, type_overrides: &HashMap<String, String>) -> AppResult<()> {
     let content = fs::read_to_string(path)
         .map_err(|e| AppError::General(format!("Failed to read file {:?}: {}", path, e)))?;
@@ -202,7 +204,7 @@ mod tests {
 
     #[test]
     fn test_process_file_injects_derives_and_imports() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("expected value");
         let file_path = dir.path().join("users.rs");
 
         let initial_code = r#"
@@ -216,14 +218,14 @@ pub struct User {
 }
 "#;
         File::create(&file_path)
-            .unwrap()
+            .expect("expected value")
             .write_all(initial_code.as_bytes())
-            .unwrap();
+            .expect("expected value");
 
         let overrides = HashMap::new();
-        process_file(&file_path, &overrides).unwrap();
+        process_file(&file_path, &overrides).expect("expected value");
 
-        let new_code = fs::read_to_string(&file_path).unwrap();
+        let new_code = fs::read_to_string(&file_path).expect("expected value");
 
         assert!(new_code.contains("use utoipa::ToSchema;"));
         assert!(new_code.contains("use serde::{Deserialize, Serialize};"));
@@ -234,7 +236,7 @@ pub struct User {
 
     #[test]
     fn test_process_file_enforces_types() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("expected value");
         let file_path = dir.path().join("posts.rs");
 
         // dsync defaults timestamps to NaiveDateTime usually
@@ -248,9 +250,9 @@ pub struct Post {
 }
 "#;
         File::create(&file_path)
-            .unwrap()
+            .expect("expected value")
             .write_all(initial_code.as_bytes())
-            .unwrap();
+            .expect("expected value");
 
         let mut overrides = HashMap::new();
         overrides.insert(
@@ -258,9 +260,9 @@ pub struct Post {
             "chrono::DateTime<Utc>".to_string(),
         );
 
-        process_file(&file_path, &overrides).unwrap();
+        process_file(&file_path, &overrides).expect("expected value");
 
-        let new_code = fs::read_to_string(&file_path).unwrap();
+        let new_code = fs::read_to_string(&file_path).expect("expected value");
 
         // Check Derives presence implies process ran
         assert!(new_code.contains("ToSchema"));
@@ -285,7 +287,7 @@ pub struct Post {
 
     #[test]
     fn test_argument_parsing() {
-        let valid = parse_key_val("id=uuid::Uuid").unwrap();
+        let valid = parse_key_val("id=uuid::Uuid").expect("expected value");
         assert_eq!(valid, ("id".to_string(), "uuid::Uuid".to_string()));
 
         let invalid = parse_key_val("invalid");

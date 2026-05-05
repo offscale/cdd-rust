@@ -114,7 +114,8 @@ mod tests {
 
     #[test]
     fn test_normalize_ref_local_passthrough() {
-        let normalized = normalize_ref_to_local("#/components/schemas/User", None).unwrap();
+        let normalized =
+            normalize_ref_to_local("#/components/schemas/User", None).expect("expected value");
         assert_eq!(normalized, "#/components/schemas/User");
     }
 
@@ -122,7 +123,7 @@ mod tests {
     fn test_normalize_ref_self_absolute_match() {
         let self_uri = Some("https://example.com/openapi.yaml");
         let ref_str = "https://example.com/openapi.yaml#/components/schemas/User";
-        let normalized = normalize_ref_to_local(ref_str, self_uri).unwrap();
+        let normalized = normalize_ref_to_local(ref_str, self_uri).expect("expected value");
         assert_eq!(normalized, "#/components/schemas/User");
     }
 
@@ -130,7 +131,7 @@ mod tests {
     fn test_normalize_ref_self_path_match() {
         let self_uri = Some("/api/openapi.yaml");
         let ref_str = "https://example.com/api/openapi.yaml#/components/schemas/User";
-        let normalized = normalize_ref_to_local(ref_str, self_uri).unwrap();
+        let normalized = normalize_ref_to_local(ref_str, self_uri).expect("expected value");
         assert_eq!(normalized, "#/components/schemas/User");
     }
 
@@ -138,7 +139,7 @@ mod tests {
     fn test_normalize_ref_self_relative_match() {
         let self_uri = Some("./openapi.yaml");
         let ref_str = "openapi.yaml#/components/schemas/User";
-        let normalized = normalize_ref_to_local(ref_str, self_uri).unwrap();
+        let normalized = normalize_ref_to_local(ref_str, self_uri).expect("expected value");
         assert_eq!(normalized, "#/components/schemas/User");
     }
 
@@ -146,7 +147,7 @@ mod tests {
     fn test_normalize_ref_self_relative_dot_segments() {
         let self_uri = Some("specs/openapi.yaml");
         let ref_str = "./specs/../specs/openapi.yaml#/components/schemas/User";
-        let normalized = normalize_ref_to_local(ref_str, self_uri).unwrap();
+        let normalized = normalize_ref_to_local(ref_str, self_uri).expect("expected value");
         assert_eq!(normalized, "#/components/schemas/User");
     }
 
@@ -154,7 +155,7 @@ mod tests {
     fn test_extract_component_name_success() {
         let self_uri = Some("https://example.com/openapi.yaml");
         let ref_str = "https://example.com/openapi.yaml#/components/parameters/Limit";
-        let name = extract_component_name(ref_str, self_uri, "parameters").unwrap();
+        let name = extract_component_name(ref_str, self_uri, "parameters").expect("expected value");
         assert_eq!(name, "Limit");
     }
 

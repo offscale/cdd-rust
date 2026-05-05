@@ -849,7 +849,7 @@ info:
   version: 1.0.0
 paths: {}
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
         assert_eq!(
             openapi.json_schema_dialect.as_deref(),
             Some("https://spec.openapis.org/oas/3.1/dialect/base")
@@ -866,7 +866,7 @@ info:
   version: 1.0.0
 paths: {}
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
         assert_eq!(
             openapi.self_uri.as_deref(),
             Some("https://example.com/api/v1/definition.yaml")
@@ -882,10 +882,14 @@ query:
   responses:
     '200': { description: OK }
 "#;
-        let path_item: ShimPathItem = serde_yaml::from_str(yaml).unwrap();
+        let path_item: ShimPathItem = serde_yaml::from_str(yaml).expect("expected value");
         assert!(path_item.query.is_some());
         assert_eq!(
-            path_item.query.unwrap().operation_id.as_deref(),
+            path_item
+                .query
+                .expect("expected value")
+                .operation_id
+                .as_deref(),
             Some("queryOp")
         );
     }
@@ -903,12 +907,15 @@ externalDocs:
 responses:
   '200': { description: OK }
 "#;
-        let op: ShimOperation = serde_yaml::from_str(yaml).unwrap();
+        let op: ShimOperation = serde_yaml::from_str(yaml).expect("expected value");
         assert!(op.deprecated);
         assert_eq!(op.summary.as_deref(), Some("Summary line"));
         assert_eq!(op.description.as_deref(), Some("Detailed description"));
         assert!(op.external_docs.is_some());
-        assert_eq!(op.external_docs.unwrap().url, "https://example.com");
+        assert_eq!(
+            op.external_docs.expect("expected value").url,
+            "https://example.com"
+        );
     }
 
     #[test]
@@ -930,11 +937,11 @@ tags:
     kind: audience
 paths: {}
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let servers = openapi.servers.unwrap();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let servers = openapi.servers.expect("expected value");
         assert_eq!(servers[0].name.as_deref(), Some("prod"));
 
-        let tags = openapi.tags.unwrap();
+        let tags = openapi.tags.expect("expected value");
         assert_eq!(tags[0].name, "external");
         assert_eq!(tags[0].kind.as_deref(), Some("audience"));
         assert_eq!(tags[1].parent.as_deref(), Some("external"));
@@ -960,10 +967,10 @@ components:
             read: read stuff
 paths: {}
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let comps = openapi.components.unwrap();
-        let schemes = comps.security_schemes.unwrap();
-        let oauth = match schemes.get("oauth").unwrap() {
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let comps = openapi.components.expect("expected value");
+        let schemes = comps.security_schemes.expect("expected value");
+        let oauth = match schemes.get("oauth").expect("expected value") {
             RefOr::T(ShimSecurityScheme::OAuth2(o)) => o,
             _ => panic!("Expected OAuth2"),
         };
@@ -974,10 +981,10 @@ paths: {}
         let flow = oauth
             .flows
             .as_ref()
-            .unwrap()
+            .expect("expected value")
             .device_authorization
             .as_ref()
-            .unwrap();
+            .expect("expected value");
         assert_eq!(
             flow.device_authorization_url.as_deref(),
             Some("https://auth.example.com/device")
@@ -1005,10 +1012,10 @@ components:
       deprecated: true
 paths: {}
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let comps = openapi.components.unwrap();
-        let schemes = comps.security_schemes.unwrap();
-        let legacy = match schemes.get("legacyKey").unwrap() {
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let comps = openapi.components.expect("expected value");
+        let schemes = comps.security_schemes.expect("expected value");
+        let legacy = match schemes.get("legacyKey").expect("expected value") {
             RefOr::T(ShimSecurityScheme::ApiKey(k)) => k,
             _ => panic!("Expected apiKey scheme"),
         };
@@ -1041,12 +1048,12 @@ components:
             read: read stuff
 paths: {}
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let comps = openapi.components.unwrap();
-        let schemes = comps.security_schemes.unwrap();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let comps = openapi.components.expect("expected value");
+        let schemes = comps.security_schemes.expect("expected value");
 
         // Check API Key
-        let api_key = match schemes.get("api_key").unwrap() {
+        let api_key = match schemes.get("api_key").expect("expected value") {
             RefOr::T(ShimSecurityScheme::ApiKey(k)) => k,
             _ => panic!("Expected ApiKey"),
         };
@@ -1054,11 +1061,17 @@ paths: {}
         assert_eq!(api_key.in_loc, "header");
 
         // Check OAuth2
-        let oauth = match schemes.get("oauth").unwrap() {
+        let oauth = match schemes.get("oauth").expect("expected value") {
             RefOr::T(ShimSecurityScheme::OAuth2(o)) => o,
             _ => panic!("Expected OAuth2"),
         };
-        let flow = oauth.flows.as_ref().unwrap().implicit.as_ref().unwrap();
+        let flow = oauth
+            .flows
+            .as_ref()
+            .expect("expected value")
+            .implicit
+            .as_ref()
+            .expect("expected value");
         assert_eq!(flow.authorization_url.as_deref(), Some("https://auth.com"));
         assert!(flow.scopes.contains_key("read"));
     }
@@ -1073,8 +1086,8 @@ securityDefinitions:
     type: basic
 paths: {}
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let definitions = openapi.security_definitions.unwrap();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let definitions = openapi.security_definitions.expect("expected value");
 
         assert!(matches!(
             definitions.get("basicAuth"),
@@ -1090,7 +1103,7 @@ info: {title: Legacy with Base, version: 1}
 basePath: /api/v1
 paths: {}
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
         assert_eq!(openapi.base_path.as_deref(), Some("/api/v1"));
     }
 
@@ -1112,16 +1125,19 @@ paths:
 x-global-config:
   env: dev
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
 
         // Root extension
-        let global = openapi.extensions.get("x-global-config").unwrap();
+        let global = openapi
+            .extensions
+            .get("x-global-config")
+            .expect("expected value");
         assert_eq!(global["env"], "dev");
 
         // Info extension
-        let info = openapi.info.unwrap();
+        let info = openapi.info.expect("expected value");
         assert_eq!(
-            info.extensions.get("x-internal").unwrap(),
+            info.extensions.get("x-internal").expect("expected value"),
             &Value::Bool(true)
         );
 
@@ -1130,10 +1146,10 @@ x-global-config:
             .paths
             .as_ref()
             .and_then(|paths| paths.items.get("/foo"))
-            .unwrap();
-        let op = path_item.get.as_ref().unwrap();
+            .expect("expected value");
+        let op = path_item.get.as_ref().expect("expected value");
         assert_eq!(
-            op.extensions.get("x-controller").unwrap(),
+            op.extensions.get("x-controller").expect("expected value"),
             &Value::String("FooController".to_string())
         );
     }
@@ -1159,16 +1175,16 @@ webhooks:
       responses:
         '200': { description: OK }
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
 
-        let paths = openapi.paths.as_ref().unwrap();
+        let paths = openapi.paths.as_ref().expect("expected value");
         assert_eq!(
             paths.extensions.get("x-paths-meta"),
             Some(&Value::Bool(true))
         );
         assert!(paths.items.contains_key("/health"));
 
-        let webhooks = openapi.webhooks.as_ref().unwrap();
+        let webhooks = openapi.webhooks.as_ref().expect("expected value");
         assert!(webhooks.extensions.contains_key("x-webhooks-meta"));
         assert!(webhooks.items.contains_key("onEvent"));
     }

@@ -353,8 +353,8 @@ mod tests {
     fn test_resolve_callback_object_inline() {
         let mut map = BTreeMap::new();
         map.insert("/hook".to_string(), empty_path_item());
-        let (resolved, _, _) =
-            resolve_callback_object(&RefOr::T(map.clone()), None, None, None).unwrap();
+        let (resolved, _, _) = resolve_callback_object(&RefOr::T(map.clone()), None, None, None)
+            .expect("expected value");
         assert_eq!(resolved.len(), 1);
         assert!(resolved.contains_key("/hook"));
     }
@@ -380,8 +380,8 @@ mod tests {
         );
 
         let cb_ref = RefOr::Ref(Ref::new("#/components/callbacks/OnEvent"));
-        let (resolved, _, _) =
-            resolve_callback_object(&cb_ref, Some(&components), None, None).unwrap();
+        let (resolved, _, _) = resolve_callback_object(&cb_ref, Some(&components), None, None)
+            .expect("expected value");
         assert!(resolved.contains_key("/event"));
     }
 
@@ -437,14 +437,17 @@ mod tests {
             None,
             None,
         )
-        .unwrap();
+        .expect("expected value");
 
         assert_eq!(callbacks.len(), 1);
         let cb = &callbacks[0];
         assert_eq!(cb.name, "OnEvent");
         assert_eq!(cb.method, "GET");
         assert_eq!(cb.expression.as_str(), "$request.body#/callbackUrl");
-        assert_eq!(cb.request_body.as_ref().unwrap().format, BodyFormat::Json);
+        assert_eq!(
+            cb.request_body.as_ref().expect("expected value").format,
+            BodyFormat::Json
+        );
         assert_eq!(cb.response_type.as_deref(), Some("Ack"));
         assert!(cb.response_headers.is_empty());
     }
@@ -466,7 +469,7 @@ mod tests {
             None,
             None,
         )
-        .unwrap_err();
+        .expect_err("expected error");
 
         assert!(format!("{err}").contains("must include a '$' expression"));
     }
@@ -489,7 +492,7 @@ mod tests {
             None,
             None,
         )
-        .unwrap();
+        .expect("expected value");
 
         assert_eq!(callbacks.len(), 1);
         assert_eq!(callbacks[0].expression.as_str(), expr);
@@ -517,7 +520,7 @@ mod tests {
             None,
             Some(&global_security),
         )
-        .unwrap();
+        .expect("expected value");
 
         assert_eq!(callbacks.len(), 1);
         let cb = &callbacks[0];
@@ -550,7 +553,7 @@ mod tests {
             None,
             None,
         )
-        .unwrap();
+        .expect("expected value");
 
         assert_eq!(callbacks.len(), 2);
         let methods: Vec<_> = callbacks.iter().map(|c| c.method.as_str()).collect();
@@ -579,7 +582,7 @@ mod tests {
             None,
             None,
         )
-        .unwrap();
+        .expect("expected value");
 
         assert_eq!(callbacks.len(), 1);
         let cb = &callbacks[0];
@@ -619,7 +622,7 @@ mod tests {
             None,
             None,
         )
-        .unwrap();
+        .expect("expected value");
 
         assert_eq!(callbacks.len(), 1);
         assert_eq!(callbacks[0].method, "GET");

@@ -209,16 +209,16 @@ components:
       type: object
       additionalProperties: true
 "#;
-        let openapi: OpenApi = serde_yaml::from_str(yaml).unwrap();
-        let components = openapi.components.as_ref().unwrap();
+        let openapi: OpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let components = openapi.components.as_ref().expect("expected value");
         let ctx = ResolutionContext::new(None, components);
 
-        let schema = match components.schemas.get("MapHolder").unwrap() {
+        let schema = match components.schemas.get("MapHolder").expect("expected value") {
             RefOr::T(s) => s,
             RefOr::Ref(_) => panic!("Expected inline schema"),
         };
 
-        let fields = flatten_schema_fields(schema, &ctx).unwrap();
+        let fields = flatten_schema_fields(schema, &ctx).expect("expected value");
         let addl = fields
             .iter()
             .find(|f| f.name == "additional_properties")
@@ -251,18 +251,24 @@ components:
             id: { type: integer }
           required: [id]
 "#;
-        let openapi: OpenApi = serde_yaml::from_str(yaml).unwrap();
-        let components = openapi.components.as_ref().unwrap();
+        let openapi: OpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let components = openapi.components.as_ref().expect("expected value");
         let ctx = ResolutionContext::new(None, components);
 
-        let schema = match components.schemas.get("Combined").unwrap() {
+        let schema = match components.schemas.get("Combined").expect("expected value") {
             RefOr::T(s) => s,
             RefOr::Ref(_) => panic!("Expected inline schema"),
         };
 
-        let fields = flatten_schema_fields(schema, &ctx).unwrap();
-        let id = fields.iter().find(|f| f.name == "id").unwrap();
-        let note = fields.iter().find(|f| f.name == "note").unwrap();
+        let fields = flatten_schema_fields(schema, &ctx).expect("expected value");
+        let id = fields
+            .iter()
+            .find(|f| f.name == "id")
+            .expect("expected value");
+        let note = fields
+            .iter()
+            .find(|f| f.name == "note")
+            .expect("expected value");
         assert_eq!(id.ty, "i32");
         assert_eq!(note.ty, "Option<String>");
     }
@@ -292,19 +298,28 @@ components:
         status:
           $ref: '#/components/schemas/Status'
 "#;
-        let openapi: OpenApi = serde_yaml::from_str(yaml).unwrap();
-        let components = openapi.components.as_ref().unwrap();
+        let openapi: OpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let components = openapi.components.as_ref().expect("expected value");
         let ctx = ResolutionContext::new(None, components);
 
-        let schema = match components.schemas.get("User").unwrap() {
+        let schema = match components.schemas.get("User").expect("expected value") {
             RefOr::T(s) => s,
             RefOr::Ref(_) => panic!("Expected inline schema"),
         };
 
-        let fields = flatten_schema_fields(schema, &ctx).unwrap();
-        let id = fields.iter().find(|f| f.name == "id").unwrap();
-        let password = fields.iter().find(|f| f.name == "password").unwrap();
-        let status = fields.iter().find(|f| f.name == "status").unwrap();
+        let fields = flatten_schema_fields(schema, &ctx).expect("expected value");
+        let id = fields
+            .iter()
+            .find(|f| f.name == "id")
+            .expect("expected value");
+        let password = fields
+            .iter()
+            .find(|f| f.name == "password")
+            .expect("expected value");
+        let status = fields
+            .iter()
+            .find(|f| f.name == "status")
+            .expect("expected value");
 
         assert!(id.is_read_only);
         assert!(!id.is_write_only);

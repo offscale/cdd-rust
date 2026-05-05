@@ -4,7 +4,7 @@
 //!
 //! Definition of the ModelMapper trait and implementations for DB-to-Struct generation.
 
-use crate::error::{CliError, CliResult};
+use cdd_core::error::{AppError, AppResult};
 use dsync::{GenerationConfig, GenerationConfigOpts, TableOptions};
 use std::path::Path;
 
@@ -16,16 +16,16 @@ pub trait ModelMapper {
     ///
     /// * `schema_path` - Path to the schema file (e.g. schema.rs).
     /// * `output_dir` - Directory to output generated code.
-    fn generate(&self, schema_path: &Path, output_dir: &Path) -> CliResult<()>;
+    fn generate(&self, schema_path: &Path, output_dir: &Path) -> AppResult<()>;
 }
 
 /// Mapper implementation using Diesel and dsync.
 pub struct DieselMapper;
 
 impl ModelMapper for DieselMapper {
-    fn generate(&self, schema_path: &Path, output_dir: &Path) -> CliResult<()> {
+    fn generate(&self, schema_path: &Path, output_dir: &Path) -> AppResult<()> {
         if !schema_path.exists() {
-            return Err(CliError::General(format!(
+            return Err(AppError::General(format!(
                 "Schema file not found at: {:?}",
                 schema_path
             )));
@@ -41,7 +41,7 @@ impl ModelMapper for DieselMapper {
         };
 
         dsync::generate_files(schema_path, output_dir, config)
-            .map_err(|e| CliError::General(format!("dsync generation failed: {}", e)))?;
+            .map_err(|e| AppError::General(format!("dsync generation failed: {}", e)))?;
 
         Ok(())
     }
@@ -57,10 +57,10 @@ mod tests {
     #[test]
     fn test_diesel_mapper_generate_success() {
         // Setup a fake schema.rs that dsync can parse
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("expected value");
         let schema_path = dir.path().join("schema.rs");
         let output_dir = dir.path().join("models");
-        std::fs::create_dir(&output_dir).unwrap();
+        std::fs::create_dir(&output_dir).expect("expected value");
 
         // Minimal valid diesel schema
         let schema_content = r#"
@@ -72,9 +72,9 @@ mod tests {
             }
         "#;
         File::create(&schema_path)
-            .unwrap()
+            .expect("expected value")
             .write_all(schema_content.as_bytes())
-            .unwrap();
+            .expect("expected value");
 
         let mapper = DieselMapper;
         let res = mapper.generate(&schema_path, &output_dir);
@@ -85,7 +85,7 @@ mod tests {
         // For a perfectly valid integration, dsync would succeed.
         // Given we mock simple content, it might succeed or fail depending on dsync version strictness.
         // We assert that we didn't get "Schema file not found".
-        if let Err(CliError::General(msg)) = res {
+        if let Err(AppError::General(msg)) = res {
             assert!(
                 !msg.contains("Schema file not found"),
                 "Should have found the schema file"
@@ -100,8 +100,8 @@ mod tests {
         let out = Path::new("out");
         let res = mapper.generate(p, out);
         assert!(res.is_err());
-        match res.unwrap_err() {
-            CliError::General(msg) => assert!(msg.contains("Schema file not found")),
+        match res.expect_err("expected error") {
+            AppError::General(msg) => assert!(msg.contains("Schema file not found")),
             _ => panic!("Expected file not found error"),
         }
     }

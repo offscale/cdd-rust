@@ -478,7 +478,7 @@ fn json_value_expr(value: &serde_json::Value) -> String {
     let serialized = serde_json::to_string(value).unwrap_or_else(|_| "null".to_string());
     let literal = rust_string_literal(&serialized);
     format!(
-        "serde_json::from_str::<serde_json::Value>({}).unwrap()",
+        "serde_json::from_str::<serde_json::Value>({}).expect(\"expected value\")",
         literal
     )
 }
@@ -817,9 +817,12 @@ pub fn test_request_builder(method: &str, uri: &str, body_setup: &str) -> String
     let method_lower = method.to_lowercase();
     let builder_call = match method_lower.as_str() {
         "get" | "post" | "put" | "delete" | "patch" => format!("{}()", method_lower),
-        "query" => "method(actix_web::http::Method::from_bytes(b\"QUERY\").unwrap())".to_string(),
+        "query" => {
+            "method(actix_web::http::Method::from_bytes(b\"QUERY\").expect(\"expected value\"))"
+                .to_string()
+        }
         _ => format!(
-            "method(actix_web::http::Method::from_bytes(b\"{}\").unwrap())",
+            "method(actix_web::http::Method::from_bytes(b\"{}\").expect(\"expected value\"))",
             method.to_uppercase()
         ),
     };
@@ -1596,9 +1599,9 @@ mod tests {
         assert!(get_req.contains("TestRequest::get()"));
 
         let query_req = test_request_builder("QUERY", "/search", body);
-        assert!(
-            query_req.contains("method(actix_web::http::Method::from_bytes(b\"QUERY\").unwrap())")
-        );
+        assert!(query_req.contains(
+            "method(actix_web::http::Method::from_bytes(b\"QUERY\").expect(\"expected value\"))"
+        ));
 
         let custom_req = test_request_builder("PROPFIND", "/files", body);
         assert!(custom_req.contains("from_bytes(b\"PROPFIND\")"));

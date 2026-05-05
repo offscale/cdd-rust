@@ -79,7 +79,7 @@ mod tests {
 
     #[test]
     fn test_execute_generates_file() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("expected value");
         let openapi_path = dir.path().join("openapi.yaml");
         let output_dir = dir.path().join("tests");
         let output_path = output_dir.join("api_contracts.rs");
@@ -93,7 +93,7 @@ paths:
       responses:
         '200': { description: OK }
 "#;
-        fs::write(&openapi_path, yaml).unwrap();
+        fs::write(&openapi_path, yaml).expect("expected value");
 
         let args = TestGenArgs {
             openapi_path: openapi_path.clone(),
@@ -101,17 +101,17 @@ paths:
             app_factory: "crate::create_app".to_string(),
         };
 
-        execute(&args, &ActixStrategy).unwrap();
+        execute(&args, &ActixStrategy).expect("expected value");
 
         assert!(output_path.exists());
-        let contents = fs::read_to_string(output_path).unwrap();
+        let contents = fs::read_to_string(output_path).expect("expected value");
         assert!(contents.contains("validate_response"));
         assert!(contents.contains("TestRequest"));
     }
 
     #[test]
     fn test_execute_missing_openapi() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("expected value");
         let openapi_path = dir.path().join("missing.yaml");
         let output_path = dir.path().join("tests/api_contracts.rs");
 
@@ -121,7 +121,7 @@ paths:
             app_factory: "crate::create_app".to_string(),
         };
 
-        let err = execute(&args, &ActixStrategy).unwrap_err();
+        let err = execute(&args, &ActixStrategy).expect_err("expected error");
         assert!(format!("{}", err).contains("OpenAPI file not found"));
     }
 }

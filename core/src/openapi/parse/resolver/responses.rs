@@ -480,7 +480,7 @@ fn extract_header_content_info(
         )));
     }
 
-    let (media_type, media_obj) = content_map.iter().next().unwrap();
+    let (media_type, media_obj) = content_map.iter().next().expect("expected value");
     let resolved = resolve_media_type_ref(
         media_obj,
         components,
@@ -1350,9 +1350,9 @@ mod tests {
         responses.responses.insert("200".into(), RefOr::T(response));
 
         let details = extract_response_details(&wrap(responses), None)
-            .unwrap()
-            .unwrap();
-        assert_eq!(details.body_type.unwrap(), "User");
+            .expect("expected value")
+            .expect("expected value");
+        assert_eq!(details.body_type.expect("expected value"), "User");
     }
 
     #[test]
@@ -1371,8 +1371,8 @@ mod tests {
         responses.responses.insert("201".into(), RefOr::T(response));
 
         let details = extract_response_details(&wrap(responses), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(details.status_code.as_deref(), Some("201"));
         assert_eq!(details.description.as_deref(), Some("Created"));
         assert_eq!(details.media_type.as_deref(), Some("text/plain"));
@@ -1393,8 +1393,10 @@ mod tests {
                 }
             }
         });
-        let responses = ShimResponses::from_raw(raw).unwrap();
-        let details = extract_response_details(&responses, None).unwrap().unwrap();
+        let responses = ShimResponses::from_raw(raw).expect("expected value");
+        let details = extract_response_details(&responses, None)
+            .expect("expected value")
+            .expect("expected value");
         let example = details.example.expect("example");
         assert!(!example.is_serialized());
         assert_eq!(example.value, json!({ "id": 42 }));
@@ -1414,8 +1416,10 @@ mod tests {
                 }
             }
         });
-        let responses = ShimResponses::from_raw(raw).unwrap();
-        let details = extract_response_details(&responses, None).unwrap().unwrap();
+        let responses = ShimResponses::from_raw(raw).expect("expected value");
+        let details = extract_response_details(&responses, None)
+            .expect("expected value")
+            .expect("expected value");
         let example = details.example.expect("example");
         assert!(example.is_serialized());
         assert_eq!(example.value, json!("hello"));
@@ -1432,8 +1436,8 @@ mod tests {
         responses.responses.insert("200".into(), RefOr::T(response));
 
         let details = extract_response_details(&wrap(responses), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(details.body_type.as_deref(), Some("Vec<serde_json::Value>"));
     }
 
@@ -1456,8 +1460,8 @@ mod tests {
         responses.responses.insert("200".into(), RefOr::T(response));
 
         let details = extract_response_details(&wrap(responses), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(details.body_type.as_deref(), Some("String"));
     }
 
@@ -1480,8 +1484,8 @@ mod tests {
         responses.responses.insert("200".into(), RefOr::T(response));
 
         let details = extract_response_details(&wrap(responses), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(details.body_type.as_deref(), Some("String"));
     }
 
@@ -1498,8 +1502,10 @@ mod tests {
             }
         });
 
-        let shim = ShimResponses::from_raw(raw).unwrap();
-        let details = extract_response_details(&shim, None).unwrap().unwrap();
+        let shim = ShimResponses::from_raw(raw).expect("expected value");
+        let details = extract_response_details(&shim, None)
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(details.body_type.as_deref(), Some("Vec<String>"));
     }
 
@@ -1516,8 +1522,10 @@ mod tests {
             }
         });
 
-        let shim = ShimResponses::from_raw(raw).unwrap();
-        let details = extract_response_details(&shim, None).unwrap().unwrap();
+        let shim = ShimResponses::from_raw(raw).expect("expected value");
+        let details = extract_response_details(&shim, None)
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(details.body_type.as_deref(), Some("Vec<String>"));
     }
 
@@ -1534,8 +1542,10 @@ mod tests {
             }
         });
 
-        let shim = ShimResponses::from_raw(raw).unwrap();
-        let details = extract_response_details(&shim, None).unwrap().unwrap();
+        let shim = ShimResponses::from_raw(raw).expect("expected value");
+        let details = extract_response_details(&shim, None)
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(details.body_type.as_deref(), Some("Vec<serde_json::Value>"));
     }
 
@@ -1548,8 +1558,10 @@ mod tests {
             }
         });
 
-        let shim = ShimResponses::from_raw(raw).unwrap();
-        let details = extract_response_details(&shim, None).unwrap().unwrap();
+        let shim = ShimResponses::from_raw(raw).expect("expected value");
+        let details = extract_response_details(&shim, None)
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(details.summary.as_deref(), Some("Accepted payload"));
     }
 
@@ -1566,8 +1578,10 @@ mod tests {
             }
         });
 
-        let shim = ShimResponses::from_raw(raw).unwrap();
-        let details = extract_response_details(&shim, None).unwrap().unwrap();
+        let shim = ShimResponses::from_raw(raw).expect("expected value");
+        let details = extract_response_details(&shim, None)
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(details.body_type.as_deref(), Some("Vec<String>"));
     }
 
@@ -1584,8 +1598,10 @@ mod tests {
             }
         });
 
-        let shim = ShimResponses::from_raw(raw).unwrap();
-        let details = extract_response_details(&shim, None).unwrap().unwrap();
+        let shim = ShimResponses::from_raw(raw).expect("expected value");
+        let details = extract_response_details(&shim, None)
+            .expect("expected value")
+            .expect("expected value");
         assert!(details.body_type.is_none());
     }
 
@@ -1609,8 +1625,10 @@ mod tests {
             }
         });
 
-        let shim = ShimResponses::from_raw(raw).unwrap();
-        let details = extract_response_details(&shim, None).unwrap().unwrap();
+        let shim = ShimResponses::from_raw(raw).expect("expected value");
+        let details = extract_response_details(&shim, None)
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(details.body_type.as_deref(), Some("i32"));
     }
 
@@ -1639,8 +1657,8 @@ mod tests {
         responses.responses.insert("200".into(), RefOr::T(response));
 
         let details = extract_response_details(&wrap(responses), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         let link = details.links.first().expect("expected link");
         assert_eq!(
             link.server_url.as_deref(),
@@ -1663,8 +1681,8 @@ mod tests {
         responses.responses.insert("200".into(), RefOr::T(response));
 
         let details = extract_response_details(&wrap(responses), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(details.body_type.as_deref(), Some("String"));
     }
 
@@ -1685,10 +1703,10 @@ mod tests {
         responses.responses.insert("200".into(), RefOr::T(response));
 
         let details = extract_response_details(&wrap(responses), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         let l = &details.links[0];
-        let expr = l.parameters.get("userId").unwrap();
+        let expr = l.parameters.get("userId").expect("expected value");
 
         match expr {
             LinkParamValue::Expression(expr) => {
@@ -1716,10 +1734,10 @@ mod tests {
         responses.responses.insert("200".into(), RefOr::T(response));
 
         let details = extract_response_details(&wrap(responses), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         let l = &details.links[0];
-        let expr = l.parameters.get("userId").unwrap();
+        let expr = l.parameters.get("userId").expect("expected value");
 
         match expr {
             LinkParamValue::Expression(expr) => {
@@ -1744,8 +1762,10 @@ mod tests {
             }
         });
 
-        let shim = ShimResponses::from_raw(raw).unwrap();
-        let details = extract_response_details(&shim, None).unwrap().unwrap();
+        let shim = ShimResponses::from_raw(raw).expect("expected value");
+        let details = extract_response_details(&shim, None)
+            .expect("expected value")
+            .expect("expected value");
         let link = &details.links[0];
         assert_eq!(link.operation_id.as_deref(), Some("getUser"));
         match link.request_body.as_ref() {
@@ -1772,8 +1792,8 @@ mod tests {
             }
         });
 
-        let shim = ShimResponses::from_raw(raw).unwrap();
-        let err = extract_response_details(&shim, None).unwrap_err();
+        let shim = ShimResponses::from_raw(raw).expect("expected value");
+        let err = extract_response_details(&shim, None).expect_err("expected error");
         assert!(format!("{err}").contains("parameter key 'path.'"));
     }
 
@@ -1789,7 +1809,7 @@ mod tests {
         let mut responses = Responses::new();
         responses.responses.insert("200".into(), RefOr::T(response));
 
-        let err = extract_response_details(&wrap(responses), None).unwrap_err();
+        let err = extract_response_details(&wrap(responses), None).expect_err("expected error");
         assert!(
             format!("{err}").contains("must define exactly one of 'operationId' or 'operationRef'")
         );
@@ -1810,7 +1830,7 @@ mod tests {
         let mut responses = Responses::new();
         responses.responses.insert("200".into(), RefOr::T(response));
 
-        let err = extract_response_details(&wrap(responses), None).unwrap_err();
+        let err = extract_response_details(&wrap(responses), None).expect_err("expected error");
         assert!(
             format!("{err}").contains("must define exactly one of 'operationId' or 'operationRef'")
         );
@@ -1832,9 +1852,9 @@ mod tests {
         responses.responses.insert("200".into(), RefOr::T(response));
 
         let details = extract_response_details(&wrap(responses), None)
-            .unwrap()
-            .unwrap();
-        assert_eq!(details.body_type.unwrap(), "User");
+            .expect("expected value")
+            .expect("expected value");
+        assert_eq!(details.body_type.expect("expected value"), "User");
     }
 
     #[test]
@@ -1849,7 +1869,7 @@ mod tests {
                 }
             }
         });
-        let responses = ShimResponses::from_raw(raw).unwrap();
+        let responses = ShimResponses::from_raw(raw).expect("expected value");
 
         let mut components = ShimComponents {
             security_schemes: None,
@@ -1866,9 +1886,9 @@ mod tests {
         );
 
         let details = extract_response_details(&responses, Some(&components))
-            .unwrap()
-            .unwrap();
-        assert_eq!(details.body_type.unwrap(), "User");
+            .expect("expected value")
+            .expect("expected value");
+        assert_eq!(details.body_type.expect("expected value"), "User");
     }
 
     #[test]
@@ -1887,9 +1907,9 @@ mod tests {
         responses.responses.insert("200".into(), RefOr::T(response));
 
         let details = extract_response_details(&wrap(responses), None)
-            .unwrap()
-            .unwrap();
-        assert_eq!(details.body_type.unwrap(), "Anything");
+            .expect("expected value")
+            .expect("expected value");
+        assert_eq!(details.body_type.expect("expected value"), "Anything");
     }
 
     #[test]
@@ -1908,7 +1928,7 @@ mod tests {
                 }
             }
         });
-        let responses = ShimResponses::from_raw(raw).unwrap();
+        let responses = ShimResponses::from_raw(raw).expect("expected value");
 
         let mut components = ShimComponents {
             security_schemes: None,
@@ -1925,8 +1945,8 @@ mod tests {
         );
 
         let details = extract_response_details(&responses, Some(&components))
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(details.headers.len(), 1);
         assert_eq!(details.headers[0].name, "X-Link");
         assert_eq!(details.headers[0].ty, "String");
@@ -1947,8 +1967,8 @@ mod tests {
                 }
             }
         });
-        let responses = ShimResponses::from_raw(raw).unwrap();
-        let err = extract_response_details(&responses, None).unwrap_err();
+        let responses = ShimResponses::from_raw(raw).expect("expected value");
+        let err = extract_response_details(&responses, None).expect_err("expected error");
         assert!(format!("{err}").contains("must define exactly one media type"));
     }
 
@@ -1963,9 +1983,9 @@ mod tests {
         responses.responses.insert("200".into(), RefOr::T(response));
 
         let details = extract_response_details(&wrap(responses), None)
-            .unwrap()
-            .unwrap();
-        assert_eq!(details.body_type.unwrap(), "String");
+            .expect("expected value")
+            .expect("expected value");
+        assert_eq!(details.body_type.expect("expected value"), "String");
     }
 
     #[test]
@@ -1979,9 +1999,9 @@ mod tests {
         responses.responses.insert("200".into(), RefOr::T(response));
 
         let details = extract_response_details(&wrap(responses), None)
-            .unwrap()
-            .unwrap();
-        assert_eq!(details.body_type.unwrap(), "String");
+            .expect("expected value")
+            .expect("expected value");
+        assert_eq!(details.body_type.expect("expected value"), "String");
     }
 
     #[test]
@@ -1998,9 +2018,9 @@ mod tests {
         responses.responses.insert("200".into(), RefOr::T(response));
 
         let details = extract_response_details(&wrap(responses), None)
-            .unwrap()
-            .unwrap();
-        assert_eq!(details.body_type.unwrap(), "Vec<u8>");
+            .expect("expected value")
+            .expect("expected value");
+        assert_eq!(details.body_type.expect("expected value"), "Vec<u8>");
     }
 
     #[test]
@@ -2014,9 +2034,12 @@ mod tests {
         responses.responses.insert("200".into(), RefOr::T(response));
 
         let details = extract_response_details(&wrap(responses), None)
-            .unwrap()
-            .unwrap();
-        assert_eq!(details.body_type.unwrap(), "serde_json::Value");
+            .expect("expected value")
+            .expect("expected value");
+        assert_eq!(
+            details.body_type.expect("expected value"),
+            "serde_json::Value"
+        );
     }
 
     #[test]
@@ -2045,8 +2068,8 @@ mod tests {
         responses.responses.insert("200".into(), RefOr::T(response));
 
         let details = extract_response_details(&wrap(responses), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(details.headers.len(), 1);
         assert_eq!(details.headers[0].name, "X-Rate-Limit");
     }
@@ -2068,8 +2091,10 @@ mod tests {
             }
         });
 
-        let shim = ShimResponses::from_raw(raw).unwrap();
-        let details = extract_response_details(&shim, None).unwrap().unwrap();
+        let shim = ShimResponses::from_raw(raw).expect("expected value");
+        let details = extract_response_details(&shim, None)
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(details.headers.len(), 1);
         assert_eq!(details.headers[0].name, "X-Rate-Limit");
         assert_eq!(details.headers[0].ty, "i32");
@@ -2095,8 +2120,10 @@ mod tests {
             }
         });
 
-        let shim = ShimResponses::from_raw(raw).unwrap();
-        let details = extract_response_details(&shim, None).unwrap().unwrap();
+        let shim = ShimResponses::from_raw(raw).expect("expected value");
+        let details = extract_response_details(&shim, None)
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(details.headers.len(), 1);
         let header = &details.headers[0];
         assert_eq!(header.content_media_type.as_deref(), Some("text/plain"));
@@ -2124,8 +2151,10 @@ mod tests {
             }
         });
 
-        let shim = ShimResponses::from_raw(raw).unwrap();
-        let details = extract_response_details(&shim, None).unwrap().unwrap();
+        let shim = ShimResponses::from_raw(raw).expect("expected value");
+        let details = extract_response_details(&shim, None)
+            .expect("expected value")
+            .expect("expected value");
         let header = &details.headers[0];
         assert!(header.required);
         assert!(header.deprecated);
@@ -2147,8 +2176,8 @@ mod tests {
             }
         });
 
-        let shim = ShimResponses::from_raw(raw).unwrap();
-        let err = extract_response_details(&shim, None).unwrap_err();
+        let shim = ShimResponses::from_raw(raw).expect("expected value");
+        let err = extract_response_details(&shim, None).expect_err("expected error");
         assert!(format!("{err}").contains("style 'form'"));
     }
 
@@ -2170,8 +2199,8 @@ mod tests {
             }
         });
 
-        let shim = ShimResponses::from_raw(raw).unwrap();
-        let err = extract_response_details(&shim, None).unwrap_err();
+        let shim = ShimResponses::from_raw(raw).expect("expected value");
+        let err = extract_response_details(&shim, None).expect_err("expected error");
         assert!(format!("{err}").contains("must not define style or explode"));
     }
 
@@ -2204,10 +2233,10 @@ mod tests {
             }
         });
 
-        let shim = ShimResponses::from_raw(raw).unwrap();
+        let shim = ShimResponses::from_raw(raw).expect("expected value");
         let details = extract_response_details(&shim, Some(&components))
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(details.headers.len(), 1);
         let header = &details.headers[0];
         assert_eq!(header.name, "X-Rate");
@@ -2231,8 +2260,8 @@ mod tests {
             }
         });
 
-        let shim = ShimResponses::from_raw(raw).unwrap();
-        let err = extract_response_details(&shim, None).unwrap_err();
+        let shim = ShimResponses::from_raw(raw).expect("expected value");
+        let err = extract_response_details(&shim, None).expect_err("expected error");
         assert!(format!("{err}").contains("content must define exactly one media type"));
     }
 
@@ -2249,8 +2278,10 @@ mod tests {
             }
         });
 
-        let shim = ShimResponses::from_raw(raw).unwrap();
-        let details = extract_response_details(&shim, None).unwrap().unwrap();
+        let shim = ShimResponses::from_raw(raw).expect("expected value");
+        let details = extract_response_details(&shim, None)
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(details.headers.len(), 1);
         assert_eq!(details.headers[0].name, "X-Any");
         assert_eq!(details.headers[0].ty, "String");
@@ -2269,8 +2300,8 @@ mod tests {
             }
         });
 
-        let shim = ShimResponses::from_raw(raw).unwrap();
-        let err = extract_response_details(&shim, None).unwrap_err();
+        let shim = ShimResponses::from_raw(raw).expect("expected value");
+        let err = extract_response_details(&shim, None).expect_err("expected error");
         assert!(format!("{err}").contains("schema is 'false'"));
     }
 
@@ -2308,8 +2339,8 @@ mod tests {
         );
 
         let details = extract_response_details(&wrap(responses), Some(&components))
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(details.body_type.as_deref(), Some("User"));
     }
 
@@ -2331,15 +2362,15 @@ mod tests {
         responses.responses.insert("200".into(), RefOr::T(response));
 
         let details = extract_response_details(&wrap(responses), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         let link = &details.links[0];
         assert_eq!(link.server_url.as_deref(), Some("https://api.example.com"));
         assert!(matches!(
             link.request_body,
             Some(LinkRequestBody::Literal(_))
         ));
-        match link.parameters.get("id").unwrap() {
+        match link.parameters.get("id").expect("expected value") {
             LinkParamValue::Literal(v) => assert_eq!(v, &json!(42)),
             _ => panic!("Expected literal parameter"),
         }
@@ -2373,8 +2404,8 @@ mod tests {
         responses.responses.insert("200".into(), RefOr::T(response));
 
         let details = extract_response_details(&wrap(responses), Some(&components))
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(
             details.links[0].description.as_deref(),
             Some("Override description")

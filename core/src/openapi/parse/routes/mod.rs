@@ -1271,14 +1271,20 @@ paths:
       responses:
         '200': {description: OK, content: {application/json: {schema: {type: object}}}}
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
 
-        let get_r = routes.iter().find(|r| r.method == "GET").unwrap();
+        let get_r = routes
+            .iter()
+            .find(|r| r.method == "GET")
+            .expect("expected value");
         assert_eq!(get_r.params[0].name, "id");
         assert_eq!(get_r.params[0].source, ParamSource::Path);
 
-        let post_r = routes.iter().find(|r| r.method == "POST").unwrap();
-        let body = post_r.request_body.as_ref().unwrap();
+        let post_r = routes
+            .iter()
+            .find(|r| r.method == "POST")
+            .expect("expected value");
+        let body = post_r.request_body.as_ref().expect("expected value");
         assert_eq!(body.ty, "UpdateUserRequest");
     }
 
@@ -1298,7 +1304,7 @@ paths:
     get:
       responses: { '200': {description: Pong} }
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].path, "/ping");
         assert_eq!(routes[0].base_path.as_deref(), Some("/v1"));
@@ -1321,7 +1327,7 @@ paths:
                 text/plain:
                   schema: { type: string }
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         let header = routes[0].response_headers.first().expect("expected header");
         assert_eq!(header.name, "X-Token");
         assert_eq!(header.content_media_type.as_deref(), Some("text/plain"));
@@ -1337,7 +1343,7 @@ paths:
     get:
       responses: { '200': {description: OK} }
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].path, "/legacy");
     }
@@ -1359,7 +1365,7 @@ paths:
       responses:
         '200': { description: OK }
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes[0].base_path.as_deref(), Some("/v1"));
     }
 
@@ -1376,7 +1382,7 @@ paths:
       responses:
         '200': { description: OK }
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes[0].base_path.as_deref(), None);
     }
 
@@ -1393,7 +1399,7 @@ paths:
       responses:
         '200': { description: OK }
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes[0].base_path.as_deref(), Some("/test"));
     }
 
@@ -1410,7 +1416,7 @@ paths:
       responses:
         '200': { description: OK }
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes[0].base_path.as_deref(), Some("/v1"));
     }
 
@@ -1432,7 +1438,7 @@ paths:
             None,
             Some("https://example.com/api/openapi.yaml"),
         )
-        .unwrap();
+        .expect("expected value");
         assert_eq!(routes[0].base_path.as_deref(), Some("/api"));
     }
 
@@ -1454,7 +1460,7 @@ paths:
             None,
             Some("https://example.com/api/openapi.yaml"),
         )
-        .unwrap();
+        .expect("expected value");
         assert_eq!(routes[0].base_path.as_deref(), Some("/api/v1"));
     }
 
@@ -1470,7 +1476,7 @@ paths:
       responses:
         '200': { description: OK }
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes[0].base_path.as_deref(), Some("/api/legacy"));
     }
 
@@ -1482,7 +1488,7 @@ paths: {}
 "#;
         let res = parse_openapi_routes(yaml);
         assert!(res.is_err());
-        match res.unwrap_err() {
+        match res.expect_err("expected error") {
             AppError::General(msg) => assert!(msg.contains("missing 'openapi' or 'swagger'")),
             _ => panic!("Wrong error type"),
         }
@@ -1516,28 +1522,28 @@ externalDocs:
   description: Context
 paths: {}
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
 
         assert_eq!(openapi.openapi.as_deref(), Some("3.2.0"));
 
-        let info = openapi.info.unwrap();
+        let info = openapi.info.expect("expected value");
         assert_eq!(
             info.terms_of_service.as_deref(),
             Some("https://example.com/terms")
         );
 
-        let contact = info.contact.unwrap();
+        let contact = info.contact.expect("expected value");
         assert_eq!(contact.email.as_deref(), Some("support@example.com"));
 
-        let license = info.license.unwrap();
+        let license = info.license.expect("expected value");
         assert_eq!(license.identifier.as_deref(), Some("MIT"));
 
-        let servers = openapi.servers.unwrap();
+        let servers = openapi.servers.expect("expected value");
         assert_eq!(servers[0].url, "https://{env}.example.com");
-        let vars = servers[0].variables.as_ref().unwrap();
-        assert_eq!(vars.get("env").unwrap().default, "dev");
+        let vars = servers[0].variables.as_ref().expect("expected value");
+        assert_eq!(vars.get("env").expect("expected value").default, "dev");
 
-        let ext = openapi.external_docs.unwrap();
+        let ext = openapi.external_docs.expect("expected value");
         assert_eq!(ext.url, "https://docs.example.com");
     }
 
@@ -1566,7 +1572,7 @@ paths:
         - $ref: '#/components/parameters/limitParam'
       responses: { '200': {description: OK} }
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         let r = &routes[0];
 
         assert_eq!(r.params.len(), 2);
@@ -1607,7 +1613,7 @@ paths:
       responses:
         '200': { description: OK }
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         let param = routes[0]
             .params
             .iter()
@@ -1634,7 +1640,7 @@ paths:
     get:
       responses: { '200': {description: OK} }
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].security.len(), 1);
         assert_eq!(routes[0].security[0].schemes[0].scheme_name, "api_key");
@@ -1666,7 +1672,7 @@ paths:
         - oauth: [read]
       responses: { '200': {description: OK} }
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].security.len(), 1);
         assert_eq!(routes[0].security[0].schemes[0].scheme_name, "oauth");
@@ -1692,7 +1698,7 @@ paths:
       security: []
       responses: { '200': {description: OK} }
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes.len(), 1);
         assert!(routes[0].security.is_empty());
     }
@@ -1714,7 +1720,7 @@ components:
         let mut registry = DocumentRegistry::new();
         registry
             .register_openapi_yaml("https://example.com/shared.yaml", shared)
-            .unwrap();
+            .expect("expected value");
 
         let entry = r#"
 openapi: 3.2.0
@@ -1733,7 +1739,7 @@ paths:
             Some(&registry),
             Some("https://example.com/openapi.yaml"),
         )
-        .unwrap();
+        .expect("expected value");
 
         assert_eq!(routes.len(), 1);
         let scheme = routes[0].security[0]
@@ -1770,7 +1776,7 @@ paths:
           schema: { type: string }
       responses: { '200': {description: OK} }
 "#;
-        let err = parse_openapi_routes(yaml).unwrap_err();
+        let err = parse_openapi_routes(yaml).expect_err("expected error");
         assert!(format!("{err}").contains("mixes 'querystring' and 'query'"));
     }
 
@@ -1796,7 +1802,7 @@ paths:
               schema: { type: object }
       responses: { '200': {description: OK} }
 "#;
-        let err = parse_openapi_routes(yaml).unwrap_err();
+        let err = parse_openapi_routes(yaml).expect_err("expected error");
         assert!(format!("{err}").contains("multiple querystring parameters"));
     }
 
@@ -1810,7 +1816,7 @@ paths:
     get:
       responses: { '200': {description: OK} }
 "#;
-        let err = parse_openapi_routes(yaml).unwrap_err();
+        let err = parse_openapi_routes(yaml).expect_err("expected error");
         assert!(format!("{err}").contains("missing path parameter '{id}'"));
     }
 
@@ -1829,7 +1835,7 @@ paths:
           schema: { type: string }
       responses: { '200': {description: OK} }
 "#;
-        let err = parse_openapi_routes(yaml).unwrap_err();
+        let err = parse_openapi_routes(yaml).expect_err("expected error");
         assert!(format!("{err}").contains("is not present in path template"));
     }
 
@@ -1848,7 +1854,7 @@ paths:
           schema: { type: string }
       responses: { '200': {description: OK} }
 "#;
-        let err = parse_openapi_routes(yaml).unwrap_err();
+        let err = parse_openapi_routes(yaml).expect_err("expected error");
         assert!(format!("{err}").contains("contains duplicate parameter '{id}'"));
     }
 
@@ -1872,7 +1878,7 @@ paths:
       responses:
         '200': { $ref: '#/components/responses/SuccessResponse' }
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         let r = &routes[0];
         assert_eq!(r.response_type.as_deref(), Some("MyData"));
     }
@@ -1891,7 +1897,7 @@ paths:
   /users:
     $ref: '#/components/pathItems/UserPath'
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].path, "/users");
         assert_eq!(routes[0].method, "GET");
@@ -1912,7 +1918,7 @@ paths:
   /users:
     $ref: 'https://example.com/openapi.yaml#/components/pathItems/UserPath'
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].path, "/users");
         assert_eq!(routes[0].method, "GET");
@@ -1930,7 +1936,7 @@ paths:
         operationId: copyThing
         responses: { '200': {description: OK} }
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes.len(), 1);
         let r = &routes[0];
         assert_eq!(r.method, "COPY");
@@ -1949,7 +1955,7 @@ paths:
         operationId: badGet
         responses: { '200': {description: OK} }
 "#;
-        let err = parse_openapi_routes(yaml).unwrap_err();
+        let err = parse_openapi_routes(yaml).expect_err("expected error");
         let msg = format!("{err}");
         assert!(msg.contains("additionalOperations"));
         assert!(msg.contains("GET"));
@@ -1971,7 +1977,7 @@ paths:
         - url: https://api.example.com/v3
       responses: { '200': {description: OK} }
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].base_path.as_deref(), Some("/v3"));
         let op_servers = routes[0]
@@ -2015,7 +2021,7 @@ paths:
             type: string
       responses: { '200': {description: OK} }
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes.len(), 1);
         let route = &routes[0];
         assert_eq!(route.path_summary.as_deref(), Some("Path summary"));
@@ -2062,7 +2068,7 @@ webhooks:
   userCreated:
     $ref: '#/components/pathItems/HookItem'
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].path, "userCreated");
         assert_eq!(routes[0].method, "POST");
@@ -2084,9 +2090,12 @@ paths:
   /alias:
     $ref: '#/paths/~1base'
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes.len(), 2);
-        let alias_route = routes.iter().find(|r| r.path == "/alias").unwrap();
+        let alias_route = routes
+            .iter()
+            .find(|r| r.path == "/alias")
+            .expect("expected value");
         assert_eq!(alias_route.method, "GET");
     }
 
@@ -2100,7 +2109,7 @@ paths:
     get:
       responses: { '200': {description: OK} }
 "#;
-        let err = parse_openapi_routes(yaml).unwrap_err();
+        let err = parse_openapi_routes(yaml).expect_err("expected error");
         assert!(format!("{err}").contains("must start with '/'"));
     }
 
@@ -2127,7 +2136,7 @@ paths:
           schema: { type: string }
       responses: { '200': {description: OK} }
 "#;
-        let err = parse_openapi_routes(yaml).unwrap_err();
+        let err = parse_openapi_routes(yaml).expect_err("expected error");
         assert!(format!("{err}").contains("conflicts with"));
     }
 
@@ -2146,7 +2155,7 @@ paths:
       operationId: sameOp
       responses: { '200': {description: OK} }
 "#;
-        let err = parse_openapi_routes(yaml).unwrap_err();
+        let err = parse_openapi_routes(yaml).expect_err("expected error");
         assert!(format!("{err}").contains("Duplicate operationId"));
     }
 
@@ -2167,7 +2176,7 @@ paths:
               responses: { '200': {description: OK} }
       responses: { '200': {description: OK} }
 "#;
-        let err = parse_openapi_routes(yaml).unwrap_err();
+        let err = parse_openapi_routes(yaml).expect_err("expected error");
         assert!(format!("{err}").contains("Duplicate operationId"));
     }
 
@@ -2187,7 +2196,7 @@ paths:
       operationId: GetUserById
       responses: { '200': {description: OK} }
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].operation_id.as_deref(), Some("GetUserById"));
         assert_eq!(routes[0].handler_name, "get_user_by_id");
@@ -2207,7 +2216,7 @@ paths:
     get:
       responses: { '200': {description: OK} }
 "#;
-        let err = parse_openapi_routes(yaml).unwrap_err();
+        let err = parse_openapi_routes(yaml).expect_err("expected error");
         assert!(format!("{err}").contains("Component key"));
     }
 
@@ -2217,7 +2226,7 @@ paths:
 openapi: 3.2.0
 info: {title: MissingEverything, version: 1.0}
 "#;
-        let err = parse_openapi_routes(yaml).unwrap_err();
+        let err = parse_openapi_routes(yaml).expect_err("expected error");
         assert!(format!("{err}").contains("must define at least one"));
     }
 
@@ -2228,7 +2237,7 @@ openapi: 3.2.0
 info: {title: EmptyPaths, version: 1.0}
 paths: {}
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert!(routes.is_empty());
     }
 
@@ -2248,7 +2257,7 @@ webhooks:
     post:
       responses: { '200': { description: OK } }
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes.len(), 2);
         assert!(routes
             .iter()
@@ -2282,7 +2291,7 @@ webhooks:
             None,
             None,
         )
-        .unwrap();
+        .expect("expected value");
         assert!(resolved.get.is_some());
     }
 
@@ -2329,7 +2338,7 @@ components:
         let mut registry = DocumentRegistry::new();
         registry
             .register_openapi_yaml("https://example.com/shared.yaml", shared)
-            .unwrap();
+            .expect("expected value");
 
         let entry = r#"
 openapi: 3.2.0
@@ -2345,7 +2354,7 @@ paths:
             Some(&registry),
             Some("https://example.com/openapi.yaml"),
         )
-        .unwrap();
+        .expect("expected value");
 
         assert_eq!(routes.len(), 1);
         let route = &routes[0];
@@ -2376,7 +2385,7 @@ paths:
                 content: { application/json: { schema: {type: object} } }
               responses: { '200': {description: OK} }
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes.len(), 1);
         let route = &routes[0];
 
@@ -2410,7 +2419,7 @@ paths:
         myHook:
           $ref: '#/components/callbacks/MyCallback'
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         let route = &routes[0];
 
         assert_eq!(route.callbacks.len(), 1);
@@ -2446,8 +2455,8 @@ paths:
               parameters:
                 id: $response.body#/id
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
-        let links = routes[0].response_links.as_ref().unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let links = routes[0].response_links.as_ref().expect("expected value");
         assert!(links[0].operation_ref.is_none());
         assert_eq!(
             links[0].resolved_operation_ref.as_deref(),
@@ -2478,8 +2487,8 @@ paths:
               parameters:
                 id: $response.body#/id
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
-        let links = routes[0].response_links.as_ref().unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let links = routes[0].response_links.as_ref().expect("expected value");
         assert_eq!(
             links[0].operation_ref.as_deref(),
             Some("#/paths/~1users~1%7Bid%7D/get")
@@ -2510,8 +2519,8 @@ paths:
             Callback:
               operationRef: '#/webhooks/onEvent/post'
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
-        let links = routes[0].response_links.as_ref().unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let links = routes[0].response_links.as_ref().expect("expected value");
         assert_eq!(
             links[0].operation_ref.as_deref(),
             Some("#/webhooks/onEvent/post")
@@ -2544,8 +2553,8 @@ paths:
   /users/{id}:
     $ref: '#/components/pathItems/UserItem'
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
-        let links = routes[0].response_links.as_ref().unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let links = routes[0].response_links.as_ref().expect("expected value");
         assert_eq!(
             links[0].operation_ref.as_deref(),
             Some("#/components/pathItems/UserItem/get")
@@ -2583,7 +2592,7 @@ paths:
   /accounts/{id}:
     $ref: '#/components/pathItems/UserItem'
 "#;
-        let err = parse_openapi_routes(yaml).unwrap_err();
+        let err = parse_openapi_routes(yaml).expect_err("expected error");
         assert!(format!("{err}").contains("operationRef"));
     }
 
@@ -2602,7 +2611,7 @@ paths:
             Self:
               operationRef: '#/paths/~1users/post'
 "#;
-        let err = parse_openapi_routes(yaml).unwrap_err();
+        let err = parse_openapi_routes(yaml).expect_err("expected error");
         assert!(format!("{err}").contains("operationRef"));
     }
 
@@ -2622,8 +2631,8 @@ paths:
               Self:
                 operationRef: '#/paths/~1files/COPY'
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
-        let links = routes[0].response_links.as_ref().unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let links = routes[0].response_links.as_ref().expect("expected value");
         assert_eq!(
             links[0].operation_ref.as_deref(),
             Some("#/paths/~1files/COPY")
@@ -2646,7 +2655,7 @@ paths:
             Missing:
               operationId: missingOp
 "#;
-        let err = parse_openapi_routes(yaml).unwrap_err();
+        let err = parse_openapi_routes(yaml).expect_err("expected error");
         assert!(format!("{err}").contains("unknown operationId"));
     }
 
@@ -2672,7 +2681,7 @@ paths:
             X-Rate-Limit:
               $ref: '#/components/headers/RateLimit'
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         let headers = &routes[0].response_headers;
         assert_eq!(headers.len(), 1);
         assert_eq!(headers[0].name, "X-Rate-Limit");
@@ -2697,7 +2706,7 @@ paths:
                   schema:
                     type: integer
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         let headers = &routes[0].response_headers;
         assert_eq!(headers.len(), 1);
         assert_eq!(headers[0].name, "X-Rate-Limit");
@@ -2724,7 +2733,7 @@ paths:
                   schema:
                     type: integer
 "#;
-        let err = parse_openapi_routes(yaml).unwrap_err();
+        let err = parse_openapi_routes(yaml).expect_err("expected error");
         assert!(format!("{err}").contains("Header 'X-Rate-Limit' cannot specify both"));
     }
 
@@ -2750,7 +2759,7 @@ paths:
               itemSchema:
                 $ref: '#/components/schemas/LogEntry'
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes[0].response_type.as_deref(), Some("Vec<LogEntry>"));
     }
 
@@ -2776,7 +2785,7 @@ paths:
               itemSchema:
                 $ref: '#/components/schemas/Event'
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes[0].response_type.as_deref(), Some("Vec<Event>"));
     }
 
@@ -2802,7 +2811,7 @@ paths:
               itemSchema:
                 $ref: '#/components/schemas/Part'
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes[0].response_type.as_deref(), Some("Vec<Part>"));
     }
 
@@ -2847,7 +2856,7 @@ paths:
               schema:
                 type: string
 "#;
-        let err = parse_openapi_routes(yaml).unwrap_err();
+        let err = parse_openapi_routes(yaml).expect_err("expected error");
         assert!(format!("{err}").contains("Header 'X-Rate' must not define both"));
     }
 
@@ -2867,7 +2876,7 @@ paths:
               itemSchema:
                 type: string
 "#;
-        let err = parse_openapi_routes(yaml).unwrap_err();
+        let err = parse_openapi_routes(yaml).expect_err("expected error");
         assert!(format!("{err}").contains("itemSchema but is not a sequential media type"));
     }
 
@@ -2896,7 +2905,7 @@ paths:
             application/json:
               $ref: '#/components/mediaTypes/WidgetJson'
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes[0].response_type.as_deref(), Some("Widget"));
     }
 
@@ -2929,10 +2938,10 @@ paths:
       responses:
         '200': {description: ok}
 "#;
-        let routes = parse_openapi_routes(yaml).unwrap();
-        let body = routes[0].request_body.as_ref().unwrap();
-        let encoding = body.encoding.as_ref().unwrap();
-        let file = encoding.get("file").unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let body = routes[0].request_body.as_ref().expect("expected value");
+        let encoding = body.encoding.as_ref().expect("expected value");
+        let file = encoding.get("file").expect("expected value");
         assert_eq!(
             file.headers.get("Content-Range").map(String::as_str),
             Some("String")

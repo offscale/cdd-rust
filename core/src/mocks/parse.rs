@@ -30,7 +30,7 @@ mod tests {
         let code = r#"
         pub struct FakeDb {}
         "#;
-        let mocks = extract_mocks(code).unwrap();
+        let mocks = extract_mocks(code).expect("expected value");
         assert!(mocks.is_empty());
     }
 }

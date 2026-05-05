@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn test_scaffold_handlers_and_route_injection() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("expected value");
         let openapi_path = dir.path().join("openapi.yaml");
         let output_dir = dir.path().join("handlers");
         let route_config_path = dir.path().join("routes.rs");
@@ -208,8 +208,8 @@ paths:
       responses:
         '200': { description: OK }
 "#;
-        let mut f = fs::File::create(&openapi_path).unwrap();
-        f.write_all(yaml.as_bytes()).unwrap();
+        let mut f = fs::File::create(&openapi_path).expect("expected value");
+        f.write_all(yaml.as_bytes()).expect("expected value");
 
         let args = ScaffoldArgs {
             openapi_path,
@@ -220,7 +220,7 @@ paths:
         let strategy = ActixStrategy;
 
         // 2. Execute
-        execute(&args, &strategy).unwrap();
+        execute(&args, &strategy).expect("expected value");
 
         // 3. Verify Handlers Generated
         let users_file = output_dir.join("users.rs");
@@ -229,15 +229,15 @@ paths:
         assert!(users_file.exists());
         assert!(posts_file.exists());
 
-        let users_code = fs::read_to_string(&users_file).unwrap();
+        let users_code = fs::read_to_string(&users_file).expect("expected value");
         assert!(users_code.contains("pub async fn get_user("));
 
-        let posts_code = fs::read_to_string(&posts_file).unwrap();
+        let posts_code = fs::read_to_string(&posts_file).expect("expected value");
         assert!(posts_code.contains("pub async fn create_post("));
 
         // 4. Verify Route Injection
         assert!(route_config_path.exists());
-        let config_code = fs::read_to_string(&route_config_path).unwrap();
+        let config_code = fs::read_to_string(&route_config_path).expect("expected value");
 
         // Check required imports for Actix
         assert!(config_code.contains("pub fn config(cfg: &mut web::ServiceConfig)"));
@@ -250,8 +250,8 @@ paths:
 
         // 5. Idempotency Check
         // Running it again should not duplicate lines (core logic test, but verified via CLI flow)
-        execute(&args, &strategy).unwrap();
-        let config_code_2 = fs::read_to_string(&route_config_path).unwrap();
+        execute(&args, &strategy).expect("expected value");
+        let config_code_2 = fs::read_to_string(&route_config_path).expect("expected value");
 
         // Count occurrences of registration
         let count = config_code_2.matches("handlers::users::get_user").count();
@@ -260,7 +260,7 @@ paths:
 
     #[test]
     fn test_missing_tags_defaults_to_default_module() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("expected value");
         let openapi_path = dir.path().join("openapi.yaml");
         let output_dir = dir.path().join("handlers");
 
@@ -274,8 +274,8 @@ paths:
       responses:
         '200': { description: OK }
 "#;
-        let mut f = fs::File::create(&openapi_path).unwrap();
-        f.write_all(yaml.as_bytes()).unwrap();
+        let mut f = fs::File::create(&openapi_path).expect("expected value");
+        f.write_all(yaml.as_bytes()).expect("expected value");
 
         let args = ScaffoldArgs {
             openapi_path,
@@ -283,12 +283,12 @@ paths:
             route_config_path: None, // Optional: skip injection
             force: false,
         };
-        execute(&args, &ActixStrategy).unwrap();
+        execute(&args, &ActixStrategy).expect("expected value");
 
         let default_file = output_dir.join("default.rs");
         assert!(default_file.exists());
 
-        let code = fs::read_to_string(default_file).unwrap();
+        let code = fs::read_to_string(default_file).expect("expected value");
         assert!(code.contains("pub async fn ping()"));
     }
 }

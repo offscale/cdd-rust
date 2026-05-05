@@ -962,7 +962,7 @@ mod tests {
             "crate::create_app",
             &strategy,
         )
-        .unwrap();
+        .expect("expected value");
 
         assert!(code.contains("#[actix_web::test]"));
         assert!(code.contains("async fn test_get_user()"));
@@ -1070,7 +1070,7 @@ mod tests {
         let strategy = ActixStrategy;
         let code =
             generate_contract_tests_file(&routes, "tests/openapi.yaml", "crate::app", &strategy)
-                .unwrap();
+                .expect("expected value");
 
         assert!(code.contains("test_list_users"));
         assert!(!code.contains("test_user_created"));
@@ -1155,7 +1155,8 @@ mod tests {
         }];
 
         let strategy = ActixStrategy;
-        let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy).unwrap();
+        let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy)
+            .expect("expected value");
         assert!(code.contains("?q=test_val&page=1"));
     }
 
@@ -1259,7 +1260,8 @@ mod tests {
         ];
 
         let strategy = ActixStrategy;
-        let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy).unwrap();
+        let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy)
+            .expect("expected value");
 
         assert!(code.contains("application/x-www-form-urlencoded"));
         assert!(code.contains("dummy=value"));
@@ -1332,7 +1334,8 @@ mod tests {
         }];
 
         let strategy = ActixStrategy;
-        let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy).unwrap();
+        let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy)
+            .expect("expected value");
         assert!(code.contains(".uri(\"/items/item-42\")"));
     }
 
@@ -1473,7 +1476,8 @@ mod tests {
         }];
 
         let strategy = ActixStrategy;
-        let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy).unwrap();
+        let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy)
+            .expect("expected value");
         assert!(code.contains("?test_val"));
     }
 
@@ -1558,7 +1562,8 @@ mod tests {
         }];
 
         let strategy = ActixStrategy;
-        let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy).unwrap();
+        let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy)
+            .expect("expected value");
         assert!(code.contains(".insert_header((\"X-Token\", \"abc123\"))"));
         assert!(code.contains(".insert_header((\"Cookie\", \"session=test_val\"))"));
     }
@@ -2051,7 +2056,8 @@ mod tests {
         }];
 
         let strategy = ActixStrategy;
-        let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy).unwrap();
+        let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy)
+            .expect("expected value");
         assert!(code.contains(".set_json(serde_json::json!"));
     }
 
@@ -2105,7 +2111,8 @@ mod tests {
         }];
 
         let strategy = ActixStrategy;
-        let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy).unwrap();
+        let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy)
+            .expect("expected value");
         // Expect URI to include base path
         assert!(code.contains(".uri(\"/api/v1/ping\")"));
         // Expect validation logic to use original template
@@ -2172,7 +2179,8 @@ mod tests {
         }];
 
         let strategy = ActixStrategy;
-        let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy).unwrap();
+        let code = generate_contract_tests_file(&routes, "doc.yaml", "init", &strategy)
+            .expect("expected value");
         assert!(!code.contains(".set_json("));
         assert!(!code.contains(".set_form("));
     }

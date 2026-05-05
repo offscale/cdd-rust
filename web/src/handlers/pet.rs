@@ -12,7 +12,7 @@ pub struct PetStore {
 
 /// Documented
 pub async fn add_pet(body: web::Json<Value>, store: web::Data<PetStore>) -> impl Responder {
-    let mut map = store.pets.lock().unwrap();
+    let mut map = store.pets.lock().expect("Mutex poisoned");
     if let Some(id) = body.get("id").and_then(|v| v.as_i64()) {
         map.insert(id, body.clone());
         HttpResponse::Ok().json(body.into_inner())
@@ -23,7 +23,7 @@ pub async fn add_pet(body: web::Json<Value>, store: web::Data<PetStore>) -> impl
 
 /// Documented
 pub async fn update_pet(body: web::Json<Value>, store: web::Data<PetStore>) -> impl Responder {
-    let mut map = store.pets.lock().unwrap();
+    let mut map = store.pets.lock().expect("Mutex poisoned");
     if let Some(id) = body.get("id").and_then(|v| v.as_i64()) {
         map.insert(id, body.clone());
         HttpResponse::Ok().json(body.into_inner())
@@ -44,7 +44,7 @@ pub async fn find_pets_by_tags() -> impl Responder {
 
 /// Documented
 pub async fn get_pet_by_id(pet_id: web::Path<i64>, store: web::Data<PetStore>) -> impl Responder {
-    let map = store.pets.lock().unwrap();
+    let map = store.pets.lock().expect("Mutex poisoned");
     if let Some(pet) = map.get(&pet_id.into_inner()) {
         HttpResponse::Ok().json(pet)
     } else {
@@ -59,7 +59,7 @@ pub async fn update_pet_with_form() -> impl Responder {
 
 /// Documented
 pub async fn delete_pet(pet_id: web::Path<i64>, store: web::Data<PetStore>) -> impl Responder {
-    let mut map = store.pets.lock().unwrap();
+    let mut map = store.pets.lock().expect("Mutex poisoned");
     if map.remove(&pet_id.into_inner()).is_some() {
         HttpResponse::Ok().finish()
     } else {

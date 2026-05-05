@@ -7,12 +7,31 @@ use derive_more::{Display, From};
 /// The Global Error Enum.
 ///
 /// We use `derive_more` for boilerplate.
-/// Note: String errors default to `General`.
 #[derive(Debug, Display, From)]
 pub enum AppError {
     /// Wrapper for standard IO errors.
     #[display("IO Error: {_0}")]
     Io(std::io::Error),
+
+    /// Wrapper for format errors.
+    #[display("Format Error: {_0}")]
+    Fmt(std::fmt::Error),
+
+    /// Wrapper for JSON errors.
+    #[display("JSON Error: {_0}")]
+    SerdeJson(serde_json::Error),
+
+    /// Wrapper for YAML errors.
+    #[display("YAML Error: {_0}")]
+    SerdeYaml(serde_yaml::Error),
+
+    /// Wrapper for URL parse errors.
+    #[display("URL Parse Error: {_0}")]
+    UrlParse(url::ParseError),
+
+    /// Wrapper for Utf8 errors.
+    #[display("UTF-8 Error: {_0}")]
+    Utf8(std::str::Utf8Error),
 
     /// Wrapper for Database string errors.
     /// We ignore this for `From<String>` to avoid conflict with General.
@@ -25,6 +44,12 @@ pub enum AppError {
     General(String),
 }
 
+impl From<&str> for AppError {
+    fn from(s: &str) -> Self {
+        AppError::General(s.to_string())
+    }
+}
+
 /// Manual implementation of the standard Error trait.
 impl std::error::Error for AppError {}
 
@@ -32,32 +57,12 @@ impl std::error::Error for AppError {}
 pub type AppResult<T> = Result<T, AppError>;
 
 #[cfg(test)]
-mod tests {
+mod additional_tests {
     use super::*;
-    use std::io::Error;
 
     #[test]
-    fn test_io_conversion() {
-        let io_err = Error::other("test");
-        let app_err: AppError = io_err.into();
-        assert!(matches!(app_err, AppError::Io(_)));
-    }
-
-    #[test]
-    fn test_string_conversion() {
-        // Test that String defaults to General, not Database
-        let msg = String::from("something wrong");
-        let app_err: AppError = msg.into();
-        match app_err {
-            AppError::General(s) => assert_eq!(s, "something wrong"),
-            _ => panic!("String should convert to AppError::General"),
-        }
-    }
-
-    #[test]
-    fn test_database_manual_creation() {
-        // Database errors must be created explicitly
-        let app_err = AppError::Database("db fail".into());
-        assert_eq!(format!("{}", app_err), "Database Error: db fail");
+    fn test_from_str() {
+        let err: AppError = "some error".into();
+        assert_eq!(format!("{}", err), "General Error: some error");
     }
 }

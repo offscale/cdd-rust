@@ -19,14 +19,20 @@ help:
 	@echo "  build_wasm     - Build the WASM target (Note: currently unsupported)"
 	@echo "  build_docker   - Build alpine and debian Docker images."
 	@echo "  run_docker     - Run the built Docker images to test them."
+	@echo "  setup_hooks    - Setup git pre-commit hooks."
 
 install_base:
 	rustup update
 	rustup target add wasm32-unknown-unknown || true
 	rustup target add wasm32-unknown-emscripten || true
 
+setup_hooks:
+	git config core.hooksPath .githooks
+
 install_deps:
 	cargo fetch
+	$(MAKE) setup_hooks
+
 
 DOC_DIR ?= target/doc
 build_docs:

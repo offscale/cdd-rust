@@ -114,7 +114,7 @@ mod tests {
         /// @OAS_PATH: /users/{id}
         pub async fn get_user() {}
         "#;
-        let routes = extract_routes_from_reqwest_functions(code).unwrap();
+        let routes = extract_routes_from_reqwest_functions(code).expect("expected value");
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].method, "GET");
         assert_eq!(routes[0].path, "/users/{id}");

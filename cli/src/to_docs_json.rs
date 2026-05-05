@@ -1,3 +1,4 @@
+//! Documentation JSON generation module.
 use cdd_core::error::{AppError, AppResult};
 use cdd_core::openapi::parse::document::parse_openapi_document;
 use cdd_core::openapi::parse::models::RouteKind;
@@ -5,6 +6,7 @@ use clap::Args;
 use serde::Serialize;
 use std::fs;
 
+/// Arguments for generating JSON documentation snippets from an OpenAPI spec.
 #[derive(Args, Debug)]
 pub struct ToDocsJsonArgs {
     /// Path or URL to the OpenAPI specification.
@@ -24,32 +26,46 @@ pub struct ToDocsJsonArgs {
     pub output: Option<String>,
 }
 
+/// The root JSON object representing documentation snippets.
 #[derive(Serialize, Debug)]
 struct DocsJsonOutput {
+    /// The language of the code snippets.
     language: String,
+    /// The list of operations.
     operations: Vec<DocsOperation>,
 }
 
+/// A specific API operation.
 #[derive(Serialize, Debug)]
 struct DocsOperation {
+    /// HTTP method.
     method: String,
+    /// Route path.
     path: String,
+    /// Optional OpenAPI Operation ID.
     #[serde(rename = "operationId", skip_serializing_if = "Option::is_none")]
     operation_id: Option<String>,
+    /// The code snippet for the operation.
     code: DocsCode,
 }
 
+/// The code snippet object for an operation.
 #[derive(Serialize, Debug)]
 struct DocsCode {
+    /// Optional imports.
     #[serde(skip_serializing_if = "Option::is_none")]
     imports: Option<String>,
+    /// Optional wrapper start code.
     #[serde(skip_serializing_if = "Option::is_none")]
     wrapper_start: Option<String>,
+    /// The main snippet code.
     snippet: String,
+    /// Optional wrapper end code.
     #[serde(skip_serializing_if = "Option::is_none")]
     wrapper_end: Option<String>,
 }
 
+/// Reads the input specification from a file or URL.
 #[cfg(not(tarpaulin_include))]
 #[cfg(feature = "client")]
 fn read_input(input: &str) -> AppResult<String> {
@@ -67,6 +83,7 @@ fn read_input(input: &str) -> AppResult<String> {
     }
 }
 
+/// Reads the input specification from a file only (when client feature is absent).
 #[cfg(not(tarpaulin_include))]
 #[cfg(not(feature = "client"))]
 fn read_input(input: &str) -> AppResult<String> {
@@ -80,6 +97,7 @@ fn read_input(input: &str) -> AppResult<String> {
     }
 }
 
+/// Executes the documentation JSON generation pipeline.
 pub fn execute(args: &ToDocsJsonArgs) -> AppResult<()> {
     let yaml_content = read_input(&args.input)?;
 
@@ -98,6 +116,7 @@ pub fn execute(args: &ToDocsJsonArgs) -> AppResult<()> {
     Ok(())
 }
 
+/// Generates the internal `DocsJsonOutput` structures from a parsed OpenAPI spec.
 fn generate_docs_json(yaml_content: &str, args: &ToDocsJsonArgs) -> AppResult<Vec<DocsJsonOutput>> {
     let parsed = parse_openapi_document(yaml_content)?;
 
@@ -189,7 +208,7 @@ paths:
             output: None,
         };
 
-        let output = generate_docs_json(yaml, &args).unwrap();
+        let output = generate_docs_json(yaml, &args).expect("expected value");
         assert_eq!(output.len(), 1);
         let rust_docs = &output[0];
         assert_eq!(rust_docs.language, "rust");
@@ -232,7 +251,7 @@ paths:
             output: None,
         };
 
-        let output = generate_docs_json(yaml, &args).unwrap();
+        let output = generate_docs_json(yaml, &args).expect("expected value");
         let op = &output[0].operations[0];
 
         assert!(op.code.imports.is_none());
@@ -265,7 +284,7 @@ webhooks:
             output: None,
         };
 
-        let output = generate_docs_json(yaml, &args).unwrap();
+        let output = generate_docs_json(yaml, &args).expect("expected value");
         // The webhook should be skipped, so operations should be empty
         assert_eq!(output.len(), 1);
         assert_eq!(output[0].operations.len(), 0);
@@ -274,11 +293,11 @@ webhooks:
     #[test]
     fn test_execute_with_file() {
         use std::io::Write;
-        let mut file = tempfile::NamedTempFile::new().unwrap();
-        writeln!(file, "openapi: 3.0.0\ninfo:\n  title: Test API\n  version: 1.0.0\npaths:\n  /pets:\n    get:\n      responses:\n        '200':\n          description: OK").unwrap();
+        let mut file = tempfile::NamedTempFile::new().expect("expected value");
+        writeln!(file, "openapi: 3.0.0\ninfo:\n  title: Test API\n  version: 1.0.0\npaths:\n  /pets:\n    get:\n      responses:\n        '200':\n          description: OK").expect("expected value");
 
         let args = ToDocsJsonArgs {
-            input: file.path().to_str().unwrap().to_string(),
+            input: file.path().to_str().expect("expected value").to_string(),
             no_imports: false,
             no_wrapping: false,
             output: None,
@@ -314,7 +333,7 @@ webhooks:
     #[test]
     fn test_execute_with_invalid_output_path() {
         use tempfile::tempdir;
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("expected value");
         let file = dir.path().join("test.yaml");
         let openapi_yaml = r#"
 openapi: 3.0.0
@@ -323,7 +342,7 @@ info:
   version: 1.0.0
 paths: {}
 "#;
-        std::fs::write(&file, openapi_yaml).unwrap();
+        std::fs::write(&file, openapi_yaml).expect("expected value");
 
         let args = ToDocsJsonArgs {
             input: file.to_string_lossy().to_string(),

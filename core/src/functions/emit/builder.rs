@@ -106,7 +106,7 @@ mod tests {
         };
 
         let strategy = ActixStrategy;
-        let code = update_handler_module("", &[route], &strategy).unwrap();
+        let code = update_handler_module("", &[route], &strategy).expect("expected value");
         assert!(code.contains("pub async fn get_users() -> impl Responder {"));
     }
 
@@ -165,7 +165,7 @@ mod tests {
         };
 
         let strategy = ActixStrategy;
-        let code = update_handler_module(source, &[route], &strategy).unwrap();
+        let code = update_handler_module(source, &[route], &strategy).expect("expected value");
         assert!(code.contains("pub async fn existing_handler"));
         assert!(code.contains("pub async fn new_func"));
     }

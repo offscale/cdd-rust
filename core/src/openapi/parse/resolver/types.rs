@@ -235,7 +235,7 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(integer), true).unwrap(),
+            map_schema_to_rust_type(&RefOr::T(integer), true).expect("expected value"),
             "i32"
         );
 
@@ -246,7 +246,7 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(long), true).unwrap(),
+            map_schema_to_rust_type(&RefOr::T(long), true).expect("expected value"),
             "i64"
         );
     }
@@ -260,7 +260,7 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(float), true).unwrap(),
+            map_schema_to_rust_type(&RefOr::T(float), true).expect("expected value"),
             "f32"
         );
 
@@ -271,13 +271,13 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(double), true).unwrap(),
+            map_schema_to_rust_type(&RefOr::T(double), true).expect("expected value"),
             "f64"
         );
 
         let default_num = Schema::Object(ObjectBuilder::new().schema_type(Type::Number).build());
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(default_num), true).unwrap(),
+            map_schema_to_rust_type(&RefOr::T(default_num), true).expect("expected value"),
             "f64"
         );
     }
@@ -286,7 +286,7 @@ mod tests {
     fn test_map_strings_registry() {
         let string = Schema::Object(ObjectBuilder::new().schema_type(Type::String).build());
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(string), true).unwrap(),
+            map_schema_to_rust_type(&RefOr::T(string), true).expect("expected value"),
             "String"
         );
 
@@ -297,7 +297,7 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(uuid), true).unwrap(),
+            map_schema_to_rust_type(&RefOr::T(uuid), true).expect("expected value"),
             "Uuid"
         );
 
@@ -308,7 +308,7 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(password), true).unwrap(),
+            map_schema_to_rust_type(&RefOr::T(password), true).expect("expected value"),
             "Secret<String>"
         );
     }
@@ -322,7 +322,7 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(byte), true).unwrap(),
+            map_schema_to_rust_type(&RefOr::T(byte), true).expect("expected value"),
             "Vec<u8>"
         );
     }
@@ -336,7 +336,7 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(binary), true).unwrap(),
+            map_schema_to_rust_type(&RefOr::T(binary), true).expect("expected value"),
             "Vec<u8>"
         );
     }
@@ -345,7 +345,7 @@ mod tests {
     fn test_map_null_schema() {
         let null_schema = Schema::Object(ObjectBuilder::new().schema_type(Type::Null).build());
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(null_schema), true).unwrap(),
+            map_schema_to_rust_type(&RefOr::T(null_schema), true).expect("expected value"),
             "Option<serde_json::Value>"
         );
     }
@@ -360,7 +360,7 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(bin), true).unwrap(),
+            map_schema_to_rust_type(&RefOr::T(bin), true).expect("expected value"),
             "Vec<u8>"
         );
     }
@@ -374,7 +374,7 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(bin), true).unwrap(),
+            map_schema_to_rust_type(&RefOr::T(bin), true).expect("expected value"),
             "Vec<u8>"
         );
     }
@@ -388,7 +388,7 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(text), true).unwrap(),
+            map_schema_to_rust_type(&RefOr::T(text), true).expect("expected value"),
             "String"
         );
     }
@@ -397,7 +397,7 @@ mod tests {
     fn test_formatting_optional() {
         let string = Schema::Object(ObjectBuilder::new().schema_type(Type::String).build());
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(string), false).unwrap(),
+            map_schema_to_rust_type(&RefOr::T(string), false).expect("expected value"),
             "Option<String>"
         );
     }
@@ -410,7 +410,7 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(schema), true).unwrap(),
+            map_schema_to_rust_type(&RefOr::T(schema), true).expect("expected value"),
             "Option<String>"
         );
     }
@@ -423,7 +423,7 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(schema), true).unwrap(),
+            map_schema_to_rust_type(&RefOr::T(schema), true).expect("expected value"),
             "serde_json::Value"
         );
     }
@@ -431,7 +431,10 @@ mod tests {
     #[test]
     fn test_ref_resolution() {
         let r = RefOr::Ref(utoipa::openapi::Ref::new("#/components/schemas/User"));
-        assert_eq!(map_schema_to_rust_type(&r, true).unwrap(), "User");
+        assert_eq!(
+            map_schema_to_rust_type(&r, true).expect("expected value"),
+            "User"
+        );
     }
 
     #[test]
@@ -451,7 +454,8 @@ mod tests {
             }
         });
 
-        let mapped = map_schema_to_rust_type_with_raw(&RefOr::T(schema), true, Some(&raw)).unwrap();
+        let mapped = map_schema_to_rust_type_with_raw(&RefOr::T(schema), true, Some(&raw))
+            .expect("expected value");
         assert_eq!(mapped, "i64");
     }
 
@@ -471,7 +475,8 @@ mod tests {
             }
         });
 
-        let mapped = map_schema_to_rust_type_with_raw(&RefOr::T(schema), true, Some(&raw)).unwrap();
+        let mapped = map_schema_to_rust_type_with_raw(&RefOr::T(schema), true, Some(&raw))
+            .expect("expected value");
         assert_eq!(mapped, "String");
     }
 }

@@ -2,6 +2,7 @@
 members = [
     "core",
     "cli",
+    "web",
 ]
 resolver = "2"
 [workspace.lints.rust]

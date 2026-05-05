@@ -1,3 +1,4 @@
+//! OpenAPI Generation Module
 use crate::TargetMode;
 use cdd_core::classes::parse::{extract_model, extract_struct_names};
 use cdd_core::error::{AppError, AppResult};
@@ -8,6 +9,7 @@ use std::fs;
 use std::path::PathBuf;
 use walkdir::WalkDir;
 
+/// Arguments for generating an OpenAPI spec from source code.
 #[derive(Args, Debug)]
 pub struct ToOpenApiArgs {
     /// Path to the code directory or file to parse.
@@ -19,6 +21,7 @@ pub struct ToOpenApiArgs {
     pub output: PathBuf,
 }
 
+/// Executes the OpenAPI generation from source code.
 pub fn execute(args: &ToOpenApiArgs, target: &TargetMode) -> AppResult<()> {
     println!("Extracting OpenAPI specification from {:?}", args.input);
 
@@ -100,9 +103,9 @@ mod tests {
 
     #[test]
     fn test_to_openapi_execute() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("expected value");
         let src_dir = dir.path().join("src");
-        fs::create_dir_all(&src_dir).unwrap();
+        fs::create_dir_all(&src_dir).expect("expected value");
 
         let rs_path = src_dir.join("models.rs");
         let rs_code = r#"
@@ -115,9 +118,9 @@ mod tests {
         pub async fn get_users() {}
         "#;
         File::create(&rs_path)
-            .unwrap()
+            .expect("expected value")
             .write_all(rs_code.as_bytes())
-            .unwrap();
+            .expect("expected value");
 
         let args = ToOpenApiArgs {
             input: src_dir,
@@ -140,9 +143,9 @@ mod tests {
 
     #[test]
     fn test_to_openapi_client_and_cli_targets() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("expected value");
         let src_dir = dir.path().join("src");
-        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::create_dir_all(&src_dir).expect("expected value");
 
         let rs_path = src_dir.join("clients.rs");
         let rs_code = r#"
@@ -153,9 +156,9 @@ mod tests {
         }
         "#;
         File::create(&rs_path)
-            .unwrap()
+            .expect("expected value")
             .write_all(rs_code.as_bytes())
-            .unwrap();
+            .expect("expected value");
 
         let args = ToOpenApiArgs {
             input: src_dir.clone(),
@@ -175,7 +178,7 @@ mod tests {
     #[test]
     fn test_to_openapi_execute_yaml() {
         use tempfile::tempdir;
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("expected value");
         let input_file = dir.path().join("input.rs");
         let output_file = dir.path().join("output.yaml");
 
@@ -184,7 +187,7 @@ mod tests {
         #[get("/test")]
         async fn test_handler() -> impl Responder { HttpResponse::Ok().finish() }
         "#;
-        std::fs::write(&input_file, handler_code).unwrap();
+        std::fs::write(&input_file, handler_code).expect("expected value");
 
         let args = ToOpenApiArgs {
             input: input_file,
@@ -194,14 +197,14 @@ mod tests {
         let result = execute(&args, &crate::TargetMode::Server);
         assert!(result.is_ok());
         assert!(std::fs::read_to_string(output_file)
-            .unwrap()
+            .expect("expected value")
             .contains("openapi:"));
     }
 
     #[test]
     fn test_to_openapi_execute_write_error() {
         use tempfile::tempdir;
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("expected value");
         let input_file = dir.path().join("input.rs");
 
         let handler_code = r#"
@@ -209,7 +212,7 @@ mod tests {
         #[get("/test")]
         async fn test_handler() -> impl Responder { HttpResponse::Ok().finish() }
         "#;
-        std::fs::write(&input_file, handler_code).unwrap();
+        std::fs::write(&input_file, handler_code).expect("expected value");
 
         let args = ToOpenApiArgs {
             input: input_file,

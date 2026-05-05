@@ -968,7 +968,7 @@ fn resolve_encoding_header_type(
                 "Encoding header content must define exactly one media type".to_string(),
             ));
         }
-        let (media_type, media_obj) = content_map.iter().next().unwrap();
+        let (media_type, media_obj) = content_map.iter().next().expect("expected value");
         let resolved_media = resolve_media_type_ref(
             media_obj,
             components,
@@ -1139,8 +1139,8 @@ mod tests {
             .build();
 
         let def = extract_request_body_type(&RefOr::T(ShimRequestBody::from(body)), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(def.ty, "User");
         assert_eq!(def.media_type, "application/json");
         assert_eq!(def.format, BodyFormat::Json);
@@ -1156,8 +1156,8 @@ mod tests {
             .build();
 
         let def = extract_request_body_type(&RefOr::T(ShimRequestBody::from(body)), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(def.media_type, "text/plain");
         assert_eq!(def.format, BodyFormat::Text);
     }
@@ -1173,8 +1173,8 @@ mod tests {
             .build();
 
         let def = extract_request_body_type(&RefOr::T(ShimRequestBody::from(body)), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(def.media_type, "application/json");
         assert_eq!(def.format, BodyFormat::Json);
     }
@@ -1196,10 +1196,10 @@ mod tests {
             }
         });
 
-        let shim: ShimRequestBody = serde_json::from_value(raw).unwrap();
+        let shim: ShimRequestBody = serde_json::from_value(raw).expect("expected value");
         let def = extract_request_body_type(&RefOr::T(shim), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(def.ty, "i32");
         assert_eq!(def.media_type, "application/json");
     }
@@ -1219,8 +1219,8 @@ mod tests {
             .build();
 
         let def = extract_request_body_type(&RefOr::T(ShimRequestBody::from(body)), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(
             def.example,
             Some(ExampleValue::data(json!({"id": 1, "name": "Ada"})))
@@ -1267,8 +1267,8 @@ mod tests {
 
         let def =
             extract_request_body_type(&RefOr::T(ShimRequestBody::from(body)), Some(&components))
-                .unwrap()
-                .unwrap();
+                .expect("expected value")
+                .expect("expected value");
         assert_eq!(
             def.example,
             Some(ExampleValue::data_with_meta(
@@ -1316,10 +1316,10 @@ mod tests {
             }
         });
 
-        let shim: ShimRequestBody = serde_json::from_value(raw).unwrap();
+        let shim: ShimRequestBody = serde_json::from_value(raw).expect("expected value");
         let def = extract_request_body_type(&RefOr::T(shim), Some(&components))
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(
             def.example,
             Some(ExampleValue::data_with_meta(
@@ -1348,8 +1348,8 @@ mod tests {
             .build();
 
         let def = extract_request_body_type(&RefOr::T(ShimRequestBody::from(body)), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(
             def.example,
             Some(ExampleValue::external(json!(
@@ -1372,10 +1372,10 @@ mod tests {
             }
         });
 
-        let body: ShimRequestBody = serde_json::from_value(raw).unwrap();
+        let body: ShimRequestBody = serde_json::from_value(raw).expect("expected value");
         let def = extract_request_body_type(&RefOr::T(body), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(
             def.example,
             Some(ExampleValue::data(json!({ "id": 42, "name": "Ada" })))
@@ -1398,10 +1398,10 @@ mod tests {
             }
         });
 
-        let body: ShimRequestBody = serde_json::from_value(raw).unwrap();
+        let body: ShimRequestBody = serde_json::from_value(raw).expect("expected value");
         let def = extract_request_body_type(&RefOr::T(body), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
 
         let example = def.example.expect("example missing");
         assert_eq!(example.summary.as_deref(), Some("Short summary"));
@@ -1423,10 +1423,10 @@ mod tests {
             }
         });
 
-        let body: ShimRequestBody = serde_json::from_value(raw).unwrap();
+        let body: ShimRequestBody = serde_json::from_value(raw).expect("expected value");
         let def = extract_request_body_type(&RefOr::T(body), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(
             def.example,
             Some(ExampleValue::data(json!({ "id": 7, "name": "Grace" })))
@@ -1447,10 +1447,10 @@ mod tests {
             }
         });
 
-        let body: ShimRequestBody = serde_json::from_value(raw).unwrap();
+        let body: ShimRequestBody = serde_json::from_value(raw).expect("expected value");
         let def = extract_request_body_type(&RefOr::T(body), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(
             def.example,
             Some(ExampleValue::serialized(json!("hello%20world")))
@@ -1470,10 +1470,10 @@ mod tests {
             }
         });
 
-        let body: ShimRequestBody = serde_json::from_value(raw).unwrap();
+        let body: ShimRequestBody = serde_json::from_value(raw).expect("expected value");
         let def = extract_request_body_type(&RefOr::T(body), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(def.ty, "Vec<String>");
         assert_eq!(def.media_type, "application/jsonl");
     }
@@ -1493,10 +1493,10 @@ mod tests {
             }
         });
 
-        let body: ShimRequestBody = serde_json::from_value(raw).unwrap();
+        let body: ShimRequestBody = serde_json::from_value(raw).expect("expected value");
         let def = extract_request_body_type(&RefOr::T(body), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(def.ty, "Vec<serde_json::Value>");
         assert_eq!(def.media_type, "text/event-stream");
         assert_eq!(def.format, BodyFormat::Text);
@@ -1514,10 +1514,10 @@ mod tests {
             }
         });
 
-        let body: ShimRequestBody = serde_json::from_value(raw).unwrap();
+        let body: ShimRequestBody = serde_json::from_value(raw).expect("expected value");
         let def = extract_request_body_type(&RefOr::T(body), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(def.ty, "Vec<String>");
         assert_eq!(def.media_type, "multipart/mixed");
         assert_eq!(def.format, BodyFormat::Multipart);
@@ -1534,8 +1534,8 @@ mod tests {
             }
         });
 
-        let body: ShimRequestBody = serde_json::from_value(raw).unwrap();
-        let def = extract_request_body_type(&RefOr::T(body), None).unwrap();
+        let body: ShimRequestBody = serde_json::from_value(raw).expect("expected value");
+        let def = extract_request_body_type(&RefOr::T(body), None).expect("expected value");
         assert!(def.is_none());
     }
 
@@ -1550,8 +1550,8 @@ mod tests {
             }
         });
 
-        let body: ShimRequestBody = serde_json::from_value(raw).unwrap();
-        let err = extract_request_body_type(&RefOr::T(body), None).unwrap_err();
+        let body: ShimRequestBody = serde_json::from_value(raw).expect("expected value");
+        let err = extract_request_body_type(&RefOr::T(body), None).expect_err("expected error");
         assert!(format!("{err}").contains("schema is 'false'"));
     }
 
@@ -1591,22 +1591,22 @@ mod tests {
             .build();
 
         let def = extract_request_body_type(&RefOr::T(ShimRequestBody::from(body)), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
 
         assert_eq!(def.ty, "Upload");
         assert_eq!(def.media_type, "multipart/form-data");
         assert_eq!(def.format, BodyFormat::Multipart);
 
-        let enc = def.encoding.unwrap();
-        let profile = enc.get("profileImage").unwrap();
+        let enc = def.encoding.expect("expected value");
+        let profile = enc.get("profileImage").expect("expected value");
         assert_eq!(profile.content_type.as_deref(), Some("image/png"));
         assert_eq!(
             profile.headers.get("X-Image-Id").map(|s| s.as_str()),
             Some("Uuid")
         );
 
-        let meta = enc.get("metadata").unwrap();
+        let meta = enc.get("metadata").expect("expected value");
         assert_eq!(meta.content_type.as_deref(), Some("application/json"));
         assert!(meta.headers.is_empty());
         assert_eq!(
@@ -1651,10 +1651,10 @@ mod tests {
             .build();
 
         let def = extract_request_body_type(&RefOr::T(ShimRequestBody::from(body)), None)
-            .unwrap()
-            .unwrap();
-        let enc = def.encoding.unwrap();
-        let file = enc.get("file").unwrap();
+            .expect("expected value")
+            .expect("expected value");
+        let enc = def.encoding.expect("expected value");
+        let file = enc.get("file").expect("expected value");
         assert!(!file.headers.contains_key("Content-Type"));
         assert_eq!(
             file.headers.get("X-Trace-Id").map(|s| s.as_str()),
@@ -1693,13 +1693,13 @@ components:
         format: int32
 "#;
 
-        let routes = parse_openapi_routes(yaml).unwrap();
-        let body = routes[0].request_body.as_ref().unwrap();
-        let enc = body.encoding.as_ref().unwrap();
+        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let body = routes[0].request_body.as_ref().expect("expected value");
+        let enc = body.encoding.as_ref().expect("expected value");
         let header_ty = enc
             .get("file")
             .and_then(|info| info.headers.get("X-Rate-Limit"))
-            .unwrap();
+            .expect("expected value");
         assert_eq!(header_ty, "i32");
     }
 
@@ -1718,10 +1718,10 @@ components:
             }
         });
 
-        let body: ShimRequestBody = serde_json::from_value(raw).unwrap();
+        let body: ShimRequestBody = serde_json::from_value(raw).expect("expected value");
         let def = extract_request_body_type(&RefOr::T(body), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
 
         let prefix = def.prefix_encoding.expect("expected prefixEncoding");
         assert_eq!(prefix.len(), 2);
@@ -1762,10 +1762,10 @@ components:
             }
         });
 
-        let body: ShimRequestBody = serde_json::from_value(raw).unwrap();
+        let body: ShimRequestBody = serde_json::from_value(raw).expect("expected value");
         let def = extract_request_body_type(&RefOr::T(body), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         let payload = def
             .encoding
             .as_ref()
@@ -1811,8 +1811,8 @@ components:
             }
         });
 
-        let body: ShimRequestBody = serde_json::from_value(raw).unwrap();
-        let err = extract_request_body_type(&RefOr::T(body), None).unwrap_err();
+        let body: ShimRequestBody = serde_json::from_value(raw).expect("expected value");
+        let err = extract_request_body_type(&RefOr::T(body), None).expect_err("expected error");
         assert!(format!("{err}").contains("encoding"));
     }
 
@@ -1828,8 +1828,8 @@ components:
             .build();
 
         let def = extract_request_body_type(&RefOr::T(ShimRequestBody::from(request_body)), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(def.ty, "Login");
         assert_eq!(def.media_type, "application/x-www-form-urlencoded");
         assert_eq!(def.format, BodyFormat::Form);
@@ -1848,8 +1848,8 @@ components:
             .build();
 
         let def = extract_request_body_type(&RefOr::T(ShimRequestBody::from(body)), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(def.ty, "User");
         assert_eq!(def.media_type, "application/vnd.api+json");
         assert_eq!(def.format, BodyFormat::Json);
@@ -1865,8 +1865,8 @@ components:
             .build();
 
         let def = extract_request_body_type(&RefOr::T(ShimRequestBody::from(body)), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(def.ty, "Vec<serde_json::Value>");
         assert_eq!(def.media_type, "application/x-ndjson");
         assert_eq!(def.format, BodyFormat::Json);
@@ -1882,8 +1882,8 @@ components:
             .build();
 
         let def = extract_request_body_type(&RefOr::T(ShimRequestBody::from(body)), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(def.ty, "String");
         assert_eq!(def.media_type, "text/plain");
         assert_eq!(def.format, BodyFormat::Text);
@@ -1900,8 +1900,8 @@ components:
             .build();
 
         let def = extract_request_body_type(&RefOr::T(ShimRequestBody::from(body)), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(def.ty, "String");
         assert_eq!(def.media_type, "application/xml");
         assert_eq!(def.format, BodyFormat::Text);
@@ -1917,8 +1917,8 @@ components:
             .build();
 
         let def = extract_request_body_type(&RefOr::T(ShimRequestBody::from(body)), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(def.ty, "Vec<u8>");
         assert_eq!(def.media_type, "application/octet-stream");
         assert_eq!(def.format, BodyFormat::Binary);
@@ -1953,8 +1953,8 @@ components:
             "https://example.com/openapi.yaml#/components/requestBodies/CreateThing",
         ));
         let def = extract_request_body_type(&body_ref, Some(&components))
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(def.ty, "Thing");
         assert_eq!(def.media_type, "application/json");
         assert_eq!(def.format, BodyFormat::Json);
@@ -1993,8 +1993,8 @@ components:
 
         let body_ref = RefOr::Ref(ref_body);
         let def = extract_request_body_type(&body_ref, Some(&components))
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(def.description.as_deref(), Some("override"));
     }
 
@@ -2021,10 +2021,10 @@ components:
                 }
             }
         });
-        let shim: ShimRequestBody = serde_json::from_value(body_json).unwrap();
+        let shim: ShimRequestBody = serde_json::from_value(body_json).expect("expected value");
         let def = extract_request_body_type(&RefOr::T(shim), Some(&components))
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(def.ty, "String");
         assert_eq!(def.media_type, "application/json");
         assert_eq!(def.format, BodyFormat::Json);
@@ -2037,10 +2037,10 @@ components:
                 "application/*": {}
             }
         });
-        let shim: ShimRequestBody = serde_json::from_value(body_json).unwrap();
+        let shim: ShimRequestBody = serde_json::from_value(body_json).expect("expected value");
         let def = extract_request_body_type(&RefOr::T(shim), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(def.media_type, "application/*");
         assert_eq!(def.format, BodyFormat::Binary);
         assert_eq!(def.ty, "Vec<u8>");
@@ -2059,8 +2059,8 @@ components:
             .build();
 
         let def = extract_request_body_type(&RefOr::T(ShimRequestBody::from(body)), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert!(def.required);
     }
 
@@ -2080,8 +2080,8 @@ components:
             .build();
 
         let def = extract_request_body_type(&RefOr::T(ShimRequestBody::from(body)), None)
-            .unwrap()
-            .unwrap();
+            .expect("expected value")
+            .expect("expected value");
         assert_eq!(
             def.example,
             Some(ExampleValue::data(json!({"name": "Ada"})))
@@ -2120,8 +2120,8 @@ components:
 
         let def =
             extract_request_body_type(&RefOr::T(ShimRequestBody::from(body)), Some(&components))
-                .unwrap()
-                .unwrap();
+                .expect("expected value")
+                .expect("expected value");
         assert_eq!(
             def.example,
             Some(ExampleValue::data(json!({"filename": "demo.png"})))

@@ -46,14 +46,14 @@ mod tests {
     #[test]
     fn test_add_import_new_file() {
         let code = "struct A;";
-        let res = add_import(code, "use foo::Bar;").unwrap();
+        let res = add_import(code, "use foo::Bar;").expect("expected value");
         assert!(res.starts_with("use foo::Bar;\n"));
     }
 
     #[test]
     fn test_add_import_existing() {
         let code = "use std::io;\nstruct A;";
-        let res = add_import(code, "use foo::Bar;").unwrap();
+        let res = add_import(code, "use foo::Bar;").expect("expected value");
         assert!(res.contains("use std::io;"));
         assert!(res.contains("use foo::Bar;"));
     }

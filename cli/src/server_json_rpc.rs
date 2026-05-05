@@ -1,43 +1,61 @@
+//! JSON-RPC Server Module
 #![cfg(feature = "server")]
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use cdd_core::error::AppResult;
 use clap::Args;
 use serde::{Deserialize, Serialize};
 
+/// Arguments for the JSON-RPC server command.
 #[derive(Args, Debug, Clone)]
 pub struct ServerJsonRpcArgs {
+    /// Port to listen on.
     #[clap(short, long, default_value = "8080", env = "CDD_RPC_PORT")]
     pub port: u16,
 
+    /// Interface to listen on.
     #[clap(short, long, default_value = "127.0.0.1", env = "CDD_RPC_LISTEN")]
     pub listen: String,
 }
 
+/// JSON-RPC Request schema.
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 struct RpcRequest {
+    /// JSON-RPC version
     jsonrpc: String,
+    /// Method name
     method: String,
+    /// Parameters
     #[allow(dead_code)]
     params: Option<serde_json::Value>,
+    /// Request ID
     id: Option<serde_json::Value>,
 }
 
+/// JSON-RPC Response schema.
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 struct RpcResponse {
+    /// JSON-RPC version
     jsonrpc: String,
+    /// Result payload
     #[serde(skip_serializing_if = "Option::is_none")]
     result: Option<serde_json::Value>,
+    /// Error payload
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<RpcError>,
+    /// Request ID
     id: Option<serde_json::Value>,
 }
 
+/// JSON-RPC Error schema.
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 struct RpcError {
+    /// Error code
     code: i32,
+    /// Error message
     message: String,
 }
 
+/// Handler for the JSON-RPC POST endpoint.
 async fn handle_rpc(req: web::Json<RpcRequest>) -> impl Responder {
     if req.jsonrpc != "2.0" {
         return HttpResponse::Ok().json(RpcResponse {
@@ -70,6 +88,7 @@ async fn handle_rpc(req: web::Json<RpcRequest>) -> impl Responder {
     }
 }
 
+/// Starts the JSON-RPC server based on provided arguments.
 #[cfg(not(tarpaulin_include))]
 #[cfg(not(tarpaulin_include))]
 pub fn execute(args: &ServerJsonRpcArgs) -> AppResult<()> {
@@ -137,7 +156,7 @@ mod tests {
 
         let resp: RpcResponse = test::call_and_read_body_json(&app, req).await;
         assert!(resp.error.is_some());
-        assert_eq!(resp.error.unwrap().code, -32600);
+        assert_eq!(resp.error.expect("expected value").code, -32600);
     }
 
     #[actix_rt::test]
@@ -162,6 +181,6 @@ mod tests {
 
         let resp: RpcResponse = test::call_and_read_body_json(&app, req).await;
         assert!(resp.error.is_some());
-        assert_eq!(resp.error.unwrap().code, -32601);
+        assert_eq!(resp.error.expect("expected value").code, -32601);
     }
 }

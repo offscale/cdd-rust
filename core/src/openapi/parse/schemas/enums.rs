@@ -125,7 +125,10 @@ mod tests {
         let v = &variants[0];
         assert_eq!(v.name, "Cat");
         assert_eq!(v.rename.as_deref(), Some("cat"));
-        assert_eq!(v.aliases.as_ref().unwrap(), &vec!["kitty".to_string()]);
+        assert_eq!(
+            v.aliases.as_ref().expect("expected value"),
+            &vec!["kitty".to_string()]
+        );
     }
 
     #[test]

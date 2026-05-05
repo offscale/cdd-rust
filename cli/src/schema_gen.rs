@@ -219,7 +219,7 @@ mod tests {
 
     #[test]
     fn test_schema_gen_struct_to_json() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("expected value");
         let src_path = dir.path().join("model.rs");
         let out_path = dir.path().join("schema.json");
 
@@ -233,9 +233,9 @@ mod tests {
         "#;
 
         fs::File::create(&src_path)
-            .unwrap()
+            .expect("expected value")
             .write_all(rust_code.as_bytes())
-            .unwrap();
+            .expect("expected value");
 
         let args = SchemaGenArgs {
             source_path: src_path,
@@ -257,9 +257,9 @@ mod tests {
             self_uri: None,
         };
 
-        execute(&args).unwrap();
+        execute(&args).expect("expected value");
 
-        let json_content = fs::read_to_string(&out_path).unwrap();
+        let json_content = fs::read_to_string(&out_path).expect("expected value");
         assert!(json_content.contains("\"title\": \"User\""));
         assert!(json_content.contains("\"description\": \"A User struct\""));
         assert!(json_content.contains("\"type\": \"integer\"")); // id
@@ -268,7 +268,7 @@ mod tests {
 
     #[test]
     fn test_schema_gen_enum_to_yaml() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("expected value");
         let src_path = dir.path().join("enums.rs");
         let out_path = dir.path().join("schema.yaml");
 
@@ -280,9 +280,9 @@ mod tests {
         "#;
 
         fs::File::create(&src_path)
-            .unwrap()
+            .expect("expected value")
             .write_all(rust_code.as_bytes())
-            .unwrap();
+            .expect("expected value");
 
         let args = SchemaGenArgs {
             source_path: src_path,
@@ -304,9 +304,9 @@ mod tests {
             self_uri: None,
         };
 
-        execute(&args).unwrap();
+        execute(&args).expect("expected value");
 
-        let yaml_content = fs::read_to_string(&out_path).unwrap();
+        let yaml_content = fs::read_to_string(&out_path).expect("expected value");
         // YAML specific checking
         assert!(yaml_content.contains("title: Status"));
         assert!(yaml_content.contains("oneOf:"));
@@ -314,7 +314,7 @@ mod tests {
 
     #[test]
     fn test_schema_gen_openapi_wrap() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("expected value");
         let src_path = dir.path().join("model.rs");
         let out_path = dir.path().join("openapi.json");
 
@@ -325,9 +325,9 @@ mod tests {
         "#;
 
         fs::File::create(&src_path)
-            .unwrap()
+            .expect("expected value")
             .write_all(rust_code.as_bytes())
-            .unwrap();
+            .expect("expected value");
 
         let args = SchemaGenArgs {
             source_path: src_path,
@@ -349,9 +349,9 @@ mod tests {
             self_uri: None,
         };
 
-        execute(&args).unwrap();
+        execute(&args).expect("expected value");
 
-        let json_content = fs::read_to_string(&out_path).unwrap();
+        let json_content = fs::read_to_string(&out_path).expect("expected value");
         assert!(json_content.contains("\"openapi\": \"3.2.0\""));
         assert!(json_content.contains("\"title\": \"Widget API\""));
         assert!(json_content.contains("\"version\": \"9.9.9\""));
@@ -361,9 +361,12 @@ mod tests {
 
     #[test]
     fn test_schema_gen_not_found() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("expected value");
         let src_path = dir.path().join("empty.rs");
-        fs::File::create(&src_path).unwrap().write_all(b"").unwrap();
+        fs::File::create(&src_path)
+            .expect("expected value")
+            .write_all(b"")
+            .expect("expected value");
 
         let args = SchemaGenArgs {
             source_path: src_path,
@@ -387,7 +390,7 @@ mod tests {
 
         let result = execute(&args);
         assert!(result.is_err());
-        match result.unwrap_err() {
+        match result.expect_err("expected error") {
             AppError::General(msg) => assert!(msg.contains("Model 'NonExistent' not found")),
             _ => panic!("Wrong error type"),
         }
@@ -395,12 +398,12 @@ mod tests {
 
     #[test]
     fn test_schema_gen_license_requires_name() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("expected value");
         let src_path = dir.path().join("model.rs");
         fs::File::create(&src_path)
-            .unwrap()
+            .expect("expected value")
             .write_all(b"struct User { id: i32 }")
-            .unwrap();
+            .expect("expected value");
 
         let args = SchemaGenArgs {
             source_path: src_path,
@@ -424,7 +427,7 @@ mod tests {
 
         let result = execute(&args);
         assert!(result.is_err());
-        let msg = format!("{}", result.unwrap_err());
+        let msg = format!("{}", result.expect_err("expected error"));
         assert!(msg.contains("info_license_name"));
     }
 }

@@ -917,7 +917,7 @@ components:
 "#,
             HEADER_BLOCK
         );
-        let models = parse_openapi_spec(&yaml).unwrap();
+        let models = parse_openapi_spec(&yaml).expect("expected value");
         assert_eq!(models.len(), 1);
         let ParsedModel::Struct(s) = &models[0] else {
             panic!("Expected struct")
@@ -954,7 +954,7 @@ components:
 "#,
             HEADER_BLOCK
         );
-        let models = parse_openapi_spec(&yaml).unwrap();
+        let models = parse_openapi_spec(&yaml).expect("expected value");
 
         let combined = models
             .iter()
@@ -995,7 +995,7 @@ components:
             HEADER_BLOCK
         );
 
-        let models = parse_openapi_spec(&yaml).unwrap();
+        let models = parse_openapi_spec(&yaml).expect("expected value");
 
         let remote = models
             .iter()
@@ -1005,7 +1005,11 @@ components:
             panic!("Struct expected")
         };
 
-        let target_field = s.fields.iter().find(|f| f.name == "field").unwrap();
+        let target_field = s
+            .fields
+            .iter()
+            .find(|f| f.name == "field")
+            .expect("expected value");
         // Our map_schema_to_rust_type splits by `/` and takes last.
         assert_eq!(target_field.ty, "Option<Local>");
     }
@@ -1025,7 +1029,7 @@ components:
             HEADER_BLOCK
         );
 
-        let models = parse_openapi_spec(&yaml).unwrap();
+        let models = parse_openapi_spec(&yaml).expect("expected value");
         let status = models
             .iter()
             .find(|m| m.name() == "Status")
@@ -1059,7 +1063,7 @@ components:
             HEADER_BLOCK
         );
 
-        let models = parse_openapi_spec(&yaml).unwrap();
+        let models = parse_openapi_spec(&yaml).expect("expected value");
         let user = models
             .iter()
             .find(|m| m.name() == "User")
@@ -1069,7 +1073,11 @@ components:
             panic!("User should be parsed as struct");
         };
 
-        let name_field = s.fields.iter().find(|f| f.name == "name").unwrap();
+        let name_field = s
+            .fields
+            .iter()
+            .find(|f| f.name == "name")
+            .expect("expected value");
         assert_eq!(name_field.ty, "Option<String>");
     }
 
@@ -1091,7 +1099,7 @@ components:
             HEADER_BLOCK
         );
 
-        let models = parse_openapi_spec(&yaml).unwrap();
+        let models = parse_openapi_spec(&yaml).expect("expected value");
         let color_space = models
             .iter()
             .find(|m| m.name() == "ColorSpace")
@@ -1137,7 +1145,7 @@ components:
             HEADER_BLOCK
         );
 
-        let models = parse_openapi_spec(&yaml).unwrap();
+        let models = parse_openapi_spec(&yaml).expect("expected value");
         let pet = models
             .iter()
             .find(|m| m.name() == "Pet")
@@ -1165,7 +1173,7 @@ properties:
         let mut registry = DocumentRegistry::new();
         registry
             .register_schema_yaml("https://example.com/schemas/Shared.json", external)
-            .unwrap();
+            .expect("expected value");
 
         let yaml = format!(
             r#"
@@ -1179,8 +1187,12 @@ components:
             HEADER_BLOCK
         );
 
-        let models = parse_openapi_spec_with_registry(&yaml, Some(&registry), None).unwrap();
-        let shared = models.iter().find(|m| m.name() == "Shared").unwrap();
+        let models =
+            parse_openapi_spec_with_registry(&yaml, Some(&registry), None).expect("expected value");
+        let shared = models
+            .iter()
+            .find(|m| m.name() == "Shared")
+            .expect("expected value");
         let ParsedModel::Struct(s) = shared else {
             panic!("Shared should be a struct")
         };
@@ -1210,7 +1222,7 @@ components:
             HEADER_BLOCK
         );
 
-        let models = parse_openapi_spec(&yaml).unwrap();
+        let models = parse_openapi_spec(&yaml).expect("expected value");
         let user = models
             .iter()
             .find(|m| m.name() == "User")
@@ -1224,7 +1236,11 @@ components:
         assert_eq!(docs.url, "https://example.com/user");
         assert_eq!(docs.description.as_deref(), Some("User docs"));
 
-        let id_field = s.fields.iter().find(|f| f.name == "id").unwrap();
+        let id_field = s
+            .fields
+            .iter()
+            .find(|f| f.name == "id")
+            .expect("expected value");
         let id_docs = id_field.external_docs.as_ref().expect("field docs missing");
         assert_eq!(id_docs.url, "https://example.com/user/id");
         assert_eq!(id_docs.description.as_deref(), Some("Id docs"));
@@ -1248,7 +1264,7 @@ components:
             HEADER_BLOCK
         );
 
-        let models = parse_openapi_spec(&yaml).unwrap();
+        let models = parse_openapi_spec(&yaml).expect("expected value");
         let user = models
             .iter()
             .find(|m| m.name() == "User")
@@ -1288,7 +1304,7 @@ components:
             HEADER_BLOCK
         );
 
-        let models = parse_openapi_spec(&yaml).unwrap();
+        let models = parse_openapi_spec(&yaml).expect("expected value");
         let combined = models
             .iter()
             .find(|m| m.name() == "Combined")
@@ -1311,7 +1327,7 @@ properties:
     type: integer
 "#;
 
-        let models = parse_openapi_spec(yaml).unwrap();
+        let models = parse_openapi_spec(yaml).expect("expected value");
         assert_eq!(models.len(), 1);
         let ParsedModel::Struct(s) = &models[0] else {
             panic!("Schema root should parse as struct")
@@ -1331,7 +1347,7 @@ properties:
     type: string
 "#;
 
-        let models = parse_openapi_spec(yaml).unwrap();
+        let models = parse_openapi_spec(yaml).expect("expected value");
         assert_eq!(models.len(), 1);
         let ParsedModel::Struct(s) = &models[0] else {
             panic!("Schema root should parse as struct")

@@ -2799,8 +2799,8 @@ tags:
   - name: accounts
 paths: {} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("Duplicate tag name"));
     }
 
@@ -2815,8 +2815,8 @@ tags:
     parent: parent
 paths: {} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("references missing parent tag"));
     }
 
@@ -2837,8 +2837,8 @@ paths:
               schema: 
                 type: string
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("style"));
     }
 
@@ -2863,8 +2863,8 @@ paths:
             X-Bad: 
               $ref: '#/components/headers/BadHeader' 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("allowEmptyValue"));
     }
 
@@ -2884,8 +2884,8 @@ paths:
       responses:
         '200': { description: ok }
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("path parameter must set required"));
     }
 
@@ -2903,8 +2903,8 @@ paths:
       responses:
         '200': { description: ok }
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("must define either 'schema' or 'content'"));
     }
 
@@ -2926,8 +2926,8 @@ paths:
       responses:
         '200': { description: ok }
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("must not define both 'schema' and 'content'"));
     }
 
@@ -2947,8 +2947,8 @@ paths:
       responses:
         '200': { description: ok }
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("allowEmptyValue"));
     }
 
@@ -2970,8 +2970,8 @@ paths:
       responses:
         '200': { description: ok }
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("duplicate parameter"));
     }
 
@@ -2996,8 +2996,8 @@ paths:
       responses:
         '200': { description: ok }
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("mixes 'querystring' and 'query'"));
     }
 
@@ -3023,8 +3023,8 @@ paths:
       responses:
         '200': { description: ok }
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("multiple querystring parameters"));
     }
 
@@ -3042,7 +3042,7 @@ paths:
           headers: 
             Content-Type: {} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
         assert!(validate_openapi_root(&openapi).is_ok());
     }
 
@@ -3064,8 +3064,8 @@ paths:
                 sample: 
                   value: {id: 1} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("example and examples"));
     }
 
@@ -3088,8 +3088,8 @@ paths:
         '200': 
           description: ok
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("example and examples"));
     }
 
@@ -3112,8 +3112,8 @@ paths:
         '200':
           description: ok
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("itemSchema"));
     }
 
@@ -3135,8 +3135,8 @@ paths:
                   value: {id: 1}
                   serializedValue: '{"id":1}'
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("examples.Bad"));
     }
 
@@ -3152,8 +3152,8 @@ components:
       externalValue: https://example.com/example.json
 paths: {}
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("components.examples.BadExample"));
     }
 
@@ -3171,8 +3171,8 @@ components:
           value: { id: 1 }
 paths: {}
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("components.mediaTypes.Json"));
     }
 
@@ -3188,8 +3188,8 @@ components:
       prefixEncoding: []
 paths: {}
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("components.mediaTypes.Multipart"));
         assert!(format!("{err}").contains("encoding"));
     }
@@ -3212,8 +3212,8 @@ paths:
       responses:
         '200': { description: ok }
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("encoding"));
         assert!(format!("{err}").contains("media type"));
     }
@@ -3243,8 +3243,8 @@ paths:
       responses:
         '200': { description: ok }
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("must not define 'name' or 'in'"));
     }
 
@@ -3282,8 +3282,8 @@ paths:
       responses:
         '200': { description: ok }
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        validate_openapi_root(&openapi).unwrap();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        validate_openapi_root(&openapi).expect("expected value");
     }
 
     #[test]
@@ -3303,8 +3303,8 @@ paths:
       responses:
         '200': { description: ok }
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("positional encoding"));
     }
 
@@ -3323,8 +3323,8 @@ paths:
       responses:
         '200': { description: ok }
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("itemSchema"));
         assert!(format!("{err}").contains("sequential"));
     }
@@ -3344,7 +3344,7 @@ paths:
       responses:
         '200': { description: ok }
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
         assert!(validate_openapi_root(&openapi).is_ok());
     }
 
@@ -3361,8 +3361,8 @@ tags:
     parent: a
 paths: {} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("Tag hierarchy contains a cycle"));
     }
 
@@ -3376,8 +3376,8 @@ servers:
   - url: https://example.com/api?debug=true
 paths: {} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("MUST NOT include query or fragment"));
     }
 
@@ -3391,8 +3391,8 @@ servers:
   - url: "https://example.com/has space"
 paths: {} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("valid URI reference"));
     }
 
@@ -3409,7 +3409,7 @@ servers:
         default: prod
 paths: {} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
         assert!(validate_openapi_root(&openapi).is_ok());
     }
 
@@ -3427,8 +3427,8 @@ servers:
         default: dev
 paths: {} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("has an empty enum"));
     }
 
@@ -3446,8 +3446,8 @@ servers:
         default: dev
 paths: {} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("default 'dev' not in enum"));
     }
 
@@ -3464,8 +3464,8 @@ servers:
         default: prod
 paths: {} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("appears more than once"));
     }
 
@@ -3479,8 +3479,8 @@ servers:
   - url: https://{env}.example.com
 paths: {} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("references undefined variable"));
     }
 
@@ -3497,8 +3497,8 @@ servers:
         default: prod
 paths: {} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("is not present in URL"));
     }
 
@@ -3515,8 +3515,8 @@ servers:
     name: prod
 paths: {} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("Duplicate server name"));
     }
 
@@ -3541,8 +3541,8 @@ paths:
         '200': 
           description: ok
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("externalDocs.url"));
     }
 
@@ -3557,8 +3557,8 @@ info:
 components: {} 
 paths: {} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("info.termsOfService"));
     }
 
@@ -3574,8 +3574,8 @@ info:
 components: {} 
 paths: {} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("info.contact.email"));
     }
 
@@ -3593,8 +3593,8 @@ info:
 components: {} 
 paths: {} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("info.license"));
     }
 
@@ -3609,8 +3609,8 @@ components:
       type: oauth2
 paths: {} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("must define 'flows'"));
     }
 
@@ -3629,8 +3629,8 @@ components:
           scopes: {} 
 paths: {} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("missing tokenUrl"));
     }
 
@@ -3646,8 +3646,8 @@ paths:
         '2AB': 
           description: nope
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("must be an HTTP status code or range"));
     }
 
@@ -3661,8 +3661,8 @@ paths:
     get: 
       responses: {} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("must define at least one response"));
     }
 
@@ -3678,7 +3678,7 @@ paths:
         default: 
           description: fallback
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
         assert!(validate_openapi_root(&openapi).is_ok());
     }
 
@@ -3693,8 +3693,8 @@ paths:
       responses: 
         '200': { description: "" } 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("Response description"));
     }
 
@@ -3715,8 +3715,8 @@ components:
     Blank: 
       description: "" 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        validate_openapi_root(&openapi).unwrap();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        validate_openapi_root(&openapi).expect("expected value");
     }
 
     #[test]
@@ -3732,8 +3732,8 @@ paths:
       responses: 
         '200': { description: OK } 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("requestBody"));
         assert!(format!("{err}").contains("content"));
     }
@@ -3755,8 +3755,8 @@ components:
     EmptyBody: 
       content: {} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         let msg = format!("{err}");
         assert!(msg.contains("requestBody"));
         assert!(msg.contains("content"));
@@ -3780,8 +3780,8 @@ components:
         responses: 
           '200': { description: OK } 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("defines $ref alongside other Path Item fields"));
     }
 
@@ -3797,8 +3797,8 @@ paths:
         responses:
           '200': { description: OK }
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("additionalOperations"));
         assert!(format!("{err}").contains("GET"));
     }
@@ -3818,8 +3818,8 @@ security:
   - Missing: [] 
 paths: {} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("does not match a known security scheme"));
     }
 
@@ -3833,8 +3833,8 @@ security:
   - https://example.com/schemes/Auth: [] 
 paths: {} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        validate_openapi_root(&openapi).unwrap();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        validate_openapi_root(&openapi).expect("expected value");
     }
 
     #[test]
@@ -3847,8 +3847,8 @@ securityDefinitions:
     type: basic
 paths: {} 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        validate_openapi_root(&openapi).unwrap();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        validate_openapi_root(&openapi).expect("expected value");
     }
 
     #[test]
@@ -3867,8 +3867,8 @@ paths:
               parameters: 
                 id: $response.body#/id
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("must define exactly one of"));
     }
 
@@ -3888,8 +3888,8 @@ paths:
               operationId: getItem
               operationRef: '#/paths/~1items/get' 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("must define exactly one of"));
     }
 
@@ -3908,8 +3908,8 @@ paths:
             BadRef: 
               operationRef: 'not a uri'
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("operationRef"));
     }
 
@@ -3932,8 +3932,8 @@ paths:
             Self: 
               $ref: '#/components/links/SelfLink' 
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("Link reference cycle"));
     }
 
@@ -3954,8 +3954,8 @@ paths:
               server: 
                 url: https://example.com/api?debug=true
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("MUST NOT include query or fragment"));
     }
 
@@ -3974,8 +3974,8 @@ paths:
             bad link: 
               operationId: getItem
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("Component key"));
     }
 
@@ -3990,8 +3990,8 @@ paths:
       responses:
         '200': { description: ok }
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("must not include query or fragment"));
     }
 
@@ -4006,8 +4006,8 @@ paths:
       responses:
         '200': { description: ok }
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("missing path parameter"));
     }
 
@@ -4027,8 +4027,8 @@ paths:
       responses:
         '200': { description: ok }
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        validate_openapi_root(&openapi).unwrap();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        validate_openapi_root(&openapi).expect("expected value");
     }
 
     #[test]
@@ -4051,8 +4051,8 @@ paths:
       responses:
         '200': { description: ok }
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        validate_openapi_root(&openapi).unwrap();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        validate_openapi_root(&openapi).expect("expected value");
     }
 
     #[test]
@@ -4071,8 +4071,8 @@ paths:
       responses:
         '200': { description: ok }
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("duplicate parameter"));
     }
 
@@ -4084,8 +4084,8 @@ info: {title: Paths, version: 1.0}
 paths:
   /pets/{petId}: {}
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        validate_openapi_root(&openapi).unwrap();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        validate_openapi_root(&openapi).expect("expected value");
     }
 
     #[test]
@@ -4109,8 +4109,8 @@ components:
           const: cat
 paths: {}
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("defaultMapping"));
     }
 
@@ -4143,8 +4143,8 @@ components:
             enum: ['cat']
 paths: {}
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        validate_openapi_root(&openapi).unwrap();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        validate_openapi_root(&openapi).expect("expected value");
     }
 
     #[test]
@@ -4169,8 +4169,8 @@ components:
           const: cat
 paths: {}
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        validate_openapi_root(&openapi).unwrap();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        validate_openapi_root(&openapi).expect("expected value");
     }
 
     #[test]
@@ -4190,8 +4190,8 @@ paths:
               responses:
                 '200': {description: ok}
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("Invalid callback expression"));
     }
 
@@ -4208,8 +4208,8 @@ components:
         url: "not a uri"
 paths: {}
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("externalDocs.url"));
     }
 
@@ -4226,8 +4226,8 @@ components:
         nodeType: banana
 paths: {}
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("nodeType"));
     }
 
@@ -4245,8 +4245,8 @@ components:
         attribute: true
 paths: {}
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_openapi_root(&openapi).unwrap_err();
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("nodeType"));
     }
 }

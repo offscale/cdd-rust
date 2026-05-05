@@ -753,7 +753,7 @@ mod tests {
 
     #[test]
     fn test_runtime_expression_parse_validation() {
-        let expr = RuntimeExpression::parse_expression("$request.path.id").unwrap();
+        let expr = RuntimeExpression::parse_expression("$request.path.id").expect("expected value");
         assert_eq!(expr.as_str(), "$request.path.id");
 
         let invalid = RuntimeExpression::parse_expression("$request.body#bad");
@@ -765,10 +765,10 @@ mod tests {
         let expr = RuntimeExpression::parse_expression(
             "http://example.com?foo={$request.path.id}&bar={$response.header.Location}",
         )
-        .unwrap();
+        .expect("expected value");
         assert!(expr.is_expression());
 
-        let plain = RuntimeExpression::parse("no expressions here").unwrap();
+        let plain = RuntimeExpression::parse("no expressions here").expect("expected value");
         assert!(!plain.is_expression());
     }
 

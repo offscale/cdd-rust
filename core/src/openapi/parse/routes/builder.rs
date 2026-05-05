@@ -579,7 +579,7 @@ mod additional_tests {
             None,
             None,
         )
-        .unwrap_err();
+        .expect_err("expected error");
 
         assert!(format!("{err}").contains("must be a valid HTTP token"));
     }
@@ -855,7 +855,7 @@ paths:
                 content: { application/json: { schema: {type: object} } } 
               responses: { '200': {description: OK} } 
 "#;
-        let routes = super::super::parse_openapi_routes(yaml).unwrap();
+        let routes = super::super::parse_openapi_routes(yaml).expect("expected value");
         assert_eq!(routes.len(), 1);
         let route = &routes[0];
 
@@ -890,7 +890,7 @@ paths:
       responses:
         '200': {description: ok}
 "#;
-        let routes = super::super::parse_openapi_routes(yaml).unwrap();
+        let routes = super::super::parse_openapi_routes(yaml).expect("expected value");
         let scheme = routes[0]
             .security
             .first()
@@ -929,7 +929,7 @@ paths:
       responses:
         '200': {description: ok}
 "#;
-        let routes = super::super::parse_openapi_routes(yaml).unwrap();
+        let routes = super::super::parse_openapi_routes(yaml).expect("expected value");
         let oauth = routes[0]
             .security
             .iter()

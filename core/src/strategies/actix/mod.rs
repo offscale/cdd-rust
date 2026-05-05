@@ -234,7 +234,7 @@ mod tests {
         };
         let code = s.route_registration_statement(&route, "mod::qh");
         assert!(code.contains(
-            ".route(web::method(actix_web::http::Method::from_bytes(b\"QUERY\").unwrap()).to(mod::qh)));"
+            ".route(web::method(actix_web::http::Method::from_bytes(b\"QUERY\").expect(\"expected value\")).to(mod::qh)));"
         ));
     }
 

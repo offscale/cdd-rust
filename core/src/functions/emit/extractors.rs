@@ -392,7 +392,7 @@ mod tests {
         };
 
         let strategy = ActixStrategy;
-        let code = update_handler_module("", &[route], &strategy).unwrap();
+        let code = update_handler_module("", &[route], &strategy).expect("expected value");
         assert!(code.contains("id: web::Path<Uuid>"));
     }
 
@@ -468,7 +468,7 @@ mod tests {
         };
 
         let strategy = ActixStrategy;
-        let code = update_handler_module("", &[route], &strategy).unwrap();
+        let code = update_handler_module("", &[route], &strategy).expect("expected value");
         assert!(code.contains("pub struct SearchQuery"));
         assert!(code.contains("query: web::Query<SearchQuery>"));
         assert!(code.contains("body: web::Json<SearchFilter>"));
@@ -534,7 +534,7 @@ mod tests {
         };
 
         let strategy = ActixStrategy;
-        let code = update_handler_module("", &[route], &strategy).unwrap();
+        let code = update_handler_module("", &[route], &strategy).expect("expected value");
         assert!(code.contains("body: actix_multipart::form::MultipartForm<UploadForm>"));
     }
 
@@ -655,7 +655,8 @@ mod tests {
         };
 
         let strategy = ActixStrategy;
-        let code = update_handler_module("", &[text_route, binary_route], &strategy).unwrap();
+        let code = update_handler_module("", &[text_route, binary_route], &strategy)
+            .expect("expected value");
         assert!(code.contains("body: String"));
         assert!(code.contains("body: web::Bytes"));
     }
@@ -720,7 +721,7 @@ mod tests {
         };
 
         let strategy = ActixStrategy;
-        let code = update_handler_module("", &[route], &strategy).unwrap();
+        let code = update_handler_module("", &[route], &strategy).expect("expected value");
         assert!(code.contains("body: Option<web::Json<Payload>>"));
     }
 
@@ -786,7 +787,7 @@ mod tests {
         };
 
         let strategy = ActixStrategy;
-        let code = update_handler_module("", &[route], &strategy).unwrap();
+        let code = update_handler_module("", &[route], &strategy).expect("expected value");
         assert!(code.contains("filter: web::Query<FilterStruct>"));
     }
 
@@ -852,7 +853,7 @@ mod tests {
         };
 
         let strategy = ActixStrategy;
-        let code = update_handler_module("", &[route], &strategy).unwrap();
+        let code = update_handler_module("", &[route], &strategy).expect("expected value");
         assert!(code.contains("filter: String"));
     }
 
@@ -911,7 +912,7 @@ mod tests {
             extensions: BTreeMap::new(),
         };
         let strategy = ActixStrategy;
-        let code = update_handler_module("", &[route], &strategy).unwrap();
+        let code = update_handler_module("", &[route], &strategy).expect("expected value");
 
         // UPDATED EXPECTATION: Variable is now `api_key` due to smarter naming
         assert!(code.contains("api_key: web::ReqData<security::ApiKey>"));
@@ -977,7 +978,7 @@ mod tests {
             extensions: BTreeMap::new(),
         };
         let strategy = ActixStrategy;
-        let code = update_handler_module("", &[route], &strategy).unwrap();
+        let code = update_handler_module("", &[route], &strategy).expect("expected value");
         assert!(code.contains("-> actix_web::Result<HttpResponse>"));
     }
 
@@ -1034,7 +1035,7 @@ mod tests {
         };
 
         let strategy = ActixStrategy;
-        let code = update_handler_module("", &[route], &strategy).unwrap();
+        let code = update_handler_module("", &[route], &strategy).expect("expected value");
         assert!(code.contains("/// Short summary"));
         assert!(code.contains("/// Longer description."));
         assert!(code.contains("/// Docs: <https://example.com/docs>"));
@@ -1119,7 +1120,7 @@ mod tests {
             extensions: BTreeMap::new(),
         };
 
-        let generated = generate_query_struct(&route).unwrap();
+        let generated = generate_query_struct(&route).expect("expected value");
         assert!(generated.code.contains("pub struct ListItemsQuery"));
         assert!(generated.code.contains("#[serde(rename = \"user-id\")]"));
         assert!(generated.code.contains("pub user_id: String"));
@@ -1187,7 +1188,7 @@ mod tests {
             extensions: BTreeMap::new(),
         };
 
-        let generated = generate_query_struct(&route).unwrap();
+        let generated = generate_query_struct(&route).expect("expected value");
         assert!(generated.code.contains("/// Filter results by status."));
         assert!(generated.code.contains("pub status: String"));
     }

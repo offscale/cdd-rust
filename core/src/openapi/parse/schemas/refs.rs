@@ -194,7 +194,7 @@ fn is_remote(uri: &str) -> bool {
         if scheme.is_empty() {
             return false;
         }
-        let first = scheme.chars().next().unwrap();
+        let first = scheme.chars().next().expect("expected value");
         if !first.is_ascii_alphabetic() {
             // Not a scheme (e.g. /abs/path or ./rel)
             return false;
@@ -1341,7 +1341,7 @@ mod tests {
             "User": { "$id": "/schemas/user" },
             "Token": { "$id": "schemas/token" }
         });
-        let base = Url::parse("https://example.com/openapi.yaml").unwrap();
+        let base = Url::parse("https://example.com/openapi.yaml").expect("expected value");
         let ids = collect_schema_ids(raw.as_object(), Some(&base));
         assert_eq!(
             ids.get("https://example.com/schemas/user"),
@@ -1397,7 +1397,7 @@ mod tests {
             }
         });
 
-        let raw_map = raw.as_object().unwrap();
+        let raw_map = raw.as_object().expect("expected value");
         let schema_ids = collect_schema_ids(Some(raw_map), None);
         let resolved =
             resolve_dynamic_refs_for_component("numberArray", raw_map, &schema_ids, None, None);
@@ -1409,7 +1409,7 @@ mod tests {
             .get("items")
             .and_then(|v| v.get("$ref"))
             .and_then(|v| v.as_str())
-            .unwrap();
+            .expect("expected value");
 
         assert_eq!(items_ref, "array_of_numbers#generic-array");
         assert!(generic
@@ -1431,7 +1431,7 @@ mod tests {
             }
         });
 
-        let raw_map = raw.as_object().unwrap();
+        let raw_map = raw.as_object().expect("expected value");
         let schema_ids = collect_schema_ids(Some(raw_map), None);
         let resolved = resolve_dynamic_refs_for_component(
             "genericArrayComponent",
@@ -1448,7 +1448,7 @@ mod tests {
             .get("items")
             .and_then(|v| v.get("$ref"))
             .and_then(|v| v.as_str())
-            .unwrap();
+            .expect("expected value");
 
         assert_eq!(items_ref, "fully_generic_array#generic-array");
     }
@@ -1458,7 +1458,7 @@ mod tests {
         let raw = json!({
             "User": { "$anchor": "UserAnchor", "type": "string" }
         });
-        let base = Url::parse("https://example.com/openapi.yaml").unwrap();
+        let base = Url::parse("https://example.com/openapi.yaml").expect("expected value");
         let anchors = collect_schema_anchors(raw.as_object(), Some(&base));
         assert_eq!(anchors.get("#UserAnchor"), Some(&"User".to_string()));
         assert_eq!(
@@ -1478,7 +1478,7 @@ mod tests {
         let raw = json!({
             "User": { "$anchor": "UserAnchor", "type": "string" }
         });
-        let base = Url::parse("https://example.com/openapi.yaml").unwrap();
+        let base = Url::parse("https://example.com/openapi.yaml").expect("expected value");
         let anchors = collect_schema_anchors(raw.as_object(), Some(&base));
 
         let mut ctx = ResolutionContext::new(Some(base.to_string()), &components);
@@ -1515,7 +1515,7 @@ mod tests {
             }
         });
 
-        let base = Url::parse("https://example.com/openapi.yaml").unwrap();
+        let base = Url::parse("https://example.com/openapi.yaml").expect("expected value");
         let inline_index = collect_inline_schema_index(&raw, Some(&base), true);
 
         let components = Components::new();
@@ -1571,7 +1571,7 @@ mod tests {
             }
         });
 
-        let base = Url::parse("https://example.com/openapi.yaml").unwrap();
+        let base = Url::parse("https://example.com/openapi.yaml").expect("expected value");
         let skipped = collect_inline_schema_index(&raw, Some(&base), true);
         assert!(!skipped.ids.contains_key("https://example.com/schemas/User"));
         assert!(skipped

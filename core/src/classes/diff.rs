@@ -177,7 +177,7 @@ mod tests {
             external_docs: None,
         };
 
-        let diffs = calculate_diff(code, "User", &target).unwrap();
+        let diffs = calculate_diff(code, "User", &target).expect("expected value");
         assert!(diffs.is_empty());
     }
 
@@ -195,7 +195,7 @@ mod tests {
             external_docs: None,
         };
 
-        let diffs = calculate_diff(code, "User", &target).unwrap();
+        let diffs = calculate_diff(code, "User", &target).expect("expected value");
         assert_eq!(diffs.len(), 1);
         if let Diff::MissingField { name, ty } = &diffs[0] {
             assert_eq!(name, "email");
@@ -219,7 +219,7 @@ mod tests {
             external_docs: None,
         };
 
-        let diffs = calculate_diff(code, "User", &target).unwrap();
+        let diffs = calculate_diff(code, "User", &target).expect("expected value");
         assert_eq!(diffs.len(), 1);
     }
 
@@ -243,7 +243,7 @@ mod tests {
             external_docs: None,
         };
 
-        let diffs = calculate_diff(code, "User", &target).unwrap();
+        let diffs = calculate_diff(code, "User", &target).expect("expected value");
         assert_eq!(diffs.len(), 1);
     }
 
@@ -261,7 +261,7 @@ mod tests {
             external_docs: None,
         };
 
-        let diffs = calculate_diff(code, "A", &target).unwrap();
+        let diffs = calculate_diff(code, "A", &target).expect("expected value");
         assert!(diffs.is_empty());
     }
 }

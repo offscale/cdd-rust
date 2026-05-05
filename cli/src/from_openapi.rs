@@ -1,3 +1,4 @@
+//! Module for generating scaffolding from OpenAPI specifications.
 use cdd_core::error::{AppError, AppResult};
 use cdd_core::strategies::{ActixStrategy, ClapCliStrategy, ReqwestStrategy};
 use clap::{Args, Subcommand};
@@ -8,12 +9,15 @@ use std::path::PathBuf;
 use crate::scaffold::ScaffoldArgs;
 use crate::test_gen::TestGenArgs;
 
+/// Arguments for generating SDKs or Server scaffolding from an OpenAPI spec.
 #[derive(Args, Debug)]
 pub struct FromOpenApiArgs {
+    /// The specific generation command to run.
     #[clap(subcommand)]
     pub command: FromOpenApiCommands,
 }
 
+/// Commands available under the `from_openapi` subcommand.
 #[derive(Subcommand, Debug)]
 pub enum FromOpenApiCommands {
     /// Generate a CLI SDK
@@ -27,6 +31,7 @@ pub enum FromOpenApiCommands {
     Server(GenerateArgs),
 }
 
+/// Common arguments used for generation commands.
 #[derive(Args, Debug)]
 pub struct GenerateArgs {
     /// Path or URL to the OpenAPI specification.
@@ -51,12 +56,14 @@ pub struct GenerateArgs {
 }
 
 impl GenerateArgs {
+    /// Get the output directory, defaulting to the current directory.
     pub fn get_output_dir(&self) -> PathBuf {
         self.output_dir
             .clone()
             .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
     }
 
+    /// Retrieve the input files either from the single file or the directory specified.
     pub fn get_input_files(&self) -> Vec<PathBuf> {
         if let Some(ref file) = self.input {
             vec![file.clone()]
@@ -82,6 +89,7 @@ impl GenerateArgs {
     }
 }
 
+/// Executes the requested OpenAPI generation command.
 pub fn execute(args: &FromOpenApiArgs) -> AppResult<()> {
     match &args.command {
         FromOpenApiCommands::SdkCli(gen_args) => {
@@ -100,6 +108,7 @@ pub fn execute(args: &FromOpenApiArgs) -> AppResult<()> {
     Ok(())
 }
 
+/// Runs the generation using the specified strategy.
 fn run_generation(
     args: &GenerateArgs,
     strategy: &impl cdd_core::strategies::BackendStrategy,
@@ -257,13 +266,13 @@ mod tests {
 
     #[test]
     fn test_get_input_files_dir() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("expected value");
         let file1 = dir.path().join("a.yaml");
         let file2 = dir.path().join("b.json");
         let file3 = dir.path().join("c.txt");
-        fs::write(&file1, "").unwrap();
-        fs::write(&file2, "").unwrap();
-        fs::write(&file3, "").unwrap();
+        fs::write(&file1, "").expect("expected value");
+        fs::write(&file2, "").expect("expected value");
+        fs::write(&file3, "").expect("expected value");
 
         let args = GenerateArgs {
             input: None,
@@ -293,7 +302,7 @@ mod tests {
 
     #[test]
     fn test_execute_and_run_generation() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("expected value");
         let input_file = dir.path().join("spec.yaml");
         let openapi_content = r#"
 openapi: 3.0.0
@@ -316,7 +325,7 @@ components:
           type: integer
           format: int64
 "#;
-        fs::write(&input_file, openapi_content).unwrap();
+        fs::write(&input_file, openapi_content).expect("expected value");
 
         // Test SdkCli
         let args = FromOpenApiArgs {

@@ -18,7 +18,6 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::generator::DieselMapper;
 
-mod error;
 mod from_openapi;
 mod generator;
 mod scaffold;
@@ -41,9 +40,11 @@ pub enum TargetMode {
     Cli,
 }
 
+/// The main CLI struct holding all arguments.
 #[derive(Parser, Debug)]
 #[clap(author, version, about = "CDD Toolchain CLI")]
 struct Cli {
+    /// The subcommand to execute.
     #[clap(subcommand)]
     command: Commands,
 
@@ -58,6 +59,7 @@ struct Cli {
     target: TargetMode,
 }
 
+/// All available commands in the CLI.
 #[derive(Subcommand, Debug)]
 #[allow(clippy::large_enum_variant)]
 enum Commands {
@@ -83,10 +85,12 @@ enum Commands {
     #[clap(name = "serve_json_rpc")]
     #[cfg(feature = "server")]
     ServerJsonRpc(server_json_rpc::ServerJsonRpcArgs),
+    /// Fallback for missing server feature
     #[cfg(not(feature = "server"))]
     ServerJsonRpc,
 }
 
+/// The main entry point of the CLI application.
 fn main() -> AppResult<()> {
     let cli = Cli::parse();
 
