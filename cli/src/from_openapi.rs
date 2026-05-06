@@ -114,11 +114,18 @@ pub fn execute(args: &FromOpenApiArgs) -> AppResult<()> {
             println!("Generating SDK...");
             run_generation(gen_args, &ReqwestStrategy)?;
         }
-        FromOpenApiCommands::Server { args: gen_args, framework } => {
+        FromOpenApiCommands::Server {
+            args: gen_args,
+            framework,
+        } => {
             println!("Generating Server with framework {:?}...", framework);
             match framework {
-                ServerFramework::ActixWeb => run_generation(gen_args, &cdd_core::strategies::ActixStrategy)?,
-                ServerFramework::Axum => run_generation(gen_args, &cdd_core::strategies::AxumStrategy)?,
+                ServerFramework::ActixWeb => {
+                    run_generation(gen_args, &cdd_core::strategies::ActixStrategy)?
+                }
+                ServerFramework::Axum => {
+                    run_generation(gen_args, &cdd_core::strategies::AxumStrategy)?
+                }
             }
         }
     }
@@ -368,15 +375,33 @@ components:
         };
         assert!(execute(&args).is_ok());
 
-        // Test Server
+        // Test Server with ActixWeb
         let args = FromOpenApiArgs {
-            command: FromOpenApiCommands::Server(GenerateArgs {
-                input: Some(input_file.clone()),
-                input_dir: None,
-                output_dir: Some(dir.path().join("out3")),
-                no_github_actions: false,
-                no_installable_package: false,
-            }),
+            command: FromOpenApiCommands::Server {
+                args: GenerateArgs {
+                    input: Some(input_file.clone()),
+                    input_dir: None,
+                    output_dir: Some(dir.path().join("out3")),
+                    no_github_actions: false,
+                    no_installable_package: false,
+                },
+                framework: ServerFramework::ActixWeb,
+            },
+        };
+        assert!(execute(&args).is_ok());
+
+        // Test Server with Axum
+        let args = FromOpenApiArgs {
+            command: FromOpenApiCommands::Server {
+                args: GenerateArgs {
+                    input: Some(input_file.clone()),
+                    input_dir: None,
+                    output_dir: Some(dir.path().join("out4")),
+                    no_github_actions: false,
+                    no_installable_package: false,
+                },
+                framework: ServerFramework::Axum,
+            },
         };
         assert!(execute(&args).is_ok());
     }

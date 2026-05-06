@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![CI/CD](https://github.com/offscale/cdd-rust/workflows/CI/badge.svg)](https://github.com/offscale/cdd-rust/actions)
-[![Docs Coverage](https://img.shields.io/badge/docs-100.00%25-green.svg)](https://docs.rs/cdd-rust)
+[![Docs Coverage](https://img.shields.io/badge/docs-99.00%25-green.svg)](https://docs.rs/cdd-rust)
 [![Tests Coverage](https://img.shields.io/badge/tests-100.00%25-green.svg)](https://crates.io/crates/cdd-rust)
 
 OpenAPI ↔ Rust. This is one compiler in a suite, all focussed on the same task: Compiler Driven Development (CDD).
