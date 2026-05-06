@@ -1,6 +1,6 @@
 //! Module for generating scaffolding from OpenAPI specifications.
 use cdd_core::error::{AppError, AppResult};
-use cdd_core::strategies::{ActixStrategy, ClapCliStrategy, ReqwestStrategy};
+use cdd_core::strategies::{ClapCliStrategy, ReqwestStrategy};
 use clap::{Args, Subcommand};
 use std::env;
 use std::fs;
@@ -8,6 +8,14 @@ use std::path::PathBuf;
 
 use crate::scaffold::ScaffoldArgs;
 use crate::test_gen::TestGenArgs;
+
+/// Available server frameworks.
+#[derive(clap::ValueEnum, Clone, Debug, Default, PartialEq, Eq)]
+pub enum ServerFramework {
+    #[default]
+    ActixWeb,
+    Axum,
+}
 
 /// Arguments for generating SDKs or Server scaffolding from an OpenAPI spec.
 #[derive(Args, Debug)]
@@ -28,7 +36,13 @@ pub enum FromOpenApiCommands {
     Sdk(GenerateArgs),
     /// Generate Server scaffolding
     #[clap(name = "to_server")]
-    Server(GenerateArgs),
+    Server {
+        #[clap(flatten)]
+        args: GenerateArgs,
+        /// The target server framework (actix-web or axum). Defaults to actix-web.
+        #[clap(long, default_value = "actix-web", env = "CDD_SERVER_FRAMEWORK")]
+        framework: ServerFramework,
+    },
 }
 
 /// Common arguments used for generation commands.
@@ -100,9 +114,12 @@ pub fn execute(args: &FromOpenApiArgs) -> AppResult<()> {
             println!("Generating SDK...");
             run_generation(gen_args, &ReqwestStrategy)?;
         }
-        FromOpenApiCommands::Server(gen_args) => {
-            println!("Generating Server...");
-            run_generation(gen_args, &ActixStrategy)?;
+        FromOpenApiCommands::Server { args: gen_args, framework } => {
+            println!("Generating Server with framework {:?}...", framework);
+            match framework {
+                ServerFramework::ActixWeb => run_generation(gen_args, &cdd_core::strategies::ActixStrategy)?,
+                ServerFramework::Axum => run_generation(gen_args, &cdd_core::strategies::AxumStrategy)?,
+            }
         }
     }
     Ok(())
