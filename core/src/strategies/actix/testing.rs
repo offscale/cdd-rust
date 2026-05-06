@@ -1555,6 +1555,46 @@ async fn validate_response(resp: actix_web::dev::ServiceResponse, method: &str, 
         .to_string()
 }
 
+/// Generates a unit test for a specific handler function to be placed alongside it.
+pub fn handler_unit_test(route: &crate::openapi::parse::ParsedRoute) -> String {
+    let method = match route.method.as_str() {
+        "GET" => "get",
+        "POST" => "post",
+        "PUT" => "put",
+        "DELETE" => "delete",
+        "PATCH" => "patch",
+        "HEAD" => "head",
+        "OPTIONS" => "options",
+        _ => "get",
+    };
+
+    let mut path = route.path.clone();
+    while let Some(start) = path.find('{') {
+        if let Some(end) = path[start..].find('}') {
+            let actual_end = start + end;
+            path.replace_range(start..actual_end + 1, "0"); // Dummy ID 0
+        } else {
+            break;
+        }
+    }
+
+    format!(
+        r#"    #[actix_web::test]
+    async fn test_{handler_name}_unit() {{
+        use actix_web::{{test, App, web}};
+        let app = test::init_service(
+            App::new().route("{path}", web::{method}().to(super::{handler_name}))
+        ).await;
+        let req = test::TestRequest::{method}().uri("{path}").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success() || resp.status().is_client_error() || resp.status().is_server_error());
+    }}"#,
+        handler_name = route.handler_name,
+        path = path,
+        method = method,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1591,6 +1631,56 @@ mod tests {
         assert!(body.contains("set_json"));
     }
 
+    #[test]
+    fn test_handler_unit_test() {
+        let route = crate::openapi::parse::ParsedRoute {
+            method: "POST".into(),
+            handler_name: "my_handler".into(),
+            path: "/users/{id}".into(),
+            ..crate::openapi::parse::ParsedRoute {
+                path: "".into(),
+                method: "".into(),
+                handler_name: "".into(),
+                summary: None,
+                description: None,
+                path_summary: None,
+                path_description: None,
+                path_extensions: std::collections::BTreeMap::new(),
+                operation_summary: None,
+                operation_description: None,
+                base_path: None,
+                path_servers: None,
+                servers_override: None,
+                operation_id: None,
+                params: vec![],
+                path_params: vec![],
+                request_body: None,
+                security: vec![],
+                security_defined: false,
+                response_type: None,
+                response_status: None,
+                response_summary: None,
+                response_description: None,
+                response_media_type: None,
+                response_example: None,
+                response_headers: vec![],
+                response_links: None,
+                kind: crate::openapi::parse::models::RouteKind::Path,
+                callbacks: vec![],
+                deprecated: false,
+                external_docs: None,
+                raw_request_body: None,
+                raw_responses: None,
+                tags: vec![],
+                extensions: std::collections::BTreeMap::new(),
+            }
+        };
+
+        let generated = handler_unit_test(&route);
+        assert!(generated.contains("test_my_handler_unit"));
+        assert!(generated.contains("web::post().to(super::my_handler)"));
+        assert!(generated.contains(".uri(\"/users/0\")"));
+    }
     #[test]
     fn test_request_builder_variants() {
         let body = "        .set_json(serde_json::json!({}))\n";

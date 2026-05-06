@@ -208,7 +208,7 @@ paths:
             output: None,
         };
 
-        let output = generate_docs_json(yaml, &args).expect("expected value");
+        let output = generate_docs_json(yaml, &args).expect("Failed to generate docs json");
         assert_eq!(output.len(), 1);
         let rust_docs = &output[0];
         assert_eq!(rust_docs.language, "rust");
@@ -251,7 +251,7 @@ paths:
             output: None,
         };
 
-        let output = generate_docs_json(yaml, &args).expect("expected value");
+        let output = generate_docs_json(yaml, &args).expect("Failed to generate docs json");
         let op = &output[0].operations[0];
 
         assert!(op.code.imports.is_none());
@@ -284,7 +284,7 @@ webhooks:
             output: None,
         };
 
-        let output = generate_docs_json(yaml, &args).expect("expected value");
+        let output = generate_docs_json(yaml, &args).expect("Failed to generate docs json");
         // The webhook should be skipped, so operations should be empty
         assert_eq!(output.len(), 1);
         assert_eq!(output[0].operations.len(), 0);
@@ -293,11 +293,15 @@ webhooks:
     #[test]
     fn test_execute_with_file() {
         use std::io::Write;
-        let mut file = tempfile::NamedTempFile::new().expect("expected value");
-        writeln!(file, "openapi: 3.0.0\ninfo:\n  title: Test API\n  version: 1.0.0\npaths:\n  /pets:\n    get:\n      responses:\n        '200':\n          description: OK").expect("expected value");
+        let mut file = tempfile::NamedTempFile::new().expect("Failed to create new instance");
+        writeln!(file, "openapi: 3.0.0\ninfo:\n  title: Test API\n  version: 1.0.0\npaths:\n  /pets:\n    get:\n      responses:\n        '200':\n          description: OK").expect("Failed to write line");
 
         let args = ToDocsJsonArgs {
-            input: file.path().to_str().expect("expected value").to_string(),
+            input: file
+                .path()
+                .to_str()
+                .expect("Failed to convert to string")
+                .to_string(),
             no_imports: false,
             no_wrapping: false,
             output: None,
@@ -333,7 +337,7 @@ webhooks:
     #[test]
     fn test_execute_with_invalid_output_path() {
         use tempfile::tempdir;
-        let dir = tempdir().expect("expected value");
+        let dir = tempdir().expect("Failed to create temporary directory");
         let file = dir.path().join("test.yaml");
         let openapi_yaml = r#"
 openapi: 3.0.0
@@ -342,7 +346,7 @@ info:
   version: 1.0.0
 paths: {}
 "#;
-        std::fs::write(&file, openapi_yaml).expect("expected value");
+        std::fs::write(&file, openapi_yaml).expect("Failed to write to file");
 
         let args = ToDocsJsonArgs {
             input: file.to_string_lossy().to_string(),

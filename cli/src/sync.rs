@@ -110,7 +110,7 @@ fn process_models_for_openapi(
 
         // Only process Rust files, skip mod.rs (orphans usually valid)
         if path.extension().is_some_and(|ext| ext == "rs")
-            && path.file_name().expect("expected value") != "mod.rs"
+            && path.file_name().expect("Failed to file name") != "mod.rs"
         {
             process_file(path, type_overrides)?;
         }
@@ -204,7 +204,7 @@ mod tests {
 
     #[test]
     fn test_process_file_injects_derives_and_imports() {
-        let dir = tempdir().expect("expected value");
+        let dir = tempdir().expect("Failed to create temporary directory");
         let file_path = dir.path().join("users.rs");
 
         let initial_code = r#"
@@ -218,14 +218,14 @@ pub struct User {
 }
 "#;
         File::create(&file_path)
-            .expect("expected value")
+            .expect("Failed to create")
             .write_all(initial_code.as_bytes())
-            .expect("expected value");
+            .expect("Failed to write to file");
 
         let overrides = HashMap::new();
-        process_file(&file_path, &overrides).expect("expected value");
+        process_file(&file_path, &overrides).expect("Failed to process file");
 
-        let new_code = fs::read_to_string(&file_path).expect("expected value");
+        let new_code = fs::read_to_string(&file_path).expect("Failed to read file to string");
 
         assert!(new_code.contains("use utoipa::ToSchema;"));
         assert!(new_code.contains("use serde::{Deserialize, Serialize};"));
@@ -236,7 +236,7 @@ pub struct User {
 
     #[test]
     fn test_process_file_enforces_types() {
-        let dir = tempdir().expect("expected value");
+        let dir = tempdir().expect("Failed to create temporary directory");
         let file_path = dir.path().join("posts.rs");
 
         // dsync defaults timestamps to NaiveDateTime usually
@@ -250,9 +250,9 @@ pub struct Post {
 }
 "#;
         File::create(&file_path)
-            .expect("expected value")
+            .expect("Failed to create")
             .write_all(initial_code.as_bytes())
-            .expect("expected value");
+            .expect("Failed to write to file");
 
         let mut overrides = HashMap::new();
         overrides.insert(
@@ -260,9 +260,9 @@ pub struct Post {
             "chrono::DateTime<Utc>".to_string(),
         );
 
-        process_file(&file_path, &overrides).expect("expected value");
+        process_file(&file_path, &overrides).expect("Failed to process file");
 
-        let new_code = fs::read_to_string(&file_path).expect("expected value");
+        let new_code = fs::read_to_string(&file_path).expect("Failed to read file to string");
 
         // Check Derives presence implies process ran
         assert!(new_code.contains("ToSchema"));
@@ -287,7 +287,7 @@ pub struct Post {
 
     #[test]
     fn test_argument_parsing() {
-        let valid = parse_key_val("id=uuid::Uuid").expect("expected value");
+        let valid = parse_key_val("id=uuid::Uuid").expect("Failed to parse key-value pair");
         assert_eq!(valid, ("id".to_string(), "uuid::Uuid".to_string()));
 
         let invalid = parse_key_val("invalid");

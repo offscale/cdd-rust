@@ -48,7 +48,7 @@ mod tests {
             }
         "#;
 
-        let res = inject_openapi_attributes(code).expect("expected value");
+        let res = inject_openapi_attributes(code).expect("Failed to inject openapi attributes");
 
         assert!(res.contains("use utoipa::ToSchema;"));
         assert!(res.contains("#[derive(ToSchema)]\n            struct User"));
@@ -64,7 +64,7 @@ mod tests {
             struct User { id: i32 }
         "#;
 
-        let res = inject_openapi_attributes(code).expect("expected value");
+        let res = inject_openapi_attributes(code).expect("Failed to inject openapi attributes");
 
         assert!(res.contains("use std::collections::HashMap;"));
         assert!(res.contains("use utoipa::ToSchema;"));

@@ -354,7 +354,7 @@ mod tests {
         let mut map = BTreeMap::new();
         map.insert("/hook".to_string(), empty_path_item());
         let (resolved, _, _) = resolve_callback_object(&RefOr::T(map.clone()), None, None, None)
-            .expect("expected value");
+            .expect("Failed to resolve callback object");
         assert_eq!(resolved.len(), 1);
         assert!(resolved.contains_key("/hook"));
     }
@@ -381,7 +381,7 @@ mod tests {
 
         let cb_ref = RefOr::Ref(Ref::new("#/components/callbacks/OnEvent"));
         let (resolved, _, _) = resolve_callback_object(&cb_ref, Some(&components), None, None)
-            .expect("expected value");
+            .expect("Failed to resolve callback object");
         assert!(resolved.contains_key("/event"));
     }
 
@@ -437,7 +437,7 @@ mod tests {
             None,
             None,
         )
-        .expect("expected value");
+        .expect("Failed to extract callback operations");
 
         assert_eq!(callbacks.len(), 1);
         let cb = &callbacks[0];
@@ -445,7 +445,10 @@ mod tests {
         assert_eq!(cb.method, "GET");
         assert_eq!(cb.expression.as_str(), "$request.body#/callbackUrl");
         assert_eq!(
-            cb.request_body.as_ref().expect("expected value").format,
+            cb.request_body
+                .as_ref()
+                .expect("Failed to get reference")
+                .format,
             BodyFormat::Json
         );
         assert_eq!(cb.response_type.as_deref(), Some("Ack"));
@@ -492,7 +495,7 @@ mod tests {
             None,
             None,
         )
-        .expect("expected value");
+        .expect("Failed to extract callback operations");
 
         assert_eq!(callbacks.len(), 1);
         assert_eq!(callbacks[0].expression.as_str(), expr);
@@ -520,7 +523,7 @@ mod tests {
             None,
             Some(&global_security),
         )
-        .expect("expected value");
+        .expect("Failed to extract callback operations");
 
         assert_eq!(callbacks.len(), 1);
         let cb = &callbacks[0];
@@ -553,7 +556,7 @@ mod tests {
             None,
             None,
         )
-        .expect("expected value");
+        .expect("Failed to extract callback operations");
 
         assert_eq!(callbacks.len(), 2);
         let methods: Vec<_> = callbacks.iter().map(|c| c.method.as_str()).collect();
@@ -582,7 +585,7 @@ mod tests {
             None,
             None,
         )
-        .expect("expected value");
+        .expect("Failed to extract callback operations");
 
         assert_eq!(callbacks.len(), 1);
         let cb = &callbacks[0];
@@ -622,7 +625,7 @@ mod tests {
             None,
             None,
         )
-        .expect("expected value");
+        .expect("Failed to extract callback operations");
 
         assert_eq!(callbacks.len(), 1);
         assert_eq!(callbacks[0].method, "GET");

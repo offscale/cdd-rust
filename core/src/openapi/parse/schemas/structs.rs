@@ -209,16 +209,19 @@ components:
       type: object
       additionalProperties: true
 "#;
-        let openapi: OpenApi = serde_yaml::from_str(yaml).expect("expected value");
-        let components = openapi.components.as_ref().expect("expected value");
+        let openapi: OpenApi = serde_yaml::from_str(yaml).expect("Failed to parse from string");
+        let components = openapi
+            .components
+            .as_ref()
+            .expect("Failed to get reference");
         let ctx = ResolutionContext::new(None, components);
 
-        let schema = match components.schemas.get("MapHolder").expect("expected value") {
+        let schema = match components.schemas.get("MapHolder").expect("Failed to get") {
             RefOr::T(s) => s,
             RefOr::Ref(_) => panic!("Expected inline schema"),
         };
 
-        let fields = flatten_schema_fields(schema, &ctx).expect("expected value");
+        let fields = flatten_schema_fields(schema, &ctx).expect("Failed to flatten schema fields");
         let addl = fields
             .iter()
             .find(|f| f.name == "additional_properties")
@@ -251,24 +254,27 @@ components:
             id: { type: integer }
           required: [id]
 "#;
-        let openapi: OpenApi = serde_yaml::from_str(yaml).expect("expected value");
-        let components = openapi.components.as_ref().expect("expected value");
+        let openapi: OpenApi = serde_yaml::from_str(yaml).expect("Failed to parse from string");
+        let components = openapi
+            .components
+            .as_ref()
+            .expect("Failed to get reference");
         let ctx = ResolutionContext::new(None, components);
 
-        let schema = match components.schemas.get("Combined").expect("expected value") {
+        let schema = match components.schemas.get("Combined").expect("Failed to get") {
             RefOr::T(s) => s,
             RefOr::Ref(_) => panic!("Expected inline schema"),
         };
 
-        let fields = flatten_schema_fields(schema, &ctx).expect("expected value");
+        let fields = flatten_schema_fields(schema, &ctx).expect("Failed to flatten schema fields");
         let id = fields
             .iter()
             .find(|f| f.name == "id")
-            .expect("expected value");
+            .expect("Failed to find");
         let note = fields
             .iter()
             .find(|f| f.name == "note")
-            .expect("expected value");
+            .expect("Failed to find");
         assert_eq!(id.ty, "i32");
         assert_eq!(note.ty, "Option<String>");
     }
@@ -298,28 +304,31 @@ components:
         status:
           $ref: '#/components/schemas/Status'
 "#;
-        let openapi: OpenApi = serde_yaml::from_str(yaml).expect("expected value");
-        let components = openapi.components.as_ref().expect("expected value");
+        let openapi: OpenApi = serde_yaml::from_str(yaml).expect("Failed to parse from string");
+        let components = openapi
+            .components
+            .as_ref()
+            .expect("Failed to get reference");
         let ctx = ResolutionContext::new(None, components);
 
-        let schema = match components.schemas.get("User").expect("expected value") {
+        let schema = match components.schemas.get("User").expect("Failed to get") {
             RefOr::T(s) => s,
             RefOr::Ref(_) => panic!("Expected inline schema"),
         };
 
-        let fields = flatten_schema_fields(schema, &ctx).expect("expected value");
+        let fields = flatten_schema_fields(schema, &ctx).expect("Failed to flatten schema fields");
         let id = fields
             .iter()
             .find(|f| f.name == "id")
-            .expect("expected value");
+            .expect("Failed to find");
         let password = fields
             .iter()
             .find(|f| f.name == "password")
-            .expect("expected value");
+            .expect("Failed to find");
         let status = fields
             .iter()
             .find(|f| f.name == "status")
-            .expect("expected value");
+            .expect("Failed to find");
 
         assert!(id.is_read_only);
         assert!(!id.is_write_only);

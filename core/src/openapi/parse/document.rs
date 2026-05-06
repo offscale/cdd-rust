@@ -286,7 +286,7 @@ webhooks:
           description: ok
 "#;
 
-        let parsed = parse_openapi_document(yaml).expect("expected value");
+        let parsed = parse_openapi_document(yaml).expect("Failed to parse openapi document");
         assert_eq!(parsed.info.title, "Example API");
         assert_eq!(parsed.info.version, "1.0.0");
         assert_eq!(parsed.info.summary.as_deref(), Some("Short summary"));

@@ -52,7 +52,7 @@ pub use openapi::parse::{
     RouteParam,
 };
 pub use routes::emit::register_routes;
-pub use strategies::{ActixStrategy, BackendStrategy};
+pub use strategies::{ActixStrategy, AxumStrategy, BackendStrategy};
 pub use tests::emit::generate_contract_tests_file;
 pub use type_mapping::{JsonSchema, JsonType, RustToJsonMapper, TypeMapper};
 

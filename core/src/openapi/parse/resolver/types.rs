@@ -235,7 +235,8 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(integer), true).expect("expected value"),
+            map_schema_to_rust_type(&RefOr::T(integer), true)
+                .expect("Failed to map schema to rust type"),
             "i32"
         );
 
@@ -246,7 +247,8 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(long), true).expect("expected value"),
+            map_schema_to_rust_type(&RefOr::T(long), true)
+                .expect("Failed to map schema to rust type"),
             "i64"
         );
     }
@@ -260,7 +262,8 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(float), true).expect("expected value"),
+            map_schema_to_rust_type(&RefOr::T(float), true)
+                .expect("Failed to map schema to rust type"),
             "f32"
         );
 
@@ -271,13 +274,15 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(double), true).expect("expected value"),
+            map_schema_to_rust_type(&RefOr::T(double), true)
+                .expect("Failed to map schema to rust type"),
             "f64"
         );
 
         let default_num = Schema::Object(ObjectBuilder::new().schema_type(Type::Number).build());
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(default_num), true).expect("expected value"),
+            map_schema_to_rust_type(&RefOr::T(default_num), true)
+                .expect("Failed to map schema to rust type"),
             "f64"
         );
     }
@@ -286,7 +291,8 @@ mod tests {
     fn test_map_strings_registry() {
         let string = Schema::Object(ObjectBuilder::new().schema_type(Type::String).build());
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(string), true).expect("expected value"),
+            map_schema_to_rust_type(&RefOr::T(string), true)
+                .expect("Failed to map schema to rust type"),
             "String"
         );
 
@@ -297,7 +303,8 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(uuid), true).expect("expected value"),
+            map_schema_to_rust_type(&RefOr::T(uuid), true)
+                .expect("Failed to map schema to rust type"),
             "Uuid"
         );
 
@@ -308,7 +315,8 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(password), true).expect("expected value"),
+            map_schema_to_rust_type(&RefOr::T(password), true)
+                .expect("Failed to map schema to rust type"),
             "Secret<String>"
         );
     }
@@ -322,7 +330,8 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(byte), true).expect("expected value"),
+            map_schema_to_rust_type(&RefOr::T(byte), true)
+                .expect("Failed to map schema to rust type"),
             "Vec<u8>"
         );
     }
@@ -336,7 +345,8 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(binary), true).expect("expected value"),
+            map_schema_to_rust_type(&RefOr::T(binary), true)
+                .expect("Failed to map schema to rust type"),
             "Vec<u8>"
         );
     }
@@ -345,7 +355,8 @@ mod tests {
     fn test_map_null_schema() {
         let null_schema = Schema::Object(ObjectBuilder::new().schema_type(Type::Null).build());
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(null_schema), true).expect("expected value"),
+            map_schema_to_rust_type(&RefOr::T(null_schema), true)
+                .expect("Failed to map schema to rust type"),
             "Option<serde_json::Value>"
         );
     }
@@ -360,7 +371,8 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(bin), true).expect("expected value"),
+            map_schema_to_rust_type(&RefOr::T(bin), true)
+                .expect("Failed to map schema to rust type"),
             "Vec<u8>"
         );
     }
@@ -374,7 +386,8 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(bin), true).expect("expected value"),
+            map_schema_to_rust_type(&RefOr::T(bin), true)
+                .expect("Failed to map schema to rust type"),
             "Vec<u8>"
         );
     }
@@ -388,7 +401,8 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(text), true).expect("expected value"),
+            map_schema_to_rust_type(&RefOr::T(text), true)
+                .expect("Failed to map schema to rust type"),
             "String"
         );
     }
@@ -397,7 +411,8 @@ mod tests {
     fn test_formatting_optional() {
         let string = Schema::Object(ObjectBuilder::new().schema_type(Type::String).build());
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(string), false).expect("expected value"),
+            map_schema_to_rust_type(&RefOr::T(string), false)
+                .expect("Failed to map schema to rust type"),
             "Option<String>"
         );
     }
@@ -410,7 +425,8 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(schema), true).expect("expected value"),
+            map_schema_to_rust_type(&RefOr::T(schema), true)
+                .expect("Failed to map schema to rust type"),
             "Option<String>"
         );
     }
@@ -423,7 +439,8 @@ mod tests {
                 .build(),
         );
         assert_eq!(
-            map_schema_to_rust_type(&RefOr::T(schema), true).expect("expected value"),
+            map_schema_to_rust_type(&RefOr::T(schema), true)
+                .expect("Failed to map schema to rust type"),
             "serde_json::Value"
         );
     }
@@ -432,7 +449,7 @@ mod tests {
     fn test_ref_resolution() {
         let r = RefOr::Ref(utoipa::openapi::Ref::new("#/components/schemas/User"));
         assert_eq!(
-            map_schema_to_rust_type(&r, true).expect("expected value"),
+            map_schema_to_rust_type(&r, true).expect("Failed to map schema to rust type"),
             "User"
         );
     }
@@ -455,7 +472,7 @@ mod tests {
         });
 
         let mapped = map_schema_to_rust_type_with_raw(&RefOr::T(schema), true, Some(&raw))
-            .expect("expected value");
+            .expect("Failed to map schema to rust type with raw");
         assert_eq!(mapped, "i64");
     }
 
@@ -476,7 +493,7 @@ mod tests {
         });
 
         let mapped = map_schema_to_rust_type_with_raw(&RefOr::T(schema), true, Some(&raw))
-            .expect("expected value");
+            .expect("Failed to map schema to rust type with raw");
         assert_eq!(mapped, "String");
     }
 }

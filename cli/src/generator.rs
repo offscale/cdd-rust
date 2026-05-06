@@ -57,10 +57,10 @@ mod tests {
     #[test]
     fn test_diesel_mapper_generate_success() {
         // Setup a fake schema.rs that dsync can parse
-        let dir = tempdir().expect("expected value");
+        let dir = tempdir().expect("Failed to create temporary directory");
         let schema_path = dir.path().join("schema.rs");
         let output_dir = dir.path().join("models");
-        std::fs::create_dir(&output_dir).expect("expected value");
+        std::fs::create_dir(&output_dir).expect("Failed to create");
 
         // Minimal valid diesel schema
         let schema_content = r#"
@@ -72,9 +72,9 @@ mod tests {
             }
         "#;
         File::create(&schema_path)
-            .expect("expected value")
+            .expect("Failed to create")
             .write_all(schema_content.as_bytes())
-            .expect("expected value");
+            .expect("Failed to write to file");
 
         let mapper = DieselMapper;
         let res = mapper.generate(&schema_path, &output_dir);

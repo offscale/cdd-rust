@@ -313,11 +313,11 @@ mod tests {
     fn test_float_precision_mapping() {
         let mapper = RustToJsonMapper;
 
-        let f32_res = mapper.map("f32").expect("expected value");
+        let f32_res = mapper.map("f32").expect("Failed to map");
         assert_eq!(f32_res.type_, JsonType::Number);
         assert_eq!(f32_res.format.as_deref(), Some("float"));
 
-        let f64_res = mapper.map("f64").expect("expected value");
+        let f64_res = mapper.map("f64").expect("Failed to map");
         assert_eq!(f64_res.type_, JsonType::Number);
         assert_eq!(f64_res.format.as_deref(), Some("double"));
     }
@@ -327,12 +327,12 @@ mod tests {
         let mapper = RustToJsonMapper;
 
         // Secret<String> -> format: password
-        let secret_str = mapper.map("Secret<String>").expect("expected value");
+        let secret_str = mapper.map("Secret<String>").expect("Failed to map");
         assert_eq!(secret_str.type_, JsonType::String);
         assert_eq!(secret_str.format.as_deref(), Some("password"));
 
         // Secret<i32> -> no password format (applies to strings)
-        let secret_int = mapper.map("Secret<i32>").expect("expected value");
+        let secret_int = mapper.map("Secret<i32>").expect("Failed to map");
         assert_eq!(secret_int.type_, JsonType::Integer);
         assert_eq!(secret_int.format, None);
     }
@@ -348,7 +348,7 @@ mod tests {
     #[test]
     fn test_options_nullable() {
         let mapper = RustToJsonMapper;
-        let res = mapper.map("Option<i32>").expect("expected value");
+        let res = mapper.map("Option<i32>").expect("Failed to map");
         assert!(res.nullable);
         assert_eq!(res.type_, JsonType::Integer);
     }
@@ -358,7 +358,7 @@ mod tests {
         let mapper = RustToJsonMapper;
         // Vec<Option<Uuid>> is weird but structurally parseable: array<integer(uuid) nullable>
         // Option<Vec<Uuid>> -> nullable array<string(uuid)>
-        let res = mapper.map("Option<Vec<Uuid>>").expect("expected value");
+        let res = mapper.map("Option<Vec<Uuid>>").expect("Failed to map");
 
         assert!(res.nullable);
         if let JsonType::Array(inner) = res.type_ {
@@ -374,7 +374,7 @@ mod tests {
         let mapper = RustToJsonMapper;
 
         // Case 1: Vec<u8> should map to binary fields
-        let res = mapper.map("Vec<u8>").expect("expected value");
+        let res = mapper.map("Vec<u8>").expect("Failed to map");
         assert_eq!(res.type_, JsonType::String);
         assert_eq!(
             res.content_media_type.as_deref(),
@@ -383,7 +383,7 @@ mod tests {
         assert_eq!(res.content_encoding.as_deref(), Some("base64"));
 
         // Case 2: Option<Vec<u8>>
-        let res_opt = mapper.map("Option<Vec<u8>>").expect("expected value");
+        let res_opt = mapper.map("Option<Vec<u8>>").expect("Failed to map");
         assert!(res_opt.nullable);
         assert_eq!(res_opt.type_, JsonType::String);
         assert_eq!(
@@ -392,7 +392,7 @@ mod tests {
         );
 
         // Case 3: Bytes
-        let res_bytes = mapper.map("Bytes").expect("expected value");
+        let res_bytes = mapper.map("Bytes").expect("Failed to map");
         assert_eq!(res_bytes.type_, JsonType::String);
         assert_eq!(res_bytes.content_encoding.as_deref(), Some("base64"));
     }
@@ -400,7 +400,7 @@ mod tests {
     #[test]
     fn test_slices_binary() {
         let mapper = RustToJsonMapper;
-        let res = mapper.map("&[u8]").expect("expected value");
+        let res = mapper.map("&[u8]").expect("Failed to map");
         assert_eq!(res.type_, JsonType::String);
         assert_eq!(res.content_encoding.as_deref(), Some("base64"));
     }

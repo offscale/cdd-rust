@@ -66,8 +66,8 @@ mod tests {
         let code = "struct User { id: i32 }";
         let parse = SourceFile::parse(code, Edition::Edition2021);
         let file = parse.tree();
-        let found = find_struct(&file, "User").expect("expected value");
-        assert_eq!(found.name().expect("expected value").text(), "User");
+        let found = find_struct(&file, "User").expect("Failed to find struct");
+        assert_eq!(found.name().expect("Failed to name").text(), "User");
 
         let err = find_struct(&file, "Missing").expect_err("expected error");
         assert!(format!("{}", err).contains("Struct 'Missing' not found"));
@@ -98,8 +98,8 @@ mod tests {
                 ast::FieldList::RecordFieldList(list) => Some(list),
                 _ => None,
             })
-            .expect("expected value");
-        let r_curly = list.syntax().last_token().expect("expected value");
+            .expect("Failed to and then");
+        let r_curly = list.syntax().last_token().expect("Failed to last token");
         assert!(check_needs_comma(&r_curly));
 
         let code_with_comma = "struct User { id: i32, }";
@@ -110,8 +110,8 @@ mod tests {
                 ast::FieldList::RecordFieldList(list) => Some(list),
                 _ => None,
             })
-            .expect("expected value");
-        let r_curly = list.syntax().last_token().expect("expected value");
+            .expect("Failed to and then");
+        let r_curly = list.syntax().last_token().expect("Failed to last token");
         assert!(!check_needs_comma(&r_curly));
     }
 }

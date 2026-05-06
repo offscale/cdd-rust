@@ -8,11 +8,13 @@
 //! - **actix**: The default implementation for Actix Web.
 
 pub mod actix;
+pub mod axum;
 pub mod reqwest;
 pub mod traits;
 
 // Re-export for easier access downstream
 pub use actix::ActixStrategy;
+pub use axum::AxumStrategy;
 pub use reqwest::ReqwestStrategy;
 pub use traits::BackendStrategy;
 pub mod clap_cli;

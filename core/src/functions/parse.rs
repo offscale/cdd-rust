@@ -130,7 +130,8 @@ mod tests {
         pub async fn create_user() {}
         "#;
 
-        let routes = extract_routes_from_functions(code).expect("expected value");
+        let routes =
+            extract_routes_from_functions(code).expect("Failed to extract routes from functions");
         assert_eq!(routes.len(), 2);
 
         assert_eq!(routes[0].method, "GET");

@@ -1377,7 +1377,7 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, None, true).expect("expected value");
+        let processed = process_parameter(&param, None, true).expect("Failed to process parameter");
         assert_eq!(processed.source, ParamSource::Query);
         assert_eq!(processed.style, Some(ParamStyle::Form));
         assert!(processed.explode); // Form defaults to true
@@ -1462,7 +1462,8 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, None, false).expect("expected value");
+        let processed =
+            process_parameter(&param, None, false).expect("Failed to process parameter");
         assert_eq!(processed.ty, "i64");
     }
 
@@ -1495,7 +1496,8 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, None, false).expect("expected value");
+        let processed =
+            process_parameter(&param, None, false).expect("Failed to process parameter");
         assert_eq!(processed.ty, "Vec<String>");
         assert_eq!(processed.style, Some(ParamStyle::Form));
     }
@@ -1533,7 +1535,7 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, None, true).expect("expected value");
+        let processed = process_parameter(&param, None, true).expect("Failed to process parameter");
         // Since schema is Object, map_schema_to_rust_type returns "serde_json::Value" unless typed struct ref
         assert_eq!(processed.ty, "serde_json::Value");
         assert_eq!(processed.source, ParamSource::Query);
@@ -1576,7 +1578,7 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, None, true).expect("expected value");
+        let processed = process_parameter(&param, None, true).expect("Failed to process parameter");
         assert_eq!(processed.source, ParamSource::QueryString);
         assert_eq!(processed.style, Some(ParamStyle::Form));
         assert!(matches!(
@@ -1617,7 +1619,7 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, None, true).expect("expected value");
+        let processed = process_parameter(&param, None, true).expect("Failed to process parameter");
         assert_eq!(
             processed.example,
             Some(ExampleValue::data(serde_json::json!({"filter": "active"})))
@@ -1657,7 +1659,7 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, None, true).expect("expected value");
+        let processed = process_parameter(&param, None, true).expect("Failed to process parameter");
         let example = processed.example.expect("example missing");
         assert_eq!(example.summary.as_deref(), Some("Short summary"));
         assert_eq!(example.description.as_deref(), Some("Longer description"));
@@ -1682,10 +1684,11 @@ mod tests {
                 }
             }
         });
-        let param: ShimParameter = serde_json::from_value(raw).expect("expected value");
+        let param: ShimParameter = serde_json::from_value(raw).expect("Failed to parse from value");
         let params = vec![RefOr::T(param)];
 
-        let resolved = resolve_parameters(&params, None, true).expect("expected value");
+        let resolved =
+            resolve_parameters(&params, None, true).expect("Failed to resolve parameters");
         assert_eq!(resolved[0].ty, "Option<i32>");
     }
 
@@ -1738,7 +1741,8 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, Some(&components), true).expect("expected value");
+        let processed = process_parameter(&param, Some(&components), true)
+            .expect("Failed to process parameter");
         assert_eq!(
             processed.example,
             Some(ExampleValue::data(serde_json::json!({"status": "open"})))
@@ -1770,7 +1774,7 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, None, true).expect("expected value");
+        let processed = process_parameter(&param, None, true).expect("Failed to process parameter");
         assert_eq!(processed.source, ParamSource::Path);
         assert_eq!(processed.style, Some(ParamStyle::Simple));
         assert!(!processed.explode); // Simple defaults to false
@@ -1799,7 +1803,7 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, None, true).expect("expected value");
+        let processed = process_parameter(&param, None, true).expect("Failed to process parameter");
         assert_eq!(processed.source, ParamSource::Cookie);
         assert_eq!(processed.style, Some(ParamStyle::Cookie));
         assert!(processed.explode);
@@ -1968,7 +1972,7 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, None, true).expect("expected value");
+        let processed = process_parameter(&param, None, true).expect("Failed to process parameter");
         assert_eq!(processed.style, Some(ParamStyle::DeepObject));
     }
 
@@ -2049,7 +2053,7 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, None, true).expect("expected value");
+        let processed = process_parameter(&param, None, true).expect("Failed to process parameter");
         assert_eq!(processed.style, Some(ParamStyle::PipeDelimited));
     }
 
@@ -2105,7 +2109,7 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, None, true).expect("expected value");
+        let processed = process_parameter(&param, None, true).expect("Failed to process parameter");
         assert_eq!(processed.ty, "String");
     }
 
@@ -2134,7 +2138,8 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, None, false).expect("expected value");
+        let processed =
+            process_parameter(&param, None, false).expect("Failed to process parameter");
         assert_eq!(processed.style, Some(ParamStyle::SpaceDelimited));
     }
 
@@ -2162,7 +2167,7 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, None, true).expect("expected value");
+        let processed = process_parameter(&param, None, true).expect("Failed to process parameter");
         assert_eq!(processed.style, Some(ParamStyle::Simple));
         assert!(processed.explode);
     }
@@ -2184,14 +2189,14 @@ mod tests {
         });
 
         let components: ShimComponents =
-            serde_json::from_value(components_json).expect("expected value");
+            serde_json::from_value(components_json).expect("Failed to parse from value");
 
         let op_params = vec![RefOr::Ref(utoipa::openapi::Ref::new(
             "#/components/parameters/limitParam",
         ))];
 
-        let resolved =
-            resolve_parameters(&op_params, Some(&components), true).expect("expected value");
+        let resolved = resolve_parameters(&op_params, Some(&components), true)
+            .expect("Failed to resolve parameters");
 
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].name, "limit");
@@ -2213,14 +2218,14 @@ mod tests {
         });
 
         let components: ShimComponents =
-            serde_json::from_value(components_json).expect("expected value");
+            serde_json::from_value(components_json).expect("Failed to parse from value");
 
         let op_params = vec![RefOr::Ref(utoipa::openapi::Ref::new(
             "https://example.com/openapi.yaml#/components/parameters/limitParam",
         ))];
 
-        let resolved =
-            resolve_parameters(&op_params, Some(&components), true).expect("expected value");
+        let resolved = resolve_parameters(&op_params, Some(&components), true)
+            .expect("Failed to resolve parameters");
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].name, "limit");
         assert_eq!(resolved[0].source, ParamSource::Query);
@@ -2241,15 +2246,15 @@ mod tests {
         });
 
         let components: ShimComponents =
-            serde_json::from_value(components_json).expect("expected value");
+            serde_json::from_value(components_json).expect("Failed to parse from value");
         let mut ref_param = utoipa::openapi::Ref::new(
             "https://example.com/openapi.yaml#/components/parameters/limitParam",
         );
         ref_param.description = "override".to_string();
 
         let op_params = vec![RefOr::Ref(ref_param)];
-        let resolved =
-            resolve_parameters(&op_params, Some(&components), true).expect("expected value");
+        let resolved = resolve_parameters(&op_params, Some(&components), true)
+            .expect("Failed to resolve parameters");
 
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].description.as_deref(), Some("override"));
@@ -2393,7 +2398,7 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, None, true).expect("expected value");
+        let processed = process_parameter(&param, None, true).expect("Failed to process parameter");
         assert_eq!(
             processed.example,
             Some(ExampleValue::data(serde_json::json!("hello")))
@@ -2447,7 +2452,7 @@ mod tests {
             }
         });
         let components: ShimComponents =
-            serde_json::from_value(components_json).expect("expected value");
+            serde_json::from_value(components_json).expect("Failed to parse from value");
 
         let mut examples = BTreeMap::new();
         examples.insert(
@@ -2478,7 +2483,8 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, Some(&components), true).expect("expected value");
+        let processed = process_parameter(&param, Some(&components), true)
+            .expect("Failed to process parameter");
         assert_eq!(
             processed.example,
             Some(ExampleValue::data(serde_json::json!("hi")))
@@ -2498,7 +2504,7 @@ mod tests {
             }
         });
         let components: ShimComponents =
-            serde_json::from_value(components_json).expect("expected value");
+            serde_json::from_value(components_json).expect("Failed to parse from value");
 
         let mut examples = BTreeMap::new();
         examples.insert(
@@ -2531,7 +2537,8 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, Some(&components), true).expect("expected value");
+        let processed = process_parameter(&param, Some(&components), true)
+            .expect("Failed to process parameter");
         assert_eq!(
             processed.example,
             Some(ExampleValue::data_with_meta(
@@ -2571,7 +2578,7 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, None, true).expect("expected value");
+        let processed = process_parameter(&param, None, true).expect("Failed to process parameter");
         assert_eq!(
             processed.example,
             Some(ExampleValue::external(serde_json::json!(
@@ -2609,7 +2616,7 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, None, true).expect("expected value");
+        let processed = process_parameter(&param, None, true).expect("Failed to process parameter");
         assert_eq!(
             processed.example,
             Some(ExampleValue::serialized(serde_json::json!(
@@ -2677,7 +2684,7 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, None, true).expect("expected value");
+        let processed = process_parameter(&param, None, true).expect("Failed to process parameter");
         assert_eq!(processed.ty, "String");
     }
 
@@ -2858,7 +2865,8 @@ mod tests {
             .chain(std::iter::once(RefOr::T(custom)))
             .collect::<Vec<_>>();
 
-        let resolved = resolve_parameters(&params, None, true).expect("expected value");
+        let resolved =
+            resolve_parameters(&params, None, true).expect("Failed to resolve parameters");
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].name, "X-Custom");
         assert_eq!(resolved[0].source, ParamSource::Header);
@@ -2929,7 +2937,7 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, None, true).expect("expected value");
+        let processed = process_parameter(&param, None, true).expect("Failed to process parameter");
         assert_eq!(
             processed.example,
             Some(ExampleValue::data(json!("from-schema")))
@@ -2982,7 +2990,8 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, Some(&components), true).expect("expected value");
+        let processed = process_parameter(&param, Some(&components), true)
+            .expect("Failed to process parameter");
         assert_eq!(
             processed.example,
             Some(ExampleValue::data(json!({ "status": "active" })))
@@ -3017,7 +3026,7 @@ mod tests {
             ..Default::default()
         };
 
-        let processed = process_parameter(&param, None, true).expect("expected value");
+        let processed = process_parameter(&param, None, true).expect("Failed to process parameter");
         assert!(processed.allow_empty_value);
     }
 
@@ -3107,7 +3116,8 @@ mod tests {
             raw,
         };
 
-        let processed = process_parameter(&param, Some(&components), true).expect("expected value");
+        let processed = process_parameter(&param, Some(&components), true)
+            .expect("Failed to process parameter");
         assert_eq!(processed.ty, "i32");
         assert_eq!(processed.content_media_type, Some(ContentMediaType::Json));
     }
@@ -3148,7 +3158,7 @@ mod tests {
             raw,
         };
 
-        let processed = process_parameter(&param, None, true).expect("expected value");
+        let processed = process_parameter(&param, None, true).expect("Failed to process parameter");
         assert_eq!(processed.ty, "Vec<String>");
     }
 
@@ -3191,7 +3201,7 @@ mod tests {
             raw,
         };
 
-        let processed = process_parameter(&param, None, true).expect("expected value");
+        let processed = process_parameter(&param, None, true).expect("Failed to process parameter");
         assert_eq!(processed.ty, "Vec<String>");
     }
 
@@ -3235,7 +3245,7 @@ mod tests {
             raw,
         };
 
-        let processed = process_parameter(&param, None, true).expect("expected value");
+        let processed = process_parameter(&param, None, true).expect("Failed to process parameter");
         assert_eq!(
             processed.example,
             Some(ExampleValue::serialized(serde_json::json!("{\"id\":1}")))

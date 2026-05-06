@@ -52,7 +52,7 @@ pub fn execute(args: &ToOpenApiArgs, target: &TargetMode) -> AppResult<()> {
 
                 // Parse routes
                 match target {
-                    TargetMode::Server => {
+                    TargetMode::ServerActix | TargetMode::ServerAxum => {
                         if let Ok(routes) = parse_actix_routes(&content) {
                             parsed_routes.extend(routes);
                         }
@@ -103,9 +103,9 @@ mod tests {
 
     #[test]
     fn test_to_openapi_execute() {
-        let dir = tempdir().expect("expected value");
+        let dir = tempdir().expect("Failed to create temporary directory");
         let src_dir = dir.path().join("src");
-        fs::create_dir_all(&src_dir).expect("expected value");
+        fs::create_dir_all(&src_dir).expect("Failed to create");
 
         let rs_path = src_dir.join("models.rs");
         let rs_code = r#"
@@ -118,16 +118,16 @@ mod tests {
         pub async fn get_users() {}
         "#;
         File::create(&rs_path)
-            .expect("expected value")
+            .expect("Failed to create")
             .write_all(rs_code.as_bytes())
-            .expect("expected value");
+            .expect("Failed to write to file");
 
         let args = ToOpenApiArgs {
             input: src_dir,
             output: dir.path().join("spec.json"),
         };
 
-        let result = execute(&args, &TargetMode::Server);
+        let result = execute(&args, &TargetMode::ServerActix);
         assert!(result.is_ok());
     }
 
@@ -137,15 +137,15 @@ mod tests {
             input: PathBuf::from("does_not_exist_dir"),
             output: PathBuf::from("spec.json"),
         };
-        let result = execute(&args, &TargetMode::Server);
+        let result = execute(&args, &TargetMode::ServerActix);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_to_openapi_client_and_cli_targets() {
-        let dir = tempdir().expect("expected value");
+        let dir = tempdir().expect("Failed to create temporary directory");
         let src_dir = dir.path().join("src");
-        std::fs::create_dir_all(&src_dir).expect("expected value");
+        std::fs::create_dir_all(&src_dir).expect("Failed to create");
 
         let rs_path = src_dir.join("clients.rs");
         let rs_code = r#"
@@ -156,9 +156,9 @@ mod tests {
         }
         "#;
         File::create(&rs_path)
-            .expect("expected value")
+            .expect("Failed to create")
             .write_all(rs_code.as_bytes())
-            .expect("expected value");
+            .expect("Failed to write to file");
 
         let args = ToOpenApiArgs {
             input: src_dir.clone(),
@@ -178,7 +178,7 @@ mod tests {
     #[test]
     fn test_to_openapi_execute_yaml() {
         use tempfile::tempdir;
-        let dir = tempdir().expect("expected value");
+        let dir = tempdir().expect("Failed to create temporary directory");
         let input_file = dir.path().join("input.rs");
         let output_file = dir.path().join("output.yaml");
 
@@ -187,24 +187,24 @@ mod tests {
         #[get("/test")]
         async fn test_handler() -> impl Responder { HttpResponse::Ok().finish() }
         "#;
-        std::fs::write(&input_file, handler_code).expect("expected value");
+        std::fs::write(&input_file, handler_code).expect("Failed to write to file");
 
         let args = ToOpenApiArgs {
             input: input_file,
             output: output_file.clone(),
         };
 
-        let result = execute(&args, &crate::TargetMode::Server);
+        let result = execute(&args, &crate::TargetMode::ServerActix);
         assert!(result.is_ok());
         assert!(std::fs::read_to_string(output_file)
-            .expect("expected value")
+            .expect("Failed to read file to string")
             .contains("openapi:"));
     }
 
     #[test]
     fn test_to_openapi_execute_write_error() {
         use tempfile::tempdir;
-        let dir = tempdir().expect("expected value");
+        let dir = tempdir().expect("Failed to create temporary directory");
         let input_file = dir.path().join("input.rs");
 
         let handler_code = r#"
@@ -212,14 +212,14 @@ mod tests {
         #[get("/test")]
         async fn test_handler() -> impl Responder { HttpResponse::Ok().finish() }
         "#;
-        std::fs::write(&input_file, handler_code).expect("expected value");
+        std::fs::write(&input_file, handler_code).expect("Failed to write to file");
 
         let args = ToOpenApiArgs {
             input: input_file,
             output: std::path::PathBuf::from("/nonexistent_dir/output.yaml"),
         };
 
-        let result = execute(&args, &crate::TargetMode::Server);
+        let result = execute(&args, &crate::TargetMode::ServerActix);
         assert!(result.is_err());
     }
 }

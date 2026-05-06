@@ -12,7 +12,7 @@
 //! - `scaffold`: Generates handler scaffolding from OpenAPI specs.
 //! - `schema-gen`: Generates JSON Schemas from Rust structs.
 
-use cdd_core::strategies::{ActixStrategy, ClapCliStrategy, ReqwestStrategy};
+use cdd_core::strategies::{ActixStrategy, AxumStrategy, ClapCliStrategy, ReqwestStrategy};
 use cdd_core::AppResult;
 use clap::{Parser, Subcommand, ValueEnum};
 
@@ -33,7 +33,9 @@ mod to_openapi;
 #[derive(ValueEnum, Clone, Debug, PartialEq)]
 pub enum TargetMode {
     /// Generate Actix Web server scaffolding
-    Server,
+    ServerActix,
+    /// Generate Axum server scaffolding
+    ServerAxum,
     /// Generate Reqwest client scaffolding
     Client,
     /// Generate Clap CLI scaffolding
@@ -53,7 +55,7 @@ struct Cli {
         short,
         long,
         env = "CDD_TARGET",
-        default_value = "server",
+        default_value = "server-actix",
         global = true
     )]
     target: TargetMode,
@@ -100,12 +102,14 @@ fn main() -> AppResult<()> {
             sync::execute(args, &mapper)?;
         }
         Commands::TestGen(args) => match cli.target {
-            TargetMode::Server => test_gen::execute(args, &ActixStrategy)?,
+            TargetMode::ServerActix => test_gen::execute(args, &ActixStrategy)?,
+            TargetMode::ServerAxum => test_gen::execute(args, &AxumStrategy)?,
             TargetMode::Client => test_gen::execute(args, &ReqwestStrategy)?,
             TargetMode::Cli => test_gen::execute(args, &ClapCliStrategy)?,
         },
         Commands::Scaffold(args) => match cli.target {
-            TargetMode::Server => scaffold::execute(args, &ActixStrategy)?,
+            TargetMode::ServerActix => scaffold::execute(args, &ActixStrategy)?,
+            TargetMode::ServerAxum => scaffold::execute(args, &AxumStrategy)?,
             TargetMode::Client => scaffold::execute(args, &ReqwestStrategy)?,
             TargetMode::Cli => scaffold::execute(args, &ClapCliStrategy)?,
         },

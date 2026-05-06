@@ -2532,14 +2532,16 @@ mod tests {
         ];
 
         let def = ParsedModel::Struct(make_struct("User", fields));
-        let schema = generate_json_schema(&def, None).expect("expected value");
+        let schema = generate_json_schema(&def, None).expect("Failed to generate json schema");
 
-        let props = schema["properties"].as_object().expect("expected value");
+        let props = schema["properties"]
+            .as_object()
+            .expect("Failed to get as object");
         assert_eq!(props["id"]["type"], "integer");
         assert_eq!(props["active"]["type"], "boolean");
         assert!(!schema
             .as_object()
-            .expect("expected value")
+            .expect("Failed to get as object")
             .contains_key("$schema"));
     }
 
@@ -2551,11 +2553,13 @@ mod tests {
         ];
 
         let def = ParsedModel::Struct(make_struct("Point", fields));
-        let schema = generate_json_schema(&def, None).expect("expected value");
+        let schema = generate_json_schema(&def, None).expect("Failed to generate json schema");
 
         assert_eq!(schema["type"], "array");
         assert_eq!(schema["items"], false);
-        let prefix_items = schema["prefixItems"].as_array().expect("expected value");
+        let prefix_items = schema["prefixItems"]
+            .as_array()
+            .expect("Failed to get as array");
         assert_eq!(prefix_items.len(), 2);
         assert_eq!(prefix_items[0]["type"], "integer");
         assert_eq!(prefix_items[1]["type"], "string");
@@ -2567,7 +2571,8 @@ mod tests {
         let def = ParsedModel::Struct(make_struct("User", fields));
         let dialect = "https://spec.openapis.org/oas/3.1/dialect/base";
 
-        let schema = generate_json_schema(&def, Some(dialect)).expect("expected value");
+        let schema =
+            generate_json_schema(&def, Some(dialect)).expect("Failed to generate json schema");
 
         assert_eq!(schema["$schema"], dialect);
         assert_eq!(schema["title"], "User");
@@ -2583,8 +2588,11 @@ mod tests {
         s.rename_all = Some(RenameRule::CamelCase);
         s.deny_unknown_fields = true;
 
-        let schema = generate_json_schema(&ParsedModel::Struct(s), None).expect("expected value");
-        let props = schema["properties"].as_object().expect("expected value");
+        let schema = generate_json_schema(&ParsedModel::Struct(s), None)
+            .expect("Failed to generate json schema");
+        let props = schema["properties"]
+            .as_object()
+            .expect("Failed to get as object");
         assert!(props.contains_key("userId"));
         assert!(props.contains_key("displayName"));
         assert_eq!(schema["additionalProperties"], false);
@@ -2606,7 +2614,8 @@ mod tests {
             .with_license(license);
         let dialect = "https://spec.openapis.org/oas/3.1/dialect/base";
 
-        let doc = generate_openapi_document(&def, Some(dialect), &info).expect("expected value");
+        let doc = generate_openapi_document(&def, Some(dialect), &info)
+            .expect("Failed to generate openapi document");
         assert_eq!(doc["openapi"], "3.2.0");
         assert_eq!(doc["jsonSchemaDialect"], dialect);
         assert_eq!(doc["info"]["title"], "Test API");
@@ -2629,7 +2638,8 @@ mod tests {
             .with_self_uri("https://example.com/openapi.yaml")
             .with_external_docs("https://example.com/docs", Some("Root docs".to_string()));
 
-        let doc = generate_openapi_document(&def, None, &info).expect("expected value");
+        let doc = generate_openapi_document(&def, None, &info)
+            .expect("Failed to generate openapi document");
         assert_eq!(doc["$self"], "https://example.com/openapi.yaml");
         assert_eq!(doc["externalDocs"]["url"], "https://example.com/docs");
         assert_eq!(doc["externalDocs"]["description"], "Root docs");
@@ -2643,7 +2653,8 @@ mod tests {
         extensions.insert("x-root".to_string(), serde_json::json!({"mode": "test"}));
 
         let info = OpenApiInfo::new("Test API", "1.0.0").with_extensions(extensions);
-        let doc = generate_openapi_document(&def, None, &info).expect("expected value");
+        let doc = generate_openapi_document(&def, None, &info)
+            .expect("Failed to generate openapi document");
         assert_eq!(doc["x-root"]["mode"], "test");
     }
 
@@ -2728,8 +2739,8 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
-        let tags = doc["tags"].as_array().expect("expected value");
+            .expect("Failed to generate openapi document with routes");
+        let tags = doc["tags"].as_array().expect("Failed to get as array");
         let first = &tags[0];
         assert_eq!(first["name"], "accounts");
         assert_eq!(first["summary"], "Account ops");
@@ -2794,7 +2805,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         assert_eq!(doc["servers"][0]["url"], "https://api.example.com/v1");
         assert_eq!(doc["servers"][0]["name"], "prod");
         assert_eq!(doc["servers"][0]["description"], "Production");
@@ -2805,9 +2816,11 @@ mod tests {
     fn test_generate_map_schema() {
         let fields = vec![make_field("tags", "HashMap<String, i32>", None)];
         let def = ParsedModel::Struct(make_struct("Tagged", fields));
-        let schema = generate_json_schema(&def, None).expect("expected value");
+        let schema = generate_json_schema(&def, None).expect("Failed to generate json schema");
 
-        let props = schema["properties"].as_object().expect("expected value");
+        let props = schema["properties"]
+            .as_object()
+            .expect("Failed to get as object");
         let tags = &props["tags"];
         assert_eq!(tags["type"], "object");
         assert_eq!(tags["additionalProperties"]["type"], "integer");
@@ -2817,9 +2830,11 @@ mod tests {
     fn test_generate_nested_map_schema() {
         let fields = vec![make_field("meta", "BTreeMap<String, Vec<String>>", None)];
         let def = ParsedModel::Struct(make_struct("Meta", fields));
-        let schema = generate_json_schema(&def, None).expect("expected value");
+        let schema = generate_json_schema(&def, None).expect("Failed to generate json schema");
 
-        let props = schema["properties"].as_object().expect("expected value");
+        let props = schema["properties"]
+            .as_object()
+            .expect("Failed to get as object");
         let meta = &props["meta"];
         assert_eq!(meta["type"], "object");
         assert_eq!(meta["additionalProperties"]["type"], "array");
@@ -2840,11 +2855,14 @@ mod tests {
             description: Some("Schema docs".to_string()),
         });
 
-        let schema = generate_json_schema(&ParsedModel::Struct(s), None).expect("expected value");
+        let schema = generate_json_schema(&ParsedModel::Struct(s), None)
+            .expect("Failed to generate json schema");
         assert_eq!(schema["externalDocs"]["url"], "https://example.com/schema");
         assert_eq!(schema["externalDocs"]["description"], "Schema docs");
 
-        let props = schema["properties"].as_object().expect("expected value");
+        let props = schema["properties"]
+            .as_object()
+            .expect("Failed to get as object");
         let id = &props["id"];
         assert_eq!(id["externalDocs"]["url"], "https://example.com/field");
         assert_eq!(id["externalDocs"]["description"], "Field docs");
@@ -2858,8 +2876,10 @@ mod tests {
         write_only.is_write_only = true;
 
         let def = ParsedModel::Struct(make_struct("Access", vec![read_only, write_only]));
-        let schema = generate_json_schema(&def, None).expect("expected value");
-        let props = schema["properties"].as_object().expect("expected value");
+        let schema = generate_json_schema(&def, None).expect("Failed to generate json schema");
+        let props = schema["properties"]
+            .as_object()
+            .expect("Failed to get as object");
         assert_eq!(props["read_only"]["readOnly"], true);
         assert_eq!(props["write_only"]["writeOnly"], true);
     }
@@ -2872,11 +2892,11 @@ mod tests {
             None,
         )];
         let def = ParsedModel::Struct(make_struct("OptionalMap", fields));
-        let schema = generate_json_schema(&def, None).expect("expected value");
+        let schema = generate_json_schema(&def, None).expect("Failed to generate json schema");
 
         assert!(schema.get("required").is_none());
         let labels = &schema["properties"]["labels"];
-        let types = labels["type"].as_array().expect("expected value");
+        let types = labels["type"].as_array().expect("Failed to get as array");
         assert!(types
             .iter()
             .any(|t| matches!(t, Value::String(s) if s == "null")));
@@ -2886,10 +2906,10 @@ mod tests {
     fn test_optional_string_nullable_schema() {
         let fields = vec![make_field("nickname", "Option<String>", None)];
         let def = ParsedModel::Struct(make_struct("NullableUser", fields));
-        let schema = generate_json_schema(&def, None).expect("expected value");
+        let schema = generate_json_schema(&def, None).expect("Failed to generate json schema");
 
         let nickname = &schema["properties"]["nickname"];
-        let types = nickname["type"].as_array().expect("expected value");
+        let types = nickname["type"].as_array().expect("Failed to get as array");
         assert!(types
             .iter()
             .any(|t| matches!(t, Value::String(s) if s == "null")));
@@ -2902,7 +2922,7 @@ mod tests {
     fn test_optional_ref_schema_uses_anyof() {
         let fields = vec![make_field("owner", "Option<User>", None)];
         let def = ParsedModel::Struct(make_struct("Owned", fields));
-        let schema = generate_json_schema(&def, None).expect("expected value");
+        let schema = generate_json_schema(&def, None).expect("Failed to generate json schema");
 
         let owner = &schema["properties"]["owner"];
         assert!(owner.get("anyOf").is_some());
@@ -2941,13 +2961,14 @@ mod tests {
             discriminator_default_mapping: None,
         };
 
-        let schema = generate_json_schema(&ParsedModel::Enum(en), None).expect("expected value");
+        let schema = generate_json_schema(&ParsedModel::Enum(en), None)
+            .expect("Failed to generate json schema");
         assert!(schema["oneOf"].is_array());
         assert!(schema["discriminator"].is_object());
         assert_eq!(schema["discriminator"]["propertyName"], "type");
         assert!(!schema
             .as_object()
-            .expect("expected value")
+            .expect("Failed to get as object")
             .contains_key("$schema"));
     }
 
@@ -2984,8 +3005,9 @@ mod tests {
             discriminator_default_mapping: None,
         };
 
-        let schema = generate_json_schema(&ParsedModel::Enum(en), None).expect("expected value");
-        let one_of = schema["oneOf"].as_array().expect("expected value");
+        let schema = generate_json_schema(&ParsedModel::Enum(en), None)
+            .expect("Failed to generate json schema");
+        let one_of = schema["oneOf"].as_array().expect("Failed to get as array");
         assert_eq!(one_of[0]["const"], "red-blue");
         assert_eq!(one_of[1]["const"], "green");
     }
@@ -2996,7 +3018,8 @@ mod tests {
         let mut s = make_struct("User", fields);
         s.rename = Some("UserModel".to_string());
 
-        let schema = generate_json_schema(&ParsedModel::Struct(s), None).expect("expected value");
+        let schema = generate_json_schema(&ParsedModel::Struct(s), None)
+            .expect("Failed to generate json schema");
         assert_eq!(schema["title"], "UserModel");
     }
 
@@ -3020,7 +3043,8 @@ mod tests {
             discriminator_default_mapping: Some("OtherPet".to_string()),
         };
 
-        let schema = generate_json_schema(&ParsedModel::Enum(en), None).expect("expected value");
+        let schema = generate_json_schema(&ParsedModel::Enum(en), None)
+            .expect("Failed to generate json schema");
         assert_eq!(schema["discriminator"]["propertyName"], "kind");
         assert_eq!(schema["discriminator"]["mapping"], json!(mapping));
         assert_eq!(schema["discriminator"]["defaultMapping"], "OtherPet");
@@ -3042,8 +3066,8 @@ mod tests {
             discriminator_default_mapping: None,
         };
         let dialect = "https://json-schema.org/draft/2020-12/schema";
-        let schema =
-            generate_json_schema(&ParsedModel::Enum(en), Some(dialect)).expect("expected value");
+        let schema = generate_json_schema(&ParsedModel::Enum(en), Some(dialect))
+            .expect("Failed to generate json schema");
         assert_eq!(schema["$schema"], dialect);
         assert_eq!(schema["title"], "Status");
     }
@@ -3052,7 +3076,7 @@ mod tests {
     fn test_generate_binary_vec_u8_schema() {
         let fields = vec![make_field("payload", "Vec<u8>", None)];
         let def = ParsedModel::Struct(make_struct("Upload", fields));
-        let schema = generate_json_schema(&def, None).expect("expected value");
+        let schema = generate_json_schema(&def, None).expect("Failed to generate json schema");
 
         let payload = &schema["properties"]["payload"];
         assert_eq!(payload["type"], "string");
@@ -3064,7 +3088,7 @@ mod tests {
     fn test_generate_binary_bytes_schema() {
         let fields = vec![make_field("data", "bytes::Bytes", None)];
         let def = ParsedModel::Struct(make_struct("Blob", fields));
-        let schema = generate_json_schema(&def, None).expect("expected value");
+        let schema = generate_json_schema(&def, None).expect("Failed to generate json schema");
 
         let data = &schema["properties"]["data"];
         assert_eq!(data["type"], "string");
@@ -3075,7 +3099,7 @@ mod tests {
     fn test_generate_binary_optional_not_required() {
         let fields = vec![make_field("payload", "Option<Vec<u8>>", None)];
         let def = ParsedModel::Struct(make_struct("Upload", fields));
-        let schema = generate_json_schema(&def, None).expect("expected value");
+        let schema = generate_json_schema(&def, None).expect("Failed to generate json schema");
 
         assert!(schema.get("required").is_none());
     }
@@ -3150,7 +3174,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[model], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
 
         assert_eq!(doc["$self"], "https://example.com/openapi.yaml");
         assert_eq!(doc["tags"][0]["name"], "users");
@@ -3241,7 +3265,7 @@ mod tests {
             &info,
             Some(&raw_components),
         )
-        .expect("expected value");
+        .expect("Failed to generate openapi document with routes and components");
 
         assert!(doc["components"]["schemas"]["Legacy"].is_object());
         assert!(doc["components"]["schemas"]["User"].is_object());
@@ -3338,7 +3362,7 @@ mod tests {
             &info,
             Some(&raw_components),
         )
-        .expect("expected value");
+        .expect("Failed to generate openapi document with routes and components");
 
         let user_schema = &doc["components"]["schemas"]["User"];
         assert_eq!(user_schema["properties"]["id"]["type"], "string");
@@ -3429,13 +3453,15 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let path_item = &doc["paths"]["/items/{id}"];
         assert_eq!(path_item["summary"], "Path summary");
         assert_eq!(path_item["description"], "Path description");
         assert_eq!(path_item["x-path-meta"]["owner"], "api");
         assert_eq!(path_item["servers"][0]["url"], "https://api.example.com/v2");
-        let path_params = path_item["parameters"].as_array().expect("expected value");
+        let path_params = path_item["parameters"]
+            .as_array()
+            .expect("Failed to get as array");
         assert!(path_params
             .iter()
             .any(|p| p["name"] == "id" && p["in"] == "path"));
@@ -3444,7 +3470,7 @@ mod tests {
         assert_eq!(op["summary"], "Op summary");
         assert_eq!(op["description"], "Op description");
         assert!(op.get("servers").is_none());
-        let op_params = op["parameters"].as_array().expect("expected value");
+        let op_params = op["parameters"].as_array().expect("Failed to get as array");
         assert!(op_params.iter().any(|p| p["name"] == "q"));
         assert!(!op_params.iter().any(|p| p["name"] == "id"));
     }
@@ -3511,7 +3537,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let header = &doc["paths"]["/status"]["get"]["responses"]["200"]["headers"]["X-Rate-Limit"];
         assert!(header.get("content").is_some());
         assert_eq!(header["content"]["text/plain"]["schema"]["type"], "integer");
@@ -3583,7 +3609,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let header = &doc["paths"]["/status"]["get"]["responses"]["200"]["headers"]["X-Flag"];
         assert_eq!(header["required"], true);
         assert_eq!(header["deprecated"], true);
@@ -3657,7 +3683,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let param_obj = &doc["paths"]["/users/{id}"]["get"]["parameters"][0];
         assert!(param_obj.get("example").is_none());
         assert_eq!(
@@ -3737,7 +3763,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let param_obj = &doc["paths"]["/users"]["get"]["parameters"][0];
         let example_obj = &param_obj["examples"]["example"];
         assert_eq!(example_obj["summary"], "Short summary");
@@ -3813,7 +3839,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let param_obj = &doc["paths"]["/users/{id}"]["get"]["parameters"][0];
         assert!(param_obj.get("example").is_none());
         assert_eq!(
@@ -3892,7 +3918,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let schema = &doc["paths"]["/users"]["get"]["parameters"][0]["schema"];
         assert!(schema.get("if").is_some());
         assert!(schema.get("then").is_some());
@@ -3959,7 +3985,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let media = &doc["paths"]["/widgets"]["post"]["requestBody"]["content"]["application/json"];
         assert!(media.get("example").is_none());
         assert_eq!(
@@ -4029,7 +4055,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let media =
             &doc["paths"]["/logs"]["post"]["requestBody"]["content"]["application/x-ndjson"];
         assert_eq!(media["itemSchema"]["type"], "string");
@@ -4087,7 +4113,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let media = &doc["paths"]["/status"]["get"]["responses"]["200"]["content"]["text/plain"];
         assert_eq!(media["examples"]["example"]["serializedValue"], "ready");
     }
@@ -4143,7 +4169,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let media =
             &doc["paths"]["/logs"]["get"]["responses"]["200"]["content"]["application/x-ndjson"];
         assert_eq!(media["itemSchema"]["type"], "string");
@@ -4201,7 +4227,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         assert_eq!(
             doc["paths"]["/status"]["get"]["responses"]["201"]["summary"],
             "Created response"
@@ -4294,7 +4320,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let schemes = &doc["components"]["securitySchemes"];
         assert_eq!(schemes["ApiKeyAuth"]["type"], "apiKey");
         assert_eq!(schemes["ApiKeyAuth"]["name"], "X-API-Key");
@@ -4373,7 +4399,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         assert_eq!(doc["security"][0]["ApiKeyAuth"][0], "read");
     }
 
@@ -4444,7 +4470,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let security = doc["paths"]["/public"]["get"]["security"]
             .as_array()
             .expect("security must be array");
@@ -4516,7 +4542,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let schemes = &doc["components"]["securitySchemes"];
         assert_eq!(schemes["LegacyAuth"]["deprecated"], true);
     }
@@ -4572,7 +4598,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let security = doc["paths"]["/public"]["get"]["security"][0]
             .as_object()
             .expect("security entry must be object");
@@ -4677,7 +4703,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let schemes = &doc["components"]["securitySchemes"];
         assert_eq!(schemes["OAuth"]["type"], "oauth2");
         assert_eq!(
@@ -4920,7 +4946,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route_a, route_b], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         assert_eq!(doc["servers"][0]["url"], "/api/v1");
         assert!(doc["paths"]["/users"]["get"].get("servers").is_none());
         assert!(doc["paths"]["/groups"]["get"].get("servers").is_none());
@@ -5023,7 +5049,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route_a, route_b], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         assert!(doc.get("servers").is_none());
         assert_eq!(
             doc["paths"]["/users"]["get"]["servers"][0]["url"],
@@ -5101,7 +5127,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         assert!(doc.get("servers").is_none());
         let server = &doc["paths"]["/users"]["get"]["servers"][0];
         assert_eq!(server["url"], "https://{env}.example.com/v1");
@@ -5161,7 +5187,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         assert!(doc["webhooks"]["onEvent"]["post"].is_object());
     }
 
@@ -5219,7 +5245,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[webhook_route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         assert_eq!(doc["paths"]["x-paths-meta"]["owner"], "api");
         assert_eq!(doc["webhooks"]["x-webhooks-meta"], true);
     }
@@ -5275,7 +5301,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         assert!(doc["paths"]["/files"]["additionalOperations"]["COPY"].is_object());
     }
 
@@ -5419,7 +5445,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let callbacks =
             &doc["paths"]["/subscribe"]["post"]["callbacks"]["onData"]["$request.body#/url"];
         assert!(callbacks["post"].is_object());
@@ -5520,7 +5546,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let cb_security = &doc["paths"]["/subscribe"]["post"]["callbacks"]["onData"]
             ["$request.body#/url"]["post"]["security"];
         assert!(cb_security.is_array());
@@ -5588,7 +5614,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let responses = &doc["paths"]["/items"]["get"]["responses"];
         assert_eq!(responses["404"]["description"], "Not Found");
         assert_eq!(
@@ -5662,7 +5688,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let header = &doc["paths"]["/items"]["get"]["responses"]["200"]["headers"]["X-Token"];
         assert!(header.get("content").is_some());
         assert!(header.get("x-cdd-content").is_none());
@@ -5737,7 +5763,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let request_body = &doc["paths"]["/items"]["post"]["requestBody"];
         assert_eq!(request_body["description"], "updated");
         assert_eq!(request_body["required"], true);
@@ -5837,7 +5863,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let schema =
             &doc["paths"]["/items"]["post"]["requestBody"]["content"]["application/json"]["schema"];
         assert!(schema.get("if").is_some());
@@ -5926,7 +5952,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let schema = &doc["paths"]["/items"]["get"]["responses"]["200"]["content"]
             ["application/json"]["schema"];
         assert!(schema.get("if").is_some());
@@ -6047,7 +6073,7 @@ mod tests {
         };
 
         let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("expected value");
+            .expect("Failed to generate openapi document with routes");
         let enc = &doc["paths"]["/upload"]["post"]["requestBody"]["content"]["multipart/form-data"]
             ["encoding"]["payload"];
         assert_eq!(enc["contentType"], "multipart/mixed");

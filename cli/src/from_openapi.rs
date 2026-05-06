@@ -266,13 +266,13 @@ mod tests {
 
     #[test]
     fn test_get_input_files_dir() {
-        let dir = tempdir().expect("expected value");
+        let dir = tempdir().expect("Failed to create temporary directory");
         let file1 = dir.path().join("a.yaml");
         let file2 = dir.path().join("b.json");
         let file3 = dir.path().join("c.txt");
-        fs::write(&file1, "").expect("expected value");
-        fs::write(&file2, "").expect("expected value");
-        fs::write(&file3, "").expect("expected value");
+        fs::write(&file1, "").expect("Failed to write to file");
+        fs::write(&file2, "").expect("Failed to write to file");
+        fs::write(&file3, "").expect("Failed to write to file");
 
         let args = GenerateArgs {
             input: None,
@@ -302,7 +302,7 @@ mod tests {
 
     #[test]
     fn test_execute_and_run_generation() {
-        let dir = tempdir().expect("expected value");
+        let dir = tempdir().expect("Failed to create temporary directory");
         let input_file = dir.path().join("spec.yaml");
         let openapi_content = r#"
 openapi: 3.0.0
@@ -325,7 +325,7 @@ components:
           type: integer
           format: int64
 "#;
-        fs::write(&input_file, openapi_content).expect("expected value");
+        fs::write(&input_file, openapi_content).expect("Failed to write to file");
 
         // Test SdkCli
         let args = FromOpenApiArgs {

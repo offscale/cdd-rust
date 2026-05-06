@@ -86,7 +86,8 @@ mod tests {
     fn test_scaffold_new_file() {
         let routes = vec![];
         let strategy = ActixStrategy;
-        let code = register_routes("", "users", &routes, &strategy).expect("expected value");
+        let code =
+            register_routes("", "users", &routes, &strategy).expect("Failed to register routes");
         assert!(code.contains("pub fn config(cfg: &mut web::ServiceConfig)"));
     }
 
@@ -147,8 +148,8 @@ pub fn config(cfg: &mut web::ServiceConfig) {
 }
 "#;
         let strategy = ActixStrategy;
-        let code =
-            register_routes(source, "users", &[parser_route], &strategy).expect("expected value");
+        let code = register_routes(source, "users", &[parser_route], &strategy)
+            .expect("Failed to register routes");
 
         assert!(code.contains("cfg.service(web::resource(\"/users\")"));
         assert!(code.contains(".route(web::get().to(handlers::users::get_users)));"));
@@ -209,8 +210,8 @@ pub fn config(cfg: &mut web::ServiceConfig) {
 }
 "#;
         let strategy = ActixStrategy;
-        let code =
-            register_routes(source, "users", &[parser_route], &strategy).expect("expected value");
+        let code = register_routes(source, "users", &[parser_route], &strategy)
+            .expect("Failed to register routes");
 
         assert!(code.contains("handlers::users::old_fn"));
         assert!(code.contains("handlers::users::new_fn"));
@@ -271,8 +272,8 @@ pub fn config(cfg: &mut web::ServiceConfig) {
 }
 "#;
         let strategy = ActixStrategy;
-        let code =
-            register_routes(source, "users", &[parser_route], &strategy).expect("expected value");
+        let code = register_routes(source, "users", &[parser_route], &strategy)
+            .expect("Failed to register routes");
         assert_eq!(code, source);
     }
 
@@ -373,7 +374,8 @@ pub fn config(cfg: &mut web::ServiceConfig) {
 
         let source = "pub fn config(cfg: &mut web::ServiceConfig) { }";
         let strategy = ActixStrategy;
-        let code = register_routes(source, "mod", &[r1, r2], &strategy).expect("expected value");
+        let code = register_routes(source, "mod", &[r1, r2], &strategy)
+            .expect("Failed to register routes");
 
         assert!(code.contains("handlers::mod::a"));
         assert!(code.contains("handlers::mod::b"));

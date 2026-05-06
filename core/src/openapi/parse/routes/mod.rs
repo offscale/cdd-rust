@@ -1271,20 +1271,23 @@ paths:
       responses:
         '200': {description: OK, content: {application/json: {schema: {type: object}}}}
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
 
         let get_r = routes
             .iter()
             .find(|r| r.method == "GET")
-            .expect("expected value");
+            .expect("Failed to find");
         assert_eq!(get_r.params[0].name, "id");
         assert_eq!(get_r.params[0].source, ParamSource::Path);
 
         let post_r = routes
             .iter()
             .find(|r| r.method == "POST")
-            .expect("expected value");
-        let body = post_r.request_body.as_ref().expect("expected value");
+            .expect("Failed to find");
+        let body = post_r
+            .request_body
+            .as_ref()
+            .expect("Failed to get reference");
         assert_eq!(body.ty, "UpdateUserRequest");
     }
 
@@ -1304,7 +1307,7 @@ paths:
     get:
       responses: { '200': {description: Pong} }
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].path, "/ping");
         assert_eq!(routes[0].base_path.as_deref(), Some("/v1"));
@@ -1327,7 +1330,7 @@ paths:
                 text/plain:
                   schema: { type: string }
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         let header = routes[0].response_headers.first().expect("expected header");
         assert_eq!(header.name, "X-Token");
         assert_eq!(header.content_media_type.as_deref(), Some("text/plain"));
@@ -1343,7 +1346,7 @@ paths:
     get:
       responses: { '200': {description: OK} }
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].path, "/legacy");
     }
@@ -1365,7 +1368,7 @@ paths:
       responses:
         '200': { description: OK }
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes[0].base_path.as_deref(), Some("/v1"));
     }
 
@@ -1382,7 +1385,7 @@ paths:
       responses:
         '200': { description: OK }
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes[0].base_path.as_deref(), None);
     }
 
@@ -1399,7 +1402,7 @@ paths:
       responses:
         '200': { description: OK }
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes[0].base_path.as_deref(), Some("/test"));
     }
 
@@ -1416,7 +1419,7 @@ paths:
       responses:
         '200': { description: OK }
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes[0].base_path.as_deref(), Some("/v1"));
     }
 
@@ -1438,7 +1441,7 @@ paths:
             None,
             Some("https://example.com/api/openapi.yaml"),
         )
-        .expect("expected value");
+        .expect("Failed to parse openapi routes with registry");
         assert_eq!(routes[0].base_path.as_deref(), Some("/api"));
     }
 
@@ -1460,7 +1463,7 @@ paths:
             None,
             Some("https://example.com/api/openapi.yaml"),
         )
-        .expect("expected value");
+        .expect("Failed to parse openapi routes with registry");
         assert_eq!(routes[0].base_path.as_deref(), Some("/api/v1"));
     }
 
@@ -1476,7 +1479,7 @@ paths:
       responses:
         '200': { description: OK }
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes[0].base_path.as_deref(), Some("/api/legacy"));
     }
 
@@ -1522,28 +1525,31 @@ externalDocs:
   description: Context
 paths: {}
 "#;
-        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("expected value");
+        let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("Failed to parse from string");
 
         assert_eq!(openapi.openapi.as_deref(), Some("3.2.0"));
 
-        let info = openapi.info.expect("expected value");
+        let info = openapi.info.expect("Missing info");
         assert_eq!(
             info.terms_of_service.as_deref(),
             Some("https://example.com/terms")
         );
 
-        let contact = info.contact.expect("expected value");
+        let contact = info.contact.expect("Missing contact");
         assert_eq!(contact.email.as_deref(), Some("support@example.com"));
 
-        let license = info.license.expect("expected value");
+        let license = info.license.expect("Missing license");
         assert_eq!(license.identifier.as_deref(), Some("MIT"));
 
-        let servers = openapi.servers.expect("expected value");
+        let servers = openapi.servers.expect("Missing servers");
         assert_eq!(servers[0].url, "https://{env}.example.com");
-        let vars = servers[0].variables.as_ref().expect("expected value");
-        assert_eq!(vars.get("env").expect("expected value").default, "dev");
+        let vars = servers[0]
+            .variables
+            .as_ref()
+            .expect("Failed to get reference");
+        assert_eq!(vars.get("env").expect("Failed to get").default, "dev");
 
-        let ext = openapi.external_docs.expect("expected value");
+        let ext = openapi.external_docs.expect("Missing external docs");
         assert_eq!(ext.url, "https://docs.example.com");
     }
 
@@ -1572,7 +1578,7 @@ paths:
         - $ref: '#/components/parameters/limitParam'
       responses: { '200': {description: OK} }
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         let r = &routes[0];
 
         assert_eq!(r.params.len(), 2);
@@ -1613,7 +1619,7 @@ paths:
       responses:
         '200': { description: OK }
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         let param = routes[0]
             .params
             .iter()
@@ -1640,7 +1646,7 @@ paths:
     get:
       responses: { '200': {description: OK} }
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].security.len(), 1);
         assert_eq!(routes[0].security[0].schemes[0].scheme_name, "api_key");
@@ -1672,7 +1678,7 @@ paths:
         - oauth: [read]
       responses: { '200': {description: OK} }
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].security.len(), 1);
         assert_eq!(routes[0].security[0].schemes[0].scheme_name, "oauth");
@@ -1698,7 +1704,7 @@ paths:
       security: []
       responses: { '200': {description: OK} }
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes.len(), 1);
         assert!(routes[0].security.is_empty());
     }
@@ -1720,7 +1726,7 @@ components:
         let mut registry = DocumentRegistry::new();
         registry
             .register_openapi_yaml("https://example.com/shared.yaml", shared)
-            .expect("expected value");
+            .expect("Failed to register openapi yaml");
 
         let entry = r#"
 openapi: 3.2.0
@@ -1739,7 +1745,7 @@ paths:
             Some(&registry),
             Some("https://example.com/openapi.yaml"),
         )
-        .expect("expected value");
+        .expect("Failed to parse openapi routes with registry");
 
         assert_eq!(routes.len(), 1);
         let scheme = routes[0].security[0]
@@ -1878,7 +1884,7 @@ paths:
       responses:
         '200': { $ref: '#/components/responses/SuccessResponse' }
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         let r = &routes[0];
         assert_eq!(r.response_type.as_deref(), Some("MyData"));
     }
@@ -1897,7 +1903,7 @@ paths:
   /users:
     $ref: '#/components/pathItems/UserPath'
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].path, "/users");
         assert_eq!(routes[0].method, "GET");
@@ -1918,7 +1924,7 @@ paths:
   /users:
     $ref: 'https://example.com/openapi.yaml#/components/pathItems/UserPath'
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].path, "/users");
         assert_eq!(routes[0].method, "GET");
@@ -1936,7 +1942,7 @@ paths:
         operationId: copyThing
         responses: { '200': {description: OK} }
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes.len(), 1);
         let r = &routes[0];
         assert_eq!(r.method, "COPY");
@@ -1977,7 +1983,7 @@ paths:
         - url: https://api.example.com/v3
       responses: { '200': {description: OK} }
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].base_path.as_deref(), Some("/v3"));
         let op_servers = routes[0]
@@ -2021,7 +2027,7 @@ paths:
             type: string
       responses: { '200': {description: OK} }
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes.len(), 1);
         let route = &routes[0];
         assert_eq!(route.path_summary.as_deref(), Some("Path summary"));
@@ -2068,7 +2074,7 @@ webhooks:
   userCreated:
     $ref: '#/components/pathItems/HookItem'
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].path, "userCreated");
         assert_eq!(routes[0].method, "POST");
@@ -2090,12 +2096,12 @@ paths:
   /alias:
     $ref: '#/paths/~1base'
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes.len(), 2);
         let alias_route = routes
             .iter()
             .find(|r| r.path == "/alias")
-            .expect("expected value");
+            .expect("Failed to find");
         assert_eq!(alias_route.method, "GET");
     }
 
@@ -2196,7 +2202,7 @@ paths:
       operationId: GetUserById
       responses: { '200': {description: OK} }
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].operation_id.as_deref(), Some("GetUserById"));
         assert_eq!(routes[0].handler_name, "get_user_by_id");
@@ -2237,7 +2243,7 @@ openapi: 3.2.0
 info: {title: EmptyPaths, version: 1.0}
 paths: {}
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert!(routes.is_empty());
     }
 
@@ -2257,7 +2263,7 @@ webhooks:
     post:
       responses: { '200': { description: OK } }
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes.len(), 2);
         assert!(routes
             .iter()
@@ -2291,7 +2297,7 @@ webhooks:
             None,
             None,
         )
-        .expect("expected value");
+        .expect("Failed to resolve path item ref");
         assert!(resolved.get.is_some());
     }
 
@@ -2338,7 +2344,7 @@ components:
         let mut registry = DocumentRegistry::new();
         registry
             .register_openapi_yaml("https://example.com/shared.yaml", shared)
-            .expect("expected value");
+            .expect("Failed to register openapi yaml");
 
         let entry = r#"
 openapi: 3.2.0
@@ -2354,7 +2360,7 @@ paths:
             Some(&registry),
             Some("https://example.com/openapi.yaml"),
         )
-        .expect("expected value");
+        .expect("Failed to parse openapi routes with registry");
 
         assert_eq!(routes.len(), 1);
         let route = &routes[0];
@@ -2385,7 +2391,7 @@ paths:
                 content: { application/json: { schema: {type: object} } }
               responses: { '200': {description: OK} }
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes.len(), 1);
         let route = &routes[0];
 
@@ -2419,7 +2425,7 @@ paths:
         myHook:
           $ref: '#/components/callbacks/MyCallback'
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         let route = &routes[0];
 
         assert_eq!(route.callbacks.len(), 1);
@@ -2455,8 +2461,11 @@ paths:
               parameters:
                 id: $response.body#/id
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
-        let links = routes[0].response_links.as_ref().expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
+        let links = routes[0]
+            .response_links
+            .as_ref()
+            .expect("Failed to get reference");
         assert!(links[0].operation_ref.is_none());
         assert_eq!(
             links[0].resolved_operation_ref.as_deref(),
@@ -2487,8 +2496,11 @@ paths:
               parameters:
                 id: $response.body#/id
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
-        let links = routes[0].response_links.as_ref().expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
+        let links = routes[0]
+            .response_links
+            .as_ref()
+            .expect("Failed to get reference");
         assert_eq!(
             links[0].operation_ref.as_deref(),
             Some("#/paths/~1users~1%7Bid%7D/get")
@@ -2519,8 +2531,11 @@ paths:
             Callback:
               operationRef: '#/webhooks/onEvent/post'
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
-        let links = routes[0].response_links.as_ref().expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
+        let links = routes[0]
+            .response_links
+            .as_ref()
+            .expect("Failed to get reference");
         assert_eq!(
             links[0].operation_ref.as_deref(),
             Some("#/webhooks/onEvent/post")
@@ -2553,8 +2568,11 @@ paths:
   /users/{id}:
     $ref: '#/components/pathItems/UserItem'
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
-        let links = routes[0].response_links.as_ref().expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
+        let links = routes[0]
+            .response_links
+            .as_ref()
+            .expect("Failed to get reference");
         assert_eq!(
             links[0].operation_ref.as_deref(),
             Some("#/components/pathItems/UserItem/get")
@@ -2631,8 +2649,11 @@ paths:
               Self:
                 operationRef: '#/paths/~1files/COPY'
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
-        let links = routes[0].response_links.as_ref().expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
+        let links = routes[0]
+            .response_links
+            .as_ref()
+            .expect("Failed to get reference");
         assert_eq!(
             links[0].operation_ref.as_deref(),
             Some("#/paths/~1files/COPY")
@@ -2681,7 +2702,7 @@ paths:
             X-Rate-Limit:
               $ref: '#/components/headers/RateLimit'
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         let headers = &routes[0].response_headers;
         assert_eq!(headers.len(), 1);
         assert_eq!(headers[0].name, "X-Rate-Limit");
@@ -2706,7 +2727,7 @@ paths:
                   schema:
                     type: integer
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         let headers = &routes[0].response_headers;
         assert_eq!(headers.len(), 1);
         assert_eq!(headers[0].name, "X-Rate-Limit");
@@ -2759,7 +2780,7 @@ paths:
               itemSchema:
                 $ref: '#/components/schemas/LogEntry'
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes[0].response_type.as_deref(), Some("Vec<LogEntry>"));
     }
 
@@ -2785,7 +2806,7 @@ paths:
               itemSchema:
                 $ref: '#/components/schemas/Event'
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes[0].response_type.as_deref(), Some("Vec<Event>"));
     }
 
@@ -2811,7 +2832,7 @@ paths:
               itemSchema:
                 $ref: '#/components/schemas/Part'
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes[0].response_type.as_deref(), Some("Vec<Part>"));
     }
 
@@ -2905,7 +2926,7 @@ paths:
             application/json:
               $ref: '#/components/mediaTypes/WidgetJson'
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes[0].response_type.as_deref(), Some("Widget"));
     }
 
@@ -2938,10 +2959,13 @@ paths:
       responses:
         '200': {description: ok}
 "#;
-        let routes = parse_openapi_routes(yaml).expect("expected value");
-        let body = routes[0].request_body.as_ref().expect("expected value");
-        let encoding = body.encoding.as_ref().expect("expected value");
-        let file = encoding.get("file").expect("expected value");
+        let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
+        let body = routes[0]
+            .request_body
+            .as_ref()
+            .expect("Failed to get reference");
+        let encoding = body.encoding.as_ref().expect("Failed to get reference");
+        let file = encoding.get("file").expect("Failed to get");
         assert_eq!(
             file.headers.get("Content-Range").map(String::as_str),
             Some("String")

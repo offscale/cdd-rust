@@ -169,4 +169,10 @@ pub trait BackendStrategy {
 
     /// Returns the helper function code for validating responses against OpenAPI.
     fn test_validation_helper(&self) -> String;
+
+    /// Generates a unit test for a specific handler function to be placed alongside it.
+    fn handler_unit_test(&self, route: &ParsedRoute) -> String {
+        let _ = route;
+        String::new()
+    }
 }

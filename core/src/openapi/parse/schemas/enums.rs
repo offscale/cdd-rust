@@ -126,7 +126,7 @@ mod tests {
         assert_eq!(v.name, "Cat");
         assert_eq!(v.rename.as_deref(), Some("cat"));
         assert_eq!(
-            v.aliases.as_ref().expect("expected value"),
+            v.aliases.as_ref().expect("Failed to get reference"),
             &vec!["kitty".to_string()]
         );
     }

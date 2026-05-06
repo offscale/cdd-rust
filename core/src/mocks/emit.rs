@@ -72,7 +72,7 @@ mod tests {
             external_docs: None,
             deprecated: false,
         };
-        let code = generate_mock_routes(&[route]).expect("expected value");
+        let code = generate_mock_routes(&[route]).expect("Failed to generate mock routes");
         assert!(code.contains("pub async fn mock_ping() {}"));
     }
 }

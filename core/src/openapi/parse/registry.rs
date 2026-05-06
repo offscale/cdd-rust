@@ -727,7 +727,7 @@ properties:
         let mut registry = DocumentRegistry::new();
         registry
             .register_schema_yaml("https://example.com/schemas/base.json", schema)
-            .expect("expected value");
+            .expect("Failed to register schema yaml");
 
         let ref_by_id = "https://example.com/schemas/base.json";
         assert!(registry.resolve_schema_ref(ref_by_id, None).is_some());
@@ -760,7 +760,7 @@ paths:
         let mut registry = DocumentRegistry::new();
         registry
             .register_openapi_yaml("https://example.com/openapi.yaml", openapi)
-            .expect("expected value");
+            .expect("Failed to register openapi yaml");
 
         let ref_by_id = "https://example.com/schemas/Inline";
         assert!(registry.resolve_schema_ref(ref_by_id, None).is_some());

@@ -232,7 +232,7 @@ mod tests {
                 id: i32
             }
         "#;
-        let s = extract_struct(code, "User").expect("expected value");
+        let s = extract_struct(code, "User").expect("Failed to extract struct");
         assert_eq!(s.fields[0].name, "id");
         assert_eq!(s.fields[0].rename.as_deref(), Some("userId"));
         assert!(!s.fields[0].is_skipped);
@@ -246,7 +246,7 @@ mod tests {
                 token: String
             }
         "#;
-        let s = extract_struct(code, "Secret").expect("expected value");
+        let s = extract_struct(code, "Secret").expect("Failed to extract struct");
         assert_eq!(s.fields[0].name, "token");
         assert!(s.fields[0].is_skipped);
     }
@@ -261,7 +261,7 @@ mod tests {
                 Dog(DogStruct)
             }
         "#;
-        let model = extract_model(code, "Pet").expect("expected value");
+        let model = extract_model(code, "Pet").expect("Failed to extract model");
         if let ParsedModel::Enum(e) = model {
             assert_eq!(e.tag.as_deref(), Some("type"));
             assert_eq!(e.variants.len(), 2);
@@ -282,7 +282,7 @@ mod tests {
                 B(String)
             }
         "#;
-        let model = extract_model(code, "Poly").expect("expected value");
+        let model = extract_model(code, "Poly").expect("Failed to extract model");
         if let ParsedModel::Enum(e) = model {
             assert!(e.untagged);
             assert_eq!(e.variants[0].ty.as_deref(), Some("i32"));

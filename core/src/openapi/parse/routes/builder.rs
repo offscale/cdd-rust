@@ -855,7 +855,8 @@ paths:
                 content: { application/json: { schema: {type: object} } } 
               responses: { '200': {description: OK} } 
 "#;
-        let routes = super::super::parse_openapi_routes(yaml).expect("expected value");
+        let routes =
+            super::super::parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes.len(), 1);
         let route = &routes[0];
 
@@ -890,7 +891,8 @@ paths:
       responses:
         '200': {description: ok}
 "#;
-        let routes = super::super::parse_openapi_routes(yaml).expect("expected value");
+        let routes =
+            super::super::parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         let scheme = routes[0]
             .security
             .first()
@@ -929,7 +931,8 @@ paths:
       responses:
         '200': {description: ok}
 "#;
-        let routes = super::super::parse_openapi_routes(yaml).expect("expected value");
+        let routes =
+            super::super::parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         let oauth = routes[0]
             .security
             .iter()

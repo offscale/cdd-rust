@@ -32,7 +32,7 @@ mod tests {
         pub async fn health_check() {}
         "#;
 
-        let routes = parse_actix_routes(code).expect("expected value");
+        let routes = parse_actix_routes(code).expect("Failed to parse actix routes");
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0].path, "/health");
     }

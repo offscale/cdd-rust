@@ -156,7 +156,7 @@ mod tests {
 
         let resp: RpcResponse = test::call_and_read_body_json(&app, req).await;
         assert!(resp.error.is_some());
-        assert_eq!(resp.error.expect("expected value").code, -32600);
+        assert_eq!(resp.error.expect("Missing error").code, -32600);
     }
 
     #[actix_rt::test]
@@ -181,6 +181,6 @@ mod tests {
 
         let resp: RpcResponse = test::call_and_read_body_json(&app, req).await;
         assert!(resp.error.is_some());
-        assert_eq!(resp.error.expect("expected value").code, -32601);
+        assert_eq!(resp.error.expect("Missing error").code, -32601);
     }
 }

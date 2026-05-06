@@ -224,8 +224,8 @@ mod tests {
     #[test]
     fn test_insert_into_empty_struct() {
         let code = "struct User {}";
-        let field = make_record_field("id", "i32", true, 4).expect("expected value");
-        let new_code = add_struct_field(code, "User", &field).expect("expected value");
+        let field = make_record_field("id", "i32", true, 4).expect("Failed to make record field");
+        let new_code = add_struct_field(code, "User", &field).expect("Failed to add struct field");
         assert!(new_code.contains("pub id: i32,"));
     }
 
@@ -233,21 +233,21 @@ mod tests {
     #[test]
     fn test_add_derive_simple() {
         let code = "struct A;";
-        let res = add_derive(code, "A", "Debug").expect("expected value");
+        let res = add_derive(code, "A", "Debug").expect("Failed to add derive");
         assert!(res.contains("#[derive(Debug)]"));
     }
 
     #[test]
     fn test_add_derive_append() {
         let code = "#[derive(Clone)]\nstruct A;";
-        let res = add_derive(code, "A", "Debug").expect("expected value");
+        let res = add_derive(code, "A", "Debug").expect("Failed to add derive");
         assert!(res.contains("#[derive(Clone, Debug)]"));
     }
 
     #[test]
     fn test_add_derive_indented() {
         let code = "    struct A;";
-        let res = add_derive(code, "A", "Debug").expect("expected value");
+        let res = add_derive(code, "A", "Debug").expect("Failed to add derive");
         assert!(res.contains("    #[derive(Debug)]"));
         assert!(res.contains("\n    struct A"));
     }
@@ -256,14 +256,16 @@ mod tests {
     #[test]
     fn test_modify_type() {
         let code = "struct A { x: i32 }";
-        let res = modify_struct_field_type(code, "A", "x", "String").expect("expected value");
+        let res = modify_struct_field_type(code, "A", "x", "String")
+            .expect("Failed to modify struct field type");
         assert!(res.contains("x: String"));
     }
 
     #[test]
     fn test_add_attribute_generic() {
         let code = "struct A;";
-        let res = add_struct_attribute(code, "A", "#[foo]").expect("expected value");
+        let res =
+            add_struct_attribute(code, "A", "#[foo]").expect("Failed to add struct attribute");
         assert!(res.contains("#[foo]\nstruct A"));
     }
 }

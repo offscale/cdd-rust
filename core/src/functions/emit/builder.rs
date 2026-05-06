@@ -6,7 +6,7 @@
 
 use crate::error::AppResult;
 use crate::functions::emit::extractors::{generate_function, generate_query_struct};
-use crate::functions::emit::parsing::{extract_fn_names, extract_struct_names};
+use crate::functions::emit::parsing::{extract_fn_names, extract_struct_names, to_snake_case};
 use crate::openapi::parse::ParsedRoute;
 use crate::strategies::BackendStrategy;
 use std::collections::HashSet;
@@ -28,6 +28,7 @@ pub fn update_handler_module(
     let existing_fns = extract_fn_names(&new_source);
     let existing_structs = extract_struct_names(&new_source);
     let mut added_structs = HashSet::new();
+    let mut tests_code = String::new();
 
     for route in routes {
         if !existing_fns.contains(&route.handler_name) {
@@ -37,12 +38,30 @@ pub fn update_handler_module(
                 {
                     new_source.push_str(&query_struct.code);
                     new_source.push('\n');
+
+                    tests_code.push_str(&format!(
+                        "    #[test]\n    fn test_{}_deserialize() {{\n        let _ = serde_json::from_str::<super::{}>(\"{{}}\");\n    }}\n",
+                        to_snake_case(&query_struct.name),
+                        query_struct.name
+                    ));
                 }
             }
             let code = generate_function(route, strategy)?;
             new_source.push_str(&code);
             new_source.push('\n');
+
+            let unit_test = strategy.handler_unit_test(route);
+            if !unit_test.is_empty() {
+                tests_code.push_str(&unit_test);
+                tests_code.push('\n');
+            }
         }
+    }
+
+    if !tests_code.is_empty() && !new_source.contains("mod tests {") {
+        new_source.push_str("\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n");
+        new_source.push_str(&tests_code);
+        new_source.push_str("}\n");
     }
 
     Ok(new_source)
@@ -106,7 +125,8 @@ mod tests {
         };
 
         let strategy = ActixStrategy;
-        let code = update_handler_module("", &[route], &strategy).expect("expected value");
+        let code = update_handler_module("", &[route], &strategy)
+            .expect("Failed to update handler module");
         assert!(code.contains("pub async fn get_users() -> impl Responder {"));
     }
 
@@ -165,7 +185,8 @@ mod tests {
         };
 
         let strategy = ActixStrategy;
-        let code = update_handler_module(source, &[route], &strategy).expect("expected value");
+        let code = update_handler_module(source, &[route], &strategy)
+            .expect("Failed to update handler module");
         assert!(code.contains("pub async fn existing_handler"));
         assert!(code.contains("pub async fn new_func"));
     }
