@@ -67,7 +67,7 @@ struct DocsCode {
 
 /// Reads the input specification from a file or URL.
 #[cfg(not(tarpaulin_include))]
-#[cfg(feature = "client")]
+#[cfg(all(feature = "client", not(target_os = "wasi")))]
 fn read_input(input: &str) -> AppResult<String> {
     if input.starts_with("http://") || input.starts_with("https://") {
         let response = ureq::get(input)
@@ -85,11 +85,11 @@ fn read_input(input: &str) -> AppResult<String> {
 
 /// Reads the input specification from a file only (when client feature is absent).
 #[cfg(not(tarpaulin_include))]
-#[cfg(not(feature = "client"))]
+#[cfg(any(not(feature = "client"), target_os = "wasi"))]
 fn read_input(input: &str) -> AppResult<String> {
     if input.starts_with("http://") || input.starts_with("https://") {
         Err(AppError::General(
-            "Client feature is not compiled, cannot fetch HTTP URLs".to_string(),
+            "Client feature is not compiled or not supported on this platform, cannot fetch HTTP URLs".to_string(),
         ))
     } else {
         std::fs::read_to_string(input)

@@ -22,7 +22,7 @@ mod from_openapi;
 mod generator;
 mod scaffold;
 mod schema_gen;
-#[cfg(feature = "server")]
+#[cfg(all(feature = "server", not(target_os = "wasi")))]
 mod server_json_rpc;
 mod sync;
 mod test_gen;
@@ -85,10 +85,10 @@ enum Commands {
     ToOpenApi(to_openapi::ToOpenApiArgs),
     /// Expose CLI interface as JSON-RPC server over HTTP.
     #[clap(name = "serve_json_rpc")]
-    #[cfg(feature = "server")]
+    #[cfg(all(feature = "server", not(target_os = "wasi")))]
     ServerJsonRpc(server_json_rpc::ServerJsonRpcArgs),
     /// Fallback for missing server feature
-    #[cfg(not(feature = "server"))]
+    #[cfg(any(not(feature = "server"), target_os = "wasi"))]
     ServerJsonRpc,
 }
 
@@ -125,14 +125,14 @@ fn main() -> AppResult<()> {
         Commands::ToOpenApi(args) => {
             to_openapi::execute(args, &cli.target)?;
         }
-        #[cfg(feature = "server")]
+        #[cfg(all(feature = "server", not(target_os = "wasi")))]
         Commands::ServerJsonRpc(args) => {
             server_json_rpc::execute(args)?;
         }
-        #[cfg(not(feature = "server"))]
+        #[cfg(any(not(feature = "server"), target_os = "wasi"))]
         Commands::ServerJsonRpc => {
             return Err(cdd_core::error::AppError::General(
-                "Server feature is not compiled".to_string(),
+                "Server feature is not compiled or not supported on this platform".to_string(),
             ));
         }
     }

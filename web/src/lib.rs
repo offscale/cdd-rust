@@ -3,6 +3,7 @@
 //! # CDD Web Library
 //!
 //! Contains route handlers, database logic, and schema definitions.
+#![cfg(not(target_os = "wasi"))]
 
 use actix_web::{get, web, HttpResponse, Responder};
 

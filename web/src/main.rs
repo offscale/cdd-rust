@@ -3,12 +3,18 @@
 //! # Web App
 #![cfg(not(tarpaulin_include))]
 
+#[cfg(not(target_os = "wasi"))]
 use actix_web::{web, App, HttpServer};
+#[cfg(not(target_os = "wasi"))]
 use cdd_web::{config, handlers::pet::PetStore, health_check};
+#[cfg(not(target_os = "wasi"))]
 use std::collections::HashMap;
+#[cfg(not(target_os = "wasi"))]
 use std::net::TcpListener;
+#[cfg(not(target_os = "wasi"))]
 use std::sync::Mutex;
 
+#[cfg(not(target_os = "wasi"))]
 fn build_server(listener: TcpListener) -> std::io::Result<actix_web::dev::Server> {
     let pet_store = web::Data::new(PetStore {
         pets: Mutex::new(HashMap::new()),
@@ -24,10 +30,12 @@ fn build_server(listener: TcpListener) -> std::io::Result<actix_web::dev::Server
     .run())
 }
 
+#[cfg(not(target_os = "wasi"))]
 fn resolve_bind_addr() -> String {
     std::env::var("CDD_WEB_BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_string())
 }
 
+#[cfg(not(target_os = "wasi"))]
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let bind_addr = resolve_bind_addr();
@@ -43,4 +51,9 @@ async fn main() -> std::io::Result<()> {
     }
 
     server.await
+}
+
+#[cfg(target_os = "wasi")]
+fn main() -> std::io::Result<()> {
+    Ok(())
 }
