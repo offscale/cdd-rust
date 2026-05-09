@@ -821,6 +821,10 @@ pub enum ParamSource {
     Header,
     /// Cookie.
     Cookie,
+    /// Form Data (OAS 2.0).
+    FormData,
+    /// Body (OAS 2.0).
+    Body,
 }
 
 fn normalize_runtime_expression(raw: &str) -> String {

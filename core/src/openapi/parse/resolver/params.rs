@@ -485,6 +485,8 @@ fn process_parameter_with_registry(
         "querystring" => ParamSource::QueryString,
         "header" => ParamSource::Header,
         "cookie" => ParamSource::Cookie,
+        "formData" => ParamSource::FormData,
+        "body" => ParamSource::Body,
         _ => ParamSource::Query,
     };
 
@@ -1081,6 +1083,7 @@ fn resolve_style(
                     Some(ParamStyle::Form)
                 }
                 ParamSource::Path | ParamSource::Header => Some(ParamStyle::Simple),
+                ParamSource::FormData | ParamSource::Body => None,
             },
             "ssv" => Some(ParamStyle::SpaceDelimited),
             "tsv" => Some(ParamStyle::SpaceDelimited), // Approximate mapping
@@ -1097,6 +1100,7 @@ fn resolve_style(
         ParamSource::Path => Some(ParamStyle::Simple),
         ParamSource::Header => Some(ParamStyle::Simple),
         ParamSource::Cookie => Some(ParamStyle::Form),
+        ParamSource::FormData | ParamSource::Body => None,
     }
 }
 
@@ -1131,6 +1135,7 @@ fn map_legacy_schema_type(
     items: Option<&ShimParameterItems>,
 ) -> String {
     match schema_type {
+        "file" => "Vec<u8>".to_string(),
         "integer" => match format {
             Some("int64") => "i64".to_string(),
             _ => "i32".to_string(),
@@ -1162,7 +1167,6 @@ fn map_legacy_schema_type(
             format!("Vec<{}>", inner)
         }
         "object" => "serde_json::Value".to_string(),
-        "file" => "Vec<u8>".to_string(),
         _ => "serde_json::Value".to_string(),
     }
 }
@@ -1190,6 +1194,7 @@ fn validate_style_for_location(
         ),
         ParamSource::Header => matches!(style, ParamStyle::Simple),
         ParamSource::Cookie => matches!(style, ParamStyle::Form | ParamStyle::Cookie),
+        ParamSource::FormData | ParamSource::Body => false,
     };
 
     if !is_allowed {
@@ -1269,7 +1274,7 @@ fn infer_param_kind_from_legacy_type(schema_type: &str) -> ParamValueKind {
     match schema_type {
         "array" => ParamValueKind::Array,
         "object" => ParamValueKind::Object,
-        "string" | "number" | "integer" | "boolean" => ParamValueKind::Primitive,
+        "string" | "number" | "integer" | "boolean" | "file" => ParamValueKind::Primitive,
         _ => ParamValueKind::Unknown,
     }
 }
@@ -1330,6 +1335,7 @@ fn allowed_style_names(source: &ParamSource) -> &'static [&'static str] {
         }
         ParamSource::Header => &["simple"],
         ParamSource::Cookie => &["form", "cookie"],
+        ParamSource::FormData | ParamSource::Body => &[],
     }
 }
 

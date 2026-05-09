@@ -16,7 +16,7 @@ use ra_ap_syntax::{AstNode, SourceFile, SyntaxKind, SyntaxNode};
 
 /// Extracts the names of all structs and enums defined in the provided Rust source code.
 pub fn extract_struct_names(code: &str) -> AppResult<Vec<String>> {
-    let parse = SourceFile::parse(code, Edition::Edition2021);
+    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(code, Edition::Edition2021));
     let file = parse.tree();
     let mut names = Vec::new();
 
@@ -55,7 +55,7 @@ pub fn extract_struct_fields(code: &str, struct_name: &str) -> AppResult<Vec<Par
 
 /// Parsing function to extract a full model definition (struct or enum).
 pub fn extract_model(code: &str, name: &str) -> AppResult<ParsedModel> {
-    let parse = SourceFile::parse(code, Edition::Edition2021);
+    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(code, Edition::Edition2021));
     let file = parse.tree();
 
     // 1. Try to find Struct

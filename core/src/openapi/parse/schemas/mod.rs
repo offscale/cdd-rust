@@ -111,9 +111,31 @@ pub fn parse_openapi_spec_with_registry(
                 *ver = serde_json::json!("3.1.0");
             }
         }
+    } else if json_val.get("swagger").is_some() {
+        json_val
+            .as_object_mut()
+            .unwrap()
+            .insert("openapi".to_string(), serde_json::json!("3.1.0"));
     }
 
     let inline_source = json_val.clone();
+
+    // Strip paths, webhooks and root parameters/responses to avoid Utoipa crash on OAS 2.0 properties
+    if let Some(obj) = json_val.as_object_mut() {
+        obj.insert("paths".to_string(), serde_json::json!({}));
+        obj.remove("webhooks");
+        obj.remove("parameters");
+        obj.remove("responses");
+        if let Some(components) = obj.get_mut("components").and_then(|c| c.as_object_mut()) {
+            let keys: Vec<String> = components.keys().cloned().collect();
+            for key in keys {
+                if key != "schemas" {
+                    components.remove(&key);
+                }
+            }
+        }
+    }
+
     let openapi: OpenApi = serde_json::from_value(json_val)
         .map_err(|e| AppError::General(format!("Failed to parse OpenAPI AST: {}", e)))?;
 

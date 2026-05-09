@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 /// Extracts OpenAPI routes from a given string of Rust source code.
 /// This parses `#[get("/path")]` attributes on functions.
 pub fn extract_routes_from_functions(code: &str) -> AppResult<Vec<ParsedRoute>> {
-    let parse = SourceFile::parse(code, Edition::Edition2021);
+    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(code, Edition::Edition2021));
     let mut routes = Vec::new();
 
     for node in parse.tree().syntax().descendants() {

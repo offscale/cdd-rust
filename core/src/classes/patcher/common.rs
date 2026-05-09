@@ -53,7 +53,7 @@ mod tests {
     use ra_ap_syntax::{ast, AstNode, SourceFile};
 
     fn parse_struct(code: &str) -> ast::Struct {
-        let parse = SourceFile::parse(code, Edition::Edition2021);
+        let parse = std::mem::ManuallyDrop::new(SourceFile::parse(code, Edition::Edition2021));
         let file = parse.tree();
         file.syntax()
             .descendants()
@@ -64,7 +64,7 @@ mod tests {
     #[test]
     fn test_find_struct_success_and_error() {
         let code = "struct User { id: i32 }";
-        let parse = SourceFile::parse(code, Edition::Edition2021);
+        let parse = std::mem::ManuallyDrop::new(SourceFile::parse(code, Edition::Edition2021));
         let file = parse.tree();
         let found = find_struct(&file, "User").expect("Failed to find struct");
         assert_eq!(found.name().expect("Failed to name").text(), "User");

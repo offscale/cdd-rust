@@ -31,7 +31,7 @@ pub fn make_record_field(
     // Construct a dummy container to parse the field within a valid context
     let wrapper_code = format!("struct Wrapper {{\n{}{}{}: {},\n}}", indent, vis, name, ty);
 
-    let parse = SourceFile::parse(&wrapper_code, Edition::Edition2021);
+    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(&wrapper_code, Edition::Edition2021));
 
     if !parse.errors().is_empty() {
         let errs: Vec<String> = parse.errors().into_iter().map(|e| e.to_string()).collect();

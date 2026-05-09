@@ -135,7 +135,7 @@ mod tests {
     use ra_ap_syntax::{ast, AstNode, SourceFile};
 
     fn parse_first_struct(code: &str) -> ast::Struct {
-        let parse = SourceFile::parse(code, Edition::Edition2021);
+        let parse = std::mem::ManuallyDrop::new(SourceFile::parse(code, Edition::Edition2021));
         let file = parse.tree();
         file.syntax()
             .descendants()
@@ -144,7 +144,7 @@ mod tests {
     }
 
     fn parse_first_enum(code: &str) -> ast::Enum {
-        let parse = SourceFile::parse(code, Edition::Edition2021);
+        let parse = std::mem::ManuallyDrop::new(SourceFile::parse(code, Edition::Edition2021));
         let file = parse.tree();
         file.syntax()
             .descendants()

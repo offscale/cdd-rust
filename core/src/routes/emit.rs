@@ -29,7 +29,7 @@ pub fn register_routes(
         new_source.push_str("pub fn config(cfg: &mut web::ServiceConfig) {\n}\n");
     }
 
-    let parse = SourceFile::parse(&new_source, Edition::Edition2021);
+    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(&new_source, Edition::Edition2021));
     let file = parse.tree();
 
     let config_fn = file

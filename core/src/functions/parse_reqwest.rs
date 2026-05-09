@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 
 /// Extracts OpenAPI routes from a given string of Rust source code for reqwest clients.
 pub fn extract_routes_from_reqwest_functions(code: &str) -> AppResult<Vec<ParsedRoute>> {
-    let parse = SourceFile::parse(code, Edition::Edition2021);
+    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(code, Edition::Edition2021));
     let mut routes = Vec::new();
 
     for node in parse.tree().syntax().descendants() {

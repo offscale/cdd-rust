@@ -13,7 +13,7 @@ pub fn add_import(source: &str, import_statement: &str) -> AppResult<String> {
         return Ok(source.into());
     }
 
-    let parse = SourceFile::parse(source, Edition::Edition2021);
+    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(source, Edition::Edition2021));
     let file = parse.tree();
 
     let mut last_use_node: Option<ra_ap_syntax::SyntaxNode> = None;

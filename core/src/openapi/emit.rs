@@ -1973,6 +1973,8 @@ fn param_source_str(source: &ParamSource) -> &'static str {
         ParamSource::QueryString => "querystring",
         ParamSource::Header => "header",
         ParamSource::Cookie => "cookie",
+        ParamSource::FormData => "formData",
+        ParamSource::Body => "body",
     }
 }
 
