@@ -5,9 +5,6 @@
 //!
 //! Logic for generating Axum handler signatures, imports, and function bodies.
 
-use crate::openapi::parse::models::ParsedLink;
-use crate::openapi::parse::models::ResponseHeader;
-
 /// Returns standard imports for Axum handlers.
 pub fn handler_imports() -> String {
     let mut imports = String::new();
@@ -20,17 +17,14 @@ pub fn handler_imports() -> String {
 }
 
 /// Generates the handler function signature and body scaffold.
-pub fn handler_signature(
-    func_name: &str,
-    args: &[String],
-    response_type: Option<&str>,
-    response_headers: &[ResponseHeader],
-    response_links: Option<&[ParsedLink]>,
-) -> String {
+pub fn handler_signature(route: &crate::openapi::parse::ParsedRoute, args: &[String]) -> String {
+    let func_name = &route.handler_name;
+    let response_headers = &route.response_headers;
+    let response_type = route.response_type.as_deref();
+
     let args_str = args.join(", ");
 
     let has_headers = !response_headers.is_empty();
-    let _has_links = response_links.map(|l| !l.is_empty()).unwrap_or(false);
 
     let return_type = if has_headers {
         "impl IntoResponse".to_string()
@@ -75,6 +69,48 @@ pub fn handler_signature(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::openapi::parse::models::RouteKind;
+    use std::collections::BTreeMap;
+
+    fn dummy_route() -> crate::openapi::parse::ParsedRoute {
+        crate::openapi::parse::ParsedRoute {
+            path: "/".into(),
+            summary: None,
+            description: None,
+            path_summary: None,
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+            operation_summary: None,
+            operation_description: None,
+            base_path: None,
+            path_servers: None,
+            servers_override: None,
+            method: "GET".into(),
+            handler_name: "my_handler".into(),
+            operation_id: None,
+            params: vec![],
+            path_params: vec![],
+            request_body: None,
+            security: vec![],
+            security_defined: false,
+            response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
+            response_headers: vec![],
+            response_links: None,
+            kind: RouteKind::Path,
+            tags: vec![],
+            callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
+        }
+    }
 
     #[test]
     fn test_handler_imports() {
@@ -83,13 +119,8 @@ mod tests {
 
     #[test]
     fn test_handler_signature() {
-        let sig = handler_signature(
-            "my_handler",
-            &["id: Path<i32>".to_string()],
-            None,
-            &[],
-            None,
-        );
+        let route = dummy_route();
+        let sig = handler_signature(&route, &["id: Path<i32>".to_string()]);
         assert!(sig.contains("pub async fn my_handler(id: Path<i32>) -> impl IntoResponse"));
     }
 }

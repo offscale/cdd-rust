@@ -45,7 +45,8 @@ pub(crate) fn generate_query_struct(route: &ParsedRoute) -> Option<GeneratedQuer
         "/// Query parameters for `{}`.\n",
         route.handler_name
     ));
-    code.push_str("#[derive(Debug, Clone, Deserialize)]\n");
+    code.push_str("#[derive(Debug, Clone, Serialize, Deserialize, Default)]\n");
+    code.push_str("#[serde(default)]\n");
     code.push_str(&format!("pub struct {} {{\n", struct_name));
 
     params.sort_by(|a, b| a.name.as_str().cmp(b.name.as_str()));
@@ -311,13 +312,7 @@ pub(crate) fn generate_function(
         code.push_str("#[deprecated]\n");
     }
 
-    let signature = strategy.handler_signature(
-        &route.handler_name,
-        &args,
-        route.response_type.as_deref(),
-        &route.response_headers,
-        route.response_links.as_deref(),
-    );
+    let signature = strategy.handler_signature(route, &args);
     code.push_str(&signature);
 
     Ok(code)

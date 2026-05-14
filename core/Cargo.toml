@@ -26,5 +26,7 @@ indexmap = "^2.12"
 # Strict RFC 3986 URI resolution
 url = "2.5"
 percent-encoding = "2.3"
+chrono = { version = "0.4.44", features = ["serde"] }
+uuid = { version = "1.23.1", features = ["serde"] }
 [lints]
 workspace = true

@@ -5,9 +5,6 @@
 //!
 //! Generates CLI command signatures and imports.
 
-use crate::openapi::parse::models::ParsedLink;
-use crate::openapi::parse::models::ResponseHeader;
-
 /// Returns standard imports for Clap CLI files.
 pub fn handler_imports() -> String {
     let mut imports = String::new();
@@ -39,13 +36,11 @@ pub fn handler_imports() -> String {
 }
 
 /// Generates the client function signature and body scaffold.
-pub fn handler_signature(
-    func_name: &str,
-    args: &[String],
-    response_type: Option<&str>,
-    response_headers: &[ResponseHeader],
-    _response_links: Option<&[ParsedLink]>,
-) -> String {
+pub fn handler_signature(route: &crate::openapi::parse::ParsedRoute, args: &[String]) -> String {
+    let func_name = &route.handler_name;
+    let response_headers = &route.response_headers;
+    let response_type = route.response_type.as_deref();
+
     // We generate a Clap Args struct, and a function that takes it.
 
     // Create the struct name from the function name (e.g. create_user -> CreateUserArgs)
@@ -62,28 +57,15 @@ pub fn handler_signature(
         + "Args";
 
     let mut struct_def = format!(
-        "#[derive(Args, Debug, Clone)]
-pub struct {} {{
-",
+        "#[derive(Args, Debug, Clone)]\npub struct {} {{\n",
         struct_name
     );
     for arg in args {
         // arg might be `id: String`. We add `#[clap(long)]` to it.
-        struct_def.push_str(
-            "    #[clap(long)]
-",
-        );
-        struct_def.push_str(&format!(
-            "    pub {},
-",
-            arg
-        ));
+        struct_def.push_str("    #[clap(long)]\n");
+        struct_def.push_str(&format!("    pub {},\n", arg));
     }
-    struct_def.push_str(
-        "}
-
-",
-    );
+    struct_def.push_str("}\n\n");
 
     let return_type = if !response_headers.is_empty() {
         "Result<reqwest::Response, reqwest::Error>".to_string()
@@ -94,20 +76,11 @@ pub struct {} {{
     };
 
     let mut body = String::new();
-    body.push_str(
-        "    // TODO: implement request logic using reqwest
-",
-    );
-    body.push_str(
-        "    todo!()
-",
-    );
+    body.push_str("    // TODO: implement request logic using reqwest\n");
+    body.push_str("    todo!()\n");
 
     let func_def = format!(
-        "pub async fn {}(args: {}, client: &Client, base_url: &str) -> {} {{
-{}
-}}
-",
+        "pub async fn {}(args: {}, client: &Client, base_url: &str) -> {} {{\n{}\n}}\n",
         func_name, struct_name, return_type, body
     );
 
@@ -117,6 +90,51 @@ pub struct {} {{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::openapi::parse::models::RouteKind;
+    use std::collections::BTreeMap;
+
+    fn dummy_route(
+        handler_name: &str,
+        response_type: Option<&str>,
+    ) -> crate::openapi::parse::ParsedRoute {
+        crate::openapi::parse::ParsedRoute {
+            path: "/".into(),
+            summary: None,
+            description: None,
+            path_summary: None,
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+            operation_summary: None,
+            operation_description: None,
+            base_path: None,
+            path_servers: None,
+            servers_override: None,
+            method: "GET".into(),
+            handler_name: handler_name.into(),
+            operation_id: None,
+            params: vec![],
+            path_params: vec![],
+            request_body: None,
+            security: vec![],
+            security_defined: false,
+            response_type: response_type.map(|s| s.to_string()),
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
+            response_headers: vec![],
+            response_links: None,
+            kind: RouteKind::Path,
+            tags: vec![],
+            callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
+        }
+    }
 
     #[test]
     fn test_handler_imports() {
@@ -127,13 +145,8 @@ mod tests {
 
     #[test]
     fn test_handler_signature() {
-        let sig = handler_signature(
-            "create_user",
-            &["id: String".to_string()],
-            Some("User"),
-            &[],
-            None,
-        );
+        let route = dummy_route("create_user", Some("User"));
+        let sig = handler_signature(&route, &["id: String".to_string()]);
         assert!(sig.contains("pub struct CreateUserArgs {"));
         assert!(sig.contains("#[clap(long)]"));
         assert!(sig.contains("pub id: String,"));

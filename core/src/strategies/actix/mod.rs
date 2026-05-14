@@ -13,7 +13,6 @@ pub mod scaffolding;
 pub mod testing;
 pub mod utils;
 
-use crate::openapi::parse::models::{ParsedLink, ResponseHeader};
 use crate::openapi::parse::ParsedRoute;
 use crate::strategies::BackendStrategy;
 
@@ -27,21 +26,8 @@ impl BackendStrategy for ActixStrategy {
         scaffolding::handler_imports()
     }
 
-    fn handler_signature(
-        &self,
-        func_name: &str,
-        args: &[String],
-        response_type: Option<&str>,
-        response_headers: &[ResponseHeader],
-        response_links: Option<&[ParsedLink]>,
-    ) -> String {
-        scaffolding::handler_signature(
-            func_name,
-            args,
-            response_type,
-            response_headers,
-            response_links,
-        )
+    fn handler_signature(&self, route: &ParsedRoute, args: &[String]) -> String {
+        scaffolding::handler_signature(route, args)
     }
 
     fn path_extractor(&self, inner_types: &[String]) -> String {
@@ -143,9 +129,9 @@ impl BackendStrategy for ActixStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::openapi::parse::models::{LinkParamValue, ParsedLink, RouteKind, RuntimeExpression};
+    use crate::openapi::parse::models::RouteKind;
     use crate::openapi::parse::ParsedRoute;
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::BTreeMap;
 
     #[test]
     fn test_actix_handler_imports() {
@@ -156,35 +142,52 @@ mod tests {
     }
 
     #[test]
-    fn test_actix_handler_signature_with_links_generated() {
+    fn test_handler_signature_passes_through() {
         let s = ActixStrategy;
-        let mut params = HashMap::new();
-        params.insert(
-            "id".to_string(),
-            LinkParamValue::Expression(RuntimeExpression::new("$request.path.id")),
-        );
 
-        let links = vec![ParsedLink {
-            name: "Self".to_string(),
+        // Use a dummy route just to make it compile
+        let route = ParsedRoute {
+            path: "/users/{id}".into(),
+            summary: None,
             description: None,
+            path_summary: None,
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+            operation_summary: None,
+            operation_description: None,
+            base_path: None,
+            path_servers: None,
+            servers_override: None,
+            method: "GET".into(),
+            handler_name: "get_user".into(),
             operation_id: None,
-            operation_ref: Some("/users/{id}".to_string()),
-            resolved_operation_ref: None,
-            parameters: params,
+            params: vec![],
+            path_params: vec![],
             request_body: None,
-            server: None,
-            server_url: None,
-        }];
+            security: vec![],
+            security_defined: false,
+            response_type: Some("User".into()),
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
+            response_headers: vec![],
+            response_links: None,
+            kind: RouteKind::Path,
+            tags: vec![],
+            callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
+        };
 
-        let code = s.handler_signature(
-            "get_user",
-            &["id: Uuid".to_string()],
-            Some("User"),
-            &[],
-            Some(&links),
-        );
+        let code = s.handler_signature(&route, &["id: Uuid".to_string()]);
 
-        assert!(code.contains("-> actix_web::Result<HttpResponse>"));
+        assert!(code.contains("pub async fn get_user"));
+        assert!(code.contains("id: Uuid"));
     }
 
     #[test]

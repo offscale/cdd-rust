@@ -10,7 +10,6 @@ pub mod registration;
 pub mod scaffolding;
 pub mod testing;
 
-use crate::openapi::parse::models::{ParsedLink, ResponseHeader};
 use crate::openapi::parse::ParsedRoute;
 use crate::strategies::BackendStrategy;
 
@@ -26,19 +25,10 @@ impl BackendStrategy for AxumStrategy {
 
     fn handler_signature(
         &self,
-        func_name: &str,
+        route: &crate::openapi::parse::ParsedRoute,
         args: &[String],
-        response_type: Option<&str>,
-        response_headers: &[ResponseHeader],
-        response_links: Option<&[ParsedLink]>,
     ) -> String {
-        scaffolding::handler_signature(
-            func_name,
-            args,
-            response_type,
-            response_headers,
-            response_links,
-        )
+        scaffolding::handler_signature(route, args)
     }
 
     fn path_extractor(&self, inner_types: &[String]) -> String {
@@ -153,7 +143,46 @@ mod tests {
     #[test]
     fn test_axum_handler_signature() {
         let s = AxumStrategy;
-        let code = s.handler_signature("get_user", &[], None, &[], None);
+
+        let route = ParsedRoute {
+            path: "/path".into(),
+            summary: None,
+            description: None,
+            path_summary: None,
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+            operation_summary: None,
+            operation_description: None,
+            base_path: None,
+            path_servers: None,
+            servers_override: None,
+            method: "POST".into(),
+            handler_name: "get_user".into(),
+            operation_id: None,
+            params: vec![],
+            path_params: vec![],
+            request_body: None,
+            security: vec![],
+            security_defined: false,
+            response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
+            response_headers: vec![],
+            response_links: None,
+            kind: RouteKind::Path,
+            callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
+            tags: vec![],
+            extensions: BTreeMap::new(),
+        };
+
+        let code = s.handler_signature(&route, &[]);
         assert!(code.contains("StatusCode::OK"));
     }
 

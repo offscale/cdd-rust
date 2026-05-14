@@ -59,7 +59,7 @@ pub fn map_schema_to_rust_type(schema: &RefOr<Schema>, is_required: bool) -> App
                                 "Uuid".to_string()
                             }
                             Some(SchemaFormat::KnownFormat(KnownFormat::DateTime)) => {
-                                "DateTime".to_string()
+                                "DateTime<Utc>".to_string()
                             }
                             Some(SchemaFormat::KnownFormat(KnownFormat::Date)) => {
                                 "NaiveDate".to_string()

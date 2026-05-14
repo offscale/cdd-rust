@@ -5,8 +5,6 @@
 //!
 //! Logic for generating handler signatures, imports, and function bodies.
 
-use crate::openapi::parse::models::ParsedLink;
-use crate::openapi::parse::models::ResponseHeader;
 use crate::strategies::actix::links::generate_link_construction;
 
 /// Returns standard imports for Actix handlers.
@@ -22,13 +20,12 @@ pub fn handler_imports() -> String {
 }
 
 /// Generates the handler function signature and body scaffold.
-pub fn handler_signature(
-    func_name: &str,
-    args: &[String],
-    response_type: Option<&str>,
-    response_headers: &[ResponseHeader],
-    response_links: Option<&[ParsedLink]>,
-) -> String {
+pub fn handler_signature(route: &crate::openapi::parse::ParsedRoute, args: &[String]) -> String {
+    let func_name = &route.handler_name;
+    let response_headers = &route.response_headers;
+    let response_type = route.response_type.as_deref();
+    let response_links = route.response_links.as_deref();
+
     let args_str = args.join(", ");
 
     let has_headers = !response_headers.is_empty();
@@ -100,9 +97,55 @@ pub fn handler_signature(
 mod tests {
     use super::*;
     use crate::openapi::parse::models::{
-        LinkParamValue, LinkRequestBody, ParsedLink, ResponseHeader, RuntimeExpression,
+        LinkParamValue, LinkRequestBody, ParsedLink, ResponseHeader, RouteKind, RuntimeExpression,
     };
+    use crate::openapi::parse::ParsedRoute;
     use std::collections::{BTreeMap, HashMap};
+
+    fn dummy_route(
+        handler_name: &str,
+        response_type: Option<&str>,
+        headers: Vec<ResponseHeader>,
+        links: Option<Vec<ParsedLink>>,
+    ) -> ParsedRoute {
+        ParsedRoute {
+            path: "/".into(),
+            summary: None,
+            description: None,
+            path_summary: None,
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+            operation_summary: None,
+            operation_description: None,
+            base_path: None,
+            path_servers: None,
+            servers_override: None,
+            method: "GET".into(),
+            handler_name: handler_name.into(),
+            operation_id: None,
+            params: vec![],
+            path_params: vec![],
+            request_body: None,
+            security: vec![],
+            security_defined: false,
+            response_type: response_type.map(|s| s.to_string()),
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
+            response_headers: headers,
+            response_links: links,
+            kind: RouteKind::Path,
+            tags: vec![],
+            callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
+        }
+    }
 
     #[test]
     fn test_handler_imports_contains_expected_use() {
@@ -115,7 +158,8 @@ mod tests {
     #[test]
     fn test_handler_signature_with_response_type() {
         let args = vec!["id: web::Path<Uuid>".to_string()];
-        let sig = handler_signature("get_user", &args, Some("User"), &[], None);
+        let route = dummy_route("get_user", Some("User"), vec![], None);
+        let sig = handler_signature(&route, &args);
         assert!(sig.contains("pub async fn get_user"));
         assert!(sig.contains("-> actix_web::Result<web::Json<User>>"));
         assert!(sig.contains("todo!()"));
@@ -153,7 +197,8 @@ mod tests {
             server_url: Some("https://api.example.com".to_string()),
         }];
 
-        let sig = handler_signature("get_user", &[], Some("User"), &headers, Some(&links));
+        let route = dummy_route("get_user", Some("User"), headers, Some(links));
+        let sig = handler_signature(&route, &[]);
         assert!(sig.contains("-> actix_web::Result<HttpResponse>"));
         assert!(sig.contains("Required Response Headers"));
         assert!(sig.contains("Generated Links"));
@@ -162,7 +207,8 @@ mod tests {
 
     #[test]
     fn test_handler_signature_without_response_type_or_headers() {
-        let sig = handler_signature("ping", &[], None, &[], None);
+        let route = dummy_route("ping", None, vec![], None);
+        let sig = handler_signature(&route, &[]);
         assert!(sig.contains("-> impl Responder"));
     }
 }

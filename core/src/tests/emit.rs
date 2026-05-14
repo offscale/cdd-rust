@@ -38,7 +38,11 @@ pub fn generate_contract_tests_file(
         if matches!(route.kind, RouteKind::Webhook) {
             continue;
         }
-        code.push_str(&generate_test_fn(route, app_factory, strategy));
+        if let Some(custom) = strategy.generate_custom_test(route, app_factory) {
+            code.push_str(&custom);
+        } else {
+            code.push_str(&generate_test_fn(route, app_factory, strategy));
+        }
         code.push('\n');
     }
 

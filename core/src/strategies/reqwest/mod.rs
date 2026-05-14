@@ -11,7 +11,6 @@ pub mod registration;
 pub mod scaffolding;
 pub mod testing;
 
-use crate::openapi::parse::models::{ParsedLink, ResponseHeader};
 use crate::openapi::parse::ParsedRoute;
 use crate::strategies::BackendStrategy;
 
@@ -25,19 +24,10 @@ impl BackendStrategy for ReqwestStrategy {
 
     fn handler_signature(
         &self,
-        func_name: &str,
+        route: &crate::openapi::parse::ParsedRoute,
         args: &[String],
-        response_type: Option<&str>,
-        response_headers: &[ResponseHeader],
-        response_links: Option<&[ParsedLink]>,
     ) -> String {
-        scaffolding::handler_signature(
-            func_name,
-            args,
-            response_type,
-            response_headers,
-            response_links,
-        )
+        scaffolding::handler_signature(route, args)
     }
 
     fn extra_handler_docs(&self, route: &ParsedRoute) -> String {
@@ -136,5 +126,9 @@ impl BackendStrategy for ReqwestStrategy {
 
     fn test_validation_helper(&self) -> String {
         testing::test_validation_helper()
+    }
+
+    fn generate_custom_test(&self, route: &ParsedRoute, app_factory: &str) -> Option<String> {
+        Some(testing::generate_custom_test(route, app_factory))
     }
 }

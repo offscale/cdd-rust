@@ -67,6 +67,10 @@ pub struct GenerateArgs {
     /// Do not generate an installable package scaffolding (e.g. Cargo.toml).
     #[clap(long, env = "CDD_NO_INSTALLABLE_PACKAGE")]
     pub no_installable_package: bool,
+
+    /// Generate integration tests.
+    #[clap(long, env = "CDD_TESTS")]
+    pub tests: bool,
 }
 
 impl GenerateArgs {
@@ -164,6 +168,9 @@ reqwest = {{ version = "0.11", features = ["json"] }}
 actix-web = "4.0"
 diesel = {{ version = "2.0", features = ["postgres"] }}
 clap = {{ version = "4.0", features = ["derive"] }}
+chrono = {{ version = "0.4", features = ["serde"] }}
+utoipa = "4.2"
+uuid = {{ version = "1.8", features = ["serde"] }}
 "#,
                 out_dir
                     .file_name()
@@ -205,7 +212,11 @@ jobs:
             .map_err(|e| AppError::General(format!("Failed to read OpenAPI {:?}: {}", input, e)))?;
 
         // 1. Generate Models (DTOs)
-        let models_dir = out_dir.join("models");
+        let src_dir = out_dir.join("src");
+        fs::create_dir_all(&src_dir).unwrap_or_default();
+        let mut lib_rs_content = String::new();
+
+        let models_dir = src_dir.join("models");
         fs::create_dir_all(&models_dir).unwrap_or_default();
 
         let models = cdd_core::openapi::parse::parse_openapi_spec(&yaml_content)?;
@@ -215,27 +226,62 @@ jobs:
             fs::write(&file_path, rust_code).unwrap_or_default();
             let mod_rs = "pub mod generated;\npub use generated::*;\n";
             fs::write(models_dir.join("mod.rs"), mod_rs).unwrap_or_default();
+            lib_rs_content.push_str("pub mod models;\n");
         }
 
         // 2. Scaffold Handlers
-        let handlers_dir = out_dir.join("handlers");
+        let handlers_dir = src_dir.join("handlers");
+        fs::create_dir_all(&handlers_dir).unwrap_or_default();
         let scaffold_args = ScaffoldArgs {
             openapi_path: input.clone(),
-            output_dir: handlers_dir,
+            output_dir: handlers_dir.clone(),
             route_config_path: None,
             force: false,
         };
         crate::scaffold::execute(&scaffold_args, strategy)?;
 
+        // Gather handler modules for mod.rs
+        if handlers_dir.exists() {
+            let mut mods = Vec::new();
+            if let Ok(entries) = fs::read_dir(&handlers_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file()
+                        && path.extension().unwrap_or_default() == "rs"
+                        && path.file_name().unwrap() != "mod.rs"
+                    {
+                        let mod_name = path.file_stem().unwrap().to_string_lossy();
+                        mods.push(format!("pub mod {};\n", mod_name));
+                    }
+                }
+            }
+            if !mods.is_empty() {
+                mods.sort();
+                fs::write(handlers_dir.join("mod.rs"), mods.join("")).unwrap_or_default();
+                lib_rs_content.push_str("pub mod handlers;\n");
+            }
+        }
+
+        if !lib_rs_content.is_empty() {
+            fs::write(src_dir.join("lib.rs"), lib_rs_content).unwrap_or_default();
+        }
+
         // 3. Generate Tests
-        let tests_dir = out_dir.join("tests");
-        fs::create_dir_all(&tests_dir).unwrap_or_default();
-        let test_gen_args = TestGenArgs {
-            openapi_path: input.clone(),
-            output_path: tests_dir.join("api_contracts.rs"),
-            app_factory: "crate::create_app".to_string(),
-        };
-        crate::test_gen::execute(&test_gen_args, strategy)?;
+        if args.tests {
+            let tests_dir = out_dir.join("tests");
+            fs::create_dir_all(&tests_dir).unwrap_or_default();
+            let crate_name = out_dir
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .replace('-', "_");
+            let test_gen_args = TestGenArgs {
+                openapi_path: input.clone(),
+                output_path: tests_dir.join("api_contracts.rs"),
+                app_factory: crate_name,
+            };
+            crate::test_gen::execute(&test_gen_args, strategy)?;
+        }
     }
 
     Ok(())
@@ -254,6 +300,7 @@ mod tests {
             output_dir: None,
             no_github_actions: false,
             no_installable_package: false,
+            tests: false,
         };
         let dir = args.get_output_dir();
         assert_eq!(
@@ -271,6 +318,7 @@ mod tests {
             output_dir: Some(path.clone()),
             no_github_actions: false,
             no_installable_package: false,
+            tests: false,
         };
         assert_eq!(args.get_output_dir(), path);
     }
@@ -284,6 +332,7 @@ mod tests {
             output_dir: None,
             no_github_actions: false,
             no_installable_package: false,
+            tests: false,
         };
         assert_eq!(args.get_input_files(), vec![path]);
     }
@@ -304,6 +353,7 @@ mod tests {
             output_dir: None,
             no_github_actions: false,
             no_installable_package: false,
+            tests: false,
         };
         let mut files = args.get_input_files();
         files.sort();
@@ -320,6 +370,7 @@ mod tests {
             output_dir: None,
             no_github_actions: false,
             no_installable_package: false,
+            tests: false,
         };
         assert!(args.get_input_files().is_empty());
     }
@@ -359,6 +410,7 @@ components:
                 output_dir: Some(dir.path().join("out1")),
                 no_github_actions: false,
                 no_installable_package: false,
+                tests: false,
             }),
         };
         assert!(execute(&args).is_ok());
@@ -371,6 +423,7 @@ components:
                 output_dir: Some(dir.path().join("out2")),
                 no_github_actions: false,
                 no_installable_package: false,
+                tests: false,
             }),
         };
         assert!(execute(&args).is_ok());
@@ -384,6 +437,7 @@ components:
                     output_dir: Some(dir.path().join("out3")),
                     no_github_actions: false,
                     no_installable_package: false,
+                    tests: false,
                 },
                 framework: ServerFramework::ActixWeb,
             },
@@ -399,6 +453,7 @@ components:
                     output_dir: Some(dir.path().join("out4")),
                     no_github_actions: false,
                     no_installable_package: false,
+                    tests: false,
                 },
                 framework: ServerFramework::Axum,
             },
@@ -414,6 +469,7 @@ components:
             output_dir: None,
             no_github_actions: false,
             no_installable_package: false,
+            tests: false,
         };
         let result = run_generation(&args, &cdd_core::strategies::ActixStrategy);
         assert!(result.is_err());
@@ -427,6 +483,7 @@ components:
             output_dir: None,
             no_github_actions: false,
             no_installable_package: false,
+            tests: false,
         };
         let result = run_generation(&args, &cdd_core::strategies::ActixStrategy);
         assert!(result.is_err());

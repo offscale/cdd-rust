@@ -112,10 +112,9 @@ pub fn parse_openapi_spec_with_registry(
             }
         }
     } else if json_val.get("swagger").is_some() {
-        json_val
-            .as_object_mut()
-            .unwrap()
-            .insert("openapi".to_string(), serde_json::json!("3.1.0"));
+        if let Some(obj) = json_val.as_object_mut() {
+            obj.insert("openapi".to_string(), serde_json::json!("3.1.0"));
+        }
     }
 
     let inline_source = json_val.clone();

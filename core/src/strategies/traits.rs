@@ -6,7 +6,7 @@
 //! Defines the interface required to generate code for a specific web framework
 //! (e.g. Actix, Axum, Poem, etc.).
 
-use crate::openapi::parse::models::{ContentMediaType, ParsedLink, ResponseHeader};
+use crate::openapi::parse::models::ContentMediaType;
 use crate::openapi::parse::ParsedRoute;
 use crate::openapi::parse::RequestBodyDefinition;
 
@@ -30,14 +30,7 @@ pub trait BackendStrategy {
     /// * `response_type` - The specific return type if identified (e.g. `UserResponse`).
     /// * `response_headers` - List of headers the response is expected to include.
     /// * `response_links` - List of links associated with the response (HATEOAS).
-    fn handler_signature(
-        &self,
-        func_name: &str,
-        args: &[String],
-        response_type: Option<&str>,
-        response_headers: &[ResponseHeader],
-        response_links: Option<&[ParsedLink]>,
-    ) -> String;
+    fn handler_signature(&self, route: &ParsedRoute, args: &[String]) -> String;
 
     /// Optional extra doc comments to insert above the handler.
     fn extra_handler_docs(&self, _route: &ParsedRoute) -> String {
@@ -174,5 +167,12 @@ pub trait BackendStrategy {
     fn handler_unit_test(&self, route: &ParsedRoute) -> String {
         let _ = route;
         String::new()
+    }
+
+    /// Allows the strategy to fully override test function generation.
+    fn generate_custom_test(&self, route: &ParsedRoute, app_factory: &str) -> Option<String> {
+        let _ = route;
+        let _ = app_factory;
+        None
     }
 }

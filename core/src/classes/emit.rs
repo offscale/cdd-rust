@@ -147,7 +147,8 @@ fn generate_dto_body(dto: &ParsedStruct) -> String {
     }
 
     // Derives
-    code.push_str("#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]\n");
+    code.push_str("#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]\n");
+    code.push_str("#[serde(default)]\n");
 
     // Struct Attributes (Rename)
     if let Some(rename) = &dto.rename {
@@ -196,7 +197,43 @@ fn generate_dto_body(dto: &ParsedStruct) -> String {
         }
 
         // Field Definition
-        code.push_str(&format!("    pub {}: {},\n", field.name, field.ty));
+        let mut escaped_name = field.name.clone();
+        if escaped_name == "type"
+            || escaped_name == "match"
+            || escaped_name == "fn"
+            || escaped_name == "struct"
+            || escaped_name == "enum"
+            || escaped_name == "trait"
+            || escaped_name == "use"
+            || escaped_name == "mod"
+            || escaped_name == "pub"
+            || escaped_name == "mut"
+            || escaped_name == "return"
+            || escaped_name == "break"
+            || escaped_name == "continue"
+            || escaped_name == "if"
+            || escaped_name == "else"
+            || escaped_name == "loop"
+            || escaped_name == "while"
+            || escaped_name == "for"
+            || escaped_name == "in"
+            || escaped_name == "let"
+            || escaped_name == "const"
+            || escaped_name == "static"
+            || escaped_name == "ref"
+            || escaped_name == "impl"
+            || escaped_name == "where"
+            || escaped_name == "as"
+            || escaped_name == "unsafe"
+            || escaped_name == "await"
+            || escaped_name == "async"
+            || escaped_name == "dyn"
+            || escaped_name == "super"
+            || escaped_name == "crate"
+        {
+            escaped_name = format!("r#{}", escaped_name);
+        }
+        code.push_str(&format!("    pub {}: {},\n", escaped_name, field.ty));
     }
 
     code.push_str("}\n");
@@ -351,7 +388,8 @@ mod tests {
         let code = generate_dto(&dto);
         assert!(code.contains("struct Simple"));
         assert!(code.contains("/// A simple struct"));
-        assert!(code.contains("#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]"));
+        assert!(code.contains("#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]"));
+        assert!(code.contains("#[serde(default)]"));
     }
 
     #[test]

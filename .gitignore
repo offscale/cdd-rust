@@ -17,3 +17,29 @@ __pycache__/
 *.so
 target/
 .idea/
+
+# Python scripts and utilities
+*.py
+*.js
+
+
+
+# Executables
+cdd-rust-*
+*.wasm
+
+# Output directories
+out_native/
+out_wasm/
+out/
+tests/
+scripts/
+
+# Temporary / testing files
+test_*.rs
+patch_*.py
+patch_*.js
+petstore*
+v2_spec.yaml
+spec.json
+.pre-commit-config.yaml
