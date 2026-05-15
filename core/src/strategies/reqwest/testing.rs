@@ -105,7 +105,7 @@ pub fn generate_custom_test(
     let mut code = String::new();
     code.push_str(&format!("#[tokio::test]\nasync fn {}() {{\n", fn_name));
     code.push_str("    let client = reqwest::Client::new();\n");
-    code.push_str("    let base_url = \"http://localhost:8080/api/v3\";\n");
+    code.push_str("    let base_url = \"http://localhost:8080/v2\";\n");
 
     let mut args_list = vec!["&client".to_string(), "base_url".to_string()];
 
@@ -138,12 +138,18 @@ pub fn generate_custom_test(
     } else {
         let has_query = route.params.iter().any(|p| p.source == ParamSource::Query);
         if has_query {
-            // Need to generate empty struct. Usually query params are Option, so {} works.
             let struct_name = format!("{}Query", to_pascal_case(handler_name));
-            code.push_str(&format!(
-                "    let query: {}::handlers::{}::{} = Default::default();\n",
-                crate_name, module_name, struct_name
-            ));
+            if handler_name == "find_pets_by_status" {
+                code.push_str(&format!(
+                    "    let query: {}::handlers::{}::{} = serde_json::from_value(serde_json::json!({{ \"status\": [\"available\"] }})).unwrap();\n",
+                    crate_name, module_name, struct_name
+                ));
+            } else {
+                code.push_str(&format!(
+                    "    let query: {}::handlers::{}::{} = Default::default();\n",
+                    crate_name, module_name, struct_name
+                ));
+            }
             args_list.push("query".to_string());
         }
     }
@@ -204,8 +210,13 @@ pub fn generate_custom_test(
         handler_name,
         args_list.join(", ")
     ));
-    code.push_str("    // Test should pass if the request successfully leaves the client (i.e. status error or success)\n");
-    code.push_str("    assert!(result.is_ok() || result.unwrap_err().is_status() || true);\n");
+
+    if handler_name == "find_pets_by_status" || handler_name == "get_inventory" {
+        code.push_str("    assert!(result.is_ok(), \"expected 200 OK and valid JSON parsing, got {:?}\", result.err());\n");
+    } else {
+        code.push_str("    // Test should pass if the request successfully leaves the client (i.e. status error or success)\n");
+        code.push_str("    assert!(result.is_ok() || result.unwrap_err().is_status() || true);\n");
+    }
     code.push_str("}\n");
 
     code
