@@ -55,10 +55,16 @@ pub fn parse_openapi_document_with_registry(
     registry: Option<&DocumentRegistry>,
     retrieval_uri: Option<&str>,
 ) -> AppResult<ParsedOpenApi> {
-    let raw_value: serde_json::Value = serde_yaml::from_str(yaml_content)
+    let mut raw_value: serde_json::Value = serde_yaml::from_str(yaml_content)
         .map_err(|e| AppError::General(format!("Failed to parse OpenAPI YAML: {}", e)))?;
-    let shim: ShimOpenApi = serde_yaml::from_str(yaml_content)
-        .map_err(|e| AppError::General(format!("Failed to parse OpenAPI YAML: {}", e)))?;
+
+    // Normalize BEFORE parsing the shim
+    crate::openapi::parse::routes::coerce_version_strings(&mut raw_value);
+    crate::openapi::parse::normalization::normalize_nullable_schemas(&mut raw_value);
+    crate::openapi::parse::normalization::normalize_boolean_schemas(&mut raw_value);
+
+    let shim: ShimOpenApi = serde_json::from_value(raw_value.clone())
+        .map_err(|e| AppError::General(format!("Failed to parse OpenAPI Shim: {}", e)))?;
     validate_openapi_root(&shim)?;
 
     let routes = if registry.is_some() || retrieval_uri.is_some() {

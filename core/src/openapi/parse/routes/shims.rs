@@ -558,7 +558,7 @@ impl ShimResponses {
     pub fn from_raw(raw: Value) -> Result<Self, serde_json::Error> {
         let mut sanitized = raw.clone();
         normalize_responses_for_utoipa(&mut sanitized);
-        let inner = serde_json::from_value::<Responses>(sanitized)?;
+        let inner = serde_json::from_value::<Responses>(sanitized.clone())?;
         Ok(Self { raw, inner })
     }
 }
@@ -580,7 +580,7 @@ impl<'de> Deserialize<'de> for ShimResponses {
         let raw = Value::deserialize(deserializer)?;
         let mut sanitized = raw.clone();
         normalize_responses_for_utoipa(&mut sanitized);
-        let inner = serde_json::from_value::<Responses>(sanitized)
+        let inner = serde_json::from_value::<Responses>(sanitized.clone())
             .map_err(|e| DeError::custom(format!("Failed to parse Responses: {}", e)))?;
         Ok(Self { raw, inner })
     }

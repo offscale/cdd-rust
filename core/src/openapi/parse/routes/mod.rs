@@ -807,7 +807,7 @@ impl ComponentRefResolver {
     }
 }
 
-fn coerce_version_strings(value: &mut serde_json::Value) {
+pub(crate) fn coerce_version_strings(value: &mut serde_json::Value) {
     let serde_json::Value::Object(map) = value else {
         return;
     };

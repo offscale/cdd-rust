@@ -22,7 +22,7 @@ pub struct ToOpenApiArgs {
 }
 
 /// Executes the OpenAPI generation from source code.
-pub fn execute(args: &ToOpenApiArgs, target: &TargetMode) -> AppResult<()> {
+pub fn execute(args: &ToOpenApiArgs, _target: &TargetMode) -> AppResult<()> {
     println!("Extracting OpenAPI specification from {:?}", args.input);
 
     if !args.input.exists() {
@@ -51,17 +51,11 @@ pub fn execute(args: &ToOpenApiArgs, target: &TargetMode) -> AppResult<()> {
                 }
 
                 // Parse routes
-                match target {
-                    TargetMode::ServerActix | TargetMode::ServerAxum => {
-                        if let Ok(routes) = parse_actix_routes(&content) {
-                            parsed_routes.extend(routes);
-                        }
-                    }
-                    TargetMode::Client | TargetMode::Cli => {
-                        if let Ok(routes) = parse_reqwest_routes(&content) {
-                            parsed_routes.extend(routes);
-                        }
-                    }
+                if let Ok(routes) = parse_actix_routes(&content) {
+                    parsed_routes.extend(routes);
+                }
+                if let Ok(routes) = parse_reqwest_routes(&content) {
+                    parsed_routes.extend(routes);
                 }
             }
         }

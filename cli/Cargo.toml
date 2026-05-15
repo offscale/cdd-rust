@@ -4,7 +4,7 @@ version = "0.0.1"
 edition = "2021"
 
 [[bin]]
-name = "cdd-rust"
+name = "cdd-cli"
 path = "src/main.rs"
 
 [dependencies]

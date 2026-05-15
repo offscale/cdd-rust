@@ -137,6 +137,10 @@ fn normalize_schema_node(value: &mut Value) {
             *value = bool_schema_replacement(*flag);
         }
         Value::Object(map) => {
+            if map.contains_key("properties") && !map.contains_key("type") {
+                map.insert("type".to_string(), Value::String("object".to_string()));
+            }
+
             if let Some(props) = map.get_mut("properties").and_then(|v| v.as_object_mut()) {
                 for v in props.values_mut() {
                     normalize_schema_node(v);

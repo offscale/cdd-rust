@@ -70,7 +70,11 @@ pub fn parse_openapi_spec_with_registry(
     }
 
     // 2. Pre-parse to get standard fields like $self (Shim)
-    let shim: ShimOpenApi = serde_yaml::from_str(yaml_content)
+    crate::openapi::parse::routes::coerce_version_strings(&mut json_val);
+    crate::openapi::parse::normalization::normalize_nullable_schemas(&mut json_val);
+    crate::openapi::parse::normalization::normalize_boolean_schemas(&mut json_val);
+
+    let shim: ShimOpenApi = serde_json::from_value(json_val.clone())
         .map_err(|e| AppError::General(format!("Failed to parse OpenAPI Shim: {}", e)))?;
     if let Some(components) = shim.components.as_ref() {
         validate_component_keys(components)?;

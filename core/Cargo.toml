@@ -30,3 +30,5 @@ chrono = { version = "0.4.44", features = ["serde"] }
 uuid = { version = "1.23.1", features = ["serde"] }
 [lints]
 workspace = true
+
+
