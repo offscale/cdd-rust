@@ -43,3 +43,20 @@ petstore*
 v2_spec.yaml
 spec.json
 .pre-commit-config.yaml
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Backup and temporary files
+*.bak
+*.swp
+*~
+*.tmp
+*.log

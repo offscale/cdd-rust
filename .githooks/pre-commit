@@ -3,11 +3,27 @@ set -e
 
 echo "Running pre-commit checks..."
 
+echo "Auto-formatting code..."
+cargo fmt --all
+
 echo "Checking formatting..."
 cargo fmt --all -- --check
 
+# Stage formatting changes if any
+if ! git diff --quiet -- '*.rs'; then
+    echo "Formatting changed some files, staging them..."
+    # get all changed files matching .rs and stage them
+    git diff --name-only | grep '\.rs$' | xargs -r git add
+fi
+
+echo "Building workspace..."
+cargo build --workspace --all-targets
+
+echo "Testing workspace..."
+cargo test --workspace
+
 echo "Running clippy..."
-cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 echo "Calculating test coverage..."
 if ! cargo tarpaulin --version > /dev/null 2>&1; then
@@ -15,7 +31,7 @@ if ! cargo tarpaulin --version > /dev/null 2>&1; then
     echo "Install it with: cargo install cargo-tarpaulin"
 fi
 TEST_OUTPUT=$(cargo tarpaulin --workspace 2>&1 || true)
-TEST_COV=$(echo "$TEST_OUTPUT" | grep -oE '[0-9]+\.[0-9]+% coverage' | grep -oE '[0-9]+\.[0-9]+' || echo "0.00")
+TEST_COV=$(echo "$TEST_OUTPUT" | grep -oE '[0-9]+\.[0-9]+% coverage' | grep -oE '[0-9]+\.[0-9]+' | head -n 1 || echo "0.00")
 
 if [ -z "$TEST_COV" ]; then
     TEST_COV="0.00"
@@ -37,7 +53,6 @@ DOCUMENTED=0
 
 for pkg in $PACKAGES; do
     DOC_OUTPUT=$(cargo +nightly rustdoc -p "$pkg" -- -Z unstable-options --show-coverage 2>&1 || true)
-    # The output has a line like: | Total                               |        877 |     100.0% |          0 |       0.0% |
     TOTAL_LINE=$(echo "$DOC_OUTPUT" | grep "^| Total" || true)
     if [ -n "$TOTAL_LINE" ]; then
         PKG_TOTAL=$(echo "$TOTAL_LINE" | awk -F'|' '{print $3}' | tr -d ' ')
@@ -58,7 +73,7 @@ echo "Doc coverage: $DOC_COV%"
 
 # Determine colors
 if [ "$(echo "$TEST_COV >= 90" | bc -l)" -eq 1 ]; then
-    TEST_COLOR="green"
+    TEST_COLOR="brightgreen"
 elif [ "$(echo "$TEST_COV >= 75" | bc -l)" -eq 1 ]; then
     TEST_COLOR="yellow"
 else
@@ -66,7 +81,7 @@ else
 fi
 
 if [ "$(echo "$DOC_COV >= 90" | bc -l)" -eq 1 ]; then
-    DOC_COLOR="green"
+    DOC_COLOR="brightgreen"
 elif [ "$(echo "$DOC_COV >= 75" | bc -l)" -eq 1 ]; then
     DOC_COLOR="yellow"
 else
@@ -76,16 +91,17 @@ fi
 # Update README.md
 if [ -f README.md ]; then
     echo "Updating README.md badges..."
-    # Update Tests Coverage badge
-    sed -i.bak -E "s/!\[Tests Coverage\]\(https:\/\/img\.shields\.io\/badge\/tests-[0-9.]+%25-[a-z]+\.svg\)/![Tests Coverage](https:\/\/img.shields.io\/badge\/tests-${TEST_COV}%25-${TEST_COLOR}.svg)/g" README.md
     
-    # Update Docs Coverage badge
-    sed -i.bak -E "s/!\[Docs Coverage\]\(https:\/\/img\.shields\.io\/badge\/docs-[0-9.]+%25-[a-z]+\.svg\)/![Docs Coverage](https:\/\/img.shields.io\/badge\/docs-${DOC_COV}%25-${DOC_COLOR}.svg)/g" README.md
+    # Update Test Coverage badge
+    sed -i.bak -E "s/badge\/test_coverage-[0-9.]+%25-[a-zA-Z]+/badge\/test_coverage-${TEST_COV}%25-${TEST_COLOR}/g" README.md
+    
+    # Update Doc Coverage badge
+    sed -i.bak -E "s/badge\/doc_coverage-[0-9.]+%25-[a-zA-Z]+/badge\/doc_coverage-${DOC_COV}%25-${DOC_COLOR}/g" README.md
     
     rm -f README.md.bak
     
     # Check if README.md was changed and stage it
-    if git diff --name-only | grep -q "^README\.md$"; then
+    if ! git diff --quiet README.md; then
         git add README.md
         echo "README.md staged with updated coverage badges."
     fi
