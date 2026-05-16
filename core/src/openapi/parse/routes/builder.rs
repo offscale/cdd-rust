@@ -246,21 +246,39 @@ fn build_route(
     if request_body.is_none() {
         if let Some(body_param) = params
             .iter()
-            .find(|p| p.source == ParamSource::Query && p.name == "body")
+            .find(|p| p.source == ParamSource::Body)
         {
             request_body = Some(crate::openapi::parse::models::RequestBodyDefinition {
                 ty: body_param.ty.clone(),
                 description: body_param.description.clone(),
                 media_type: "application/json".to_string(),
                 format: crate::openapi::parse::models::BodyFormat::Json,
-                required: true,
+                required: !body_param.ty.starts_with("Option<"),
                 example: None,
                 encoding: None,
                 item_encoding: None,
                 prefix_encoding: None,
             });
-            params.retain(|p| !(p.source == ParamSource::Query && p.name == "body"));
+            params.retain(|p| p.source != ParamSource::Body);
         }
+    }
+
+    // Extract Swagger 2.0 "in: formData" params
+    let form_params: Vec<_> = params.iter().filter(|p| p.source == ParamSource::FormData).cloned().collect();
+    if !form_params.is_empty() && request_body.is_none() {
+        let is_multipart = form_params.iter().any(|p| p.ty == "Vec<u8>");
+        request_body = Some(crate::openapi::parse::models::RequestBodyDefinition {
+            ty: if is_multipart { "reqwest::multipart::Form".to_string() } else { "serde_json::Value".to_string() },
+            description: Some("Form Data".to_string()),
+            media_type: if is_multipart { "multipart/form-data".to_string() } else { "application/x-www-form-urlencoded".to_string() },
+            format: if is_multipart { crate::openapi::parse::models::BodyFormat::Multipart } else { crate::openapi::parse::models::BodyFormat::Form },
+            required: form_params.iter().any(|p| !p.ty.starts_with("Option<")),
+            example: None,
+            encoding: None,
+            item_encoding: None,
+            prefix_encoding: None,
+        });
+        params.retain(|p| p.source != ParamSource::FormData);
     }
 
     // 4. Security

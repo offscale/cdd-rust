@@ -164,6 +164,7 @@ edition = "2021"
 tokio = {{ version = "1", features = ["full"] }}
 serde = {{ version = "1.0", features = ["derive"] }}
 serde_json = "1.0"
+serde_qs = "1.0"
 reqwest = {{ version = "0.11", features = ["json"] }}
 actix-web = "4.0"
 diesel = {{ version = "2.0", features = ["postgres"] }}
@@ -487,5 +488,21 @@ components:
         };
         let result = run_generation(&args, &cdd_core::strategies::ActixStrategy);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_run_generation_with_tests_flag() {
+        let dir = tempdir().unwrap();
+        let input = dir.path().join("spec.json");
+        std::fs::write(&input, r#"{"openapi": "3.0.0", "info": {"title": "Test", "version": "1.0"}, "paths": {}}"#).unwrap();
+        let args = GenerateArgs {
+            input: Some(input),
+            input_dir: None,
+            output_dir: Some(dir.path().join("my_out_app")),
+            no_github_actions: true,
+            no_installable_package: true,
+            tests: true,
+        };
+        let _ = run_generation(&args, &cdd_core::strategies::ActixStrategy);
     }
 }

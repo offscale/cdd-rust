@@ -76,6 +76,17 @@ pub fn bytes_extractor(_body_type: &str) -> String {
 }
 
 /// Generates the type string for Security extraction.
-pub fn security_extractor(_requirements: &[SecurityRequirementGroup]) -> String {
-    "".to_string()
+pub fn security_extractor(requirements: &[SecurityRequirementGroup]) -> String {
+    let mut needs_auth = false;
+    for group in requirements {
+        if !group.is_anonymous() {
+            needs_auth = true;
+            break;
+        }
+    }
+    if needs_auth {
+        "auth_token: Option<&str>".to_string()
+    } else {
+        "".to_string()
+    }
 }

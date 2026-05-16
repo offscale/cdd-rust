@@ -105,7 +105,7 @@ pub fn generate_custom_test(
     let mut code = String::new();
     code.push_str(&format!("#[tokio::test]\nasync fn {}() {{\n", fn_name));
     code.push_str("    let client = reqwest::Client::new();\n");
-    code.push_str("    let base_url = \"http://localhost:8080/v2\";\n");
+    code.push_str("    let base_url = \"http://localhost:8080\";\n");
 
     let mut args_list = vec!["&client".to_string(), "base_url".to_string()];
 
@@ -116,10 +116,16 @@ pub fn generate_custom_test(
         .filter(|p| p.source == ParamSource::Path)
     {
         let var_name = to_snake_case(&param.name);
-        code.push_str(&format!(
-            "    let {}: {} = Default::default();\n",
-            var_name, param.ty
-        ));
+        if param.ty == "String" {
+            code.push_str(&format!("    let {}: String = \"test_value\".to_string();\n", var_name));
+        } else if param.ty == "i64" || param.ty == "i32" || param.ty == "u64" || param.ty == "u32" {
+            code.push_str(&format!("    let {}: {} = 1;\n", var_name, param.ty));
+        } else {
+            code.push_str(&format!(
+                "    let {}: {} = Default::default();\n",
+                var_name, param.ty
+            ));
+        }
         args_list.push(var_name);
     }
 
@@ -144,6 +150,11 @@ pub fn generate_custom_test(
                     "    let query: {}::handlers::{}::{} = serde_json::from_value(serde_json::json!({{ \"status\": [\"available\"] }})).unwrap();\n",
                     crate_name, module_name, struct_name
                 ));
+            } else if handler_name == "login_user" {
+                code.push_str(&format!(
+                    "    let query: {}::handlers::{}::{} = serde_json::from_value(serde_json::json!({{ \"username\": \"user1\", \"password\": \"test_pass\" }})).unwrap();\n",
+                    crate_name, module_name, struct_name
+                ));
             } else {
                 code.push_str(&format!(
                     "    let query: {}::handlers::{}::{} = Default::default();\n",
@@ -161,7 +172,11 @@ pub fn generate_custom_test(
         .filter(|p| p.source == ParamSource::Header)
     {
         let var_name = to_snake_case(&param.name);
-        code.push_str(&format!("    let {} = Default::default();\n", var_name));
+        if var_name == "api_key" {
+            code.push_str(&format!("    let {} = \"special-key\".to_string();\n", var_name));
+        } else {
+            code.push_str(&format!("    let {} = Default::default();\n", var_name));
+        }
         args_list.push(var_name);
     }
 
@@ -176,6 +191,19 @@ pub fn generate_custom_test(
         args_list.push(var_name);
     }
 
+    // Security (auth_token)
+    let mut needs_auth = false;
+    for group in &route.security {
+        if !group.is_anonymous() {
+            needs_auth = true;
+            break;
+        }
+    }
+    if needs_auth {
+        code.push_str("    let auth_token = Some(\"special-key\");\n");
+        args_list.push("auth_token".to_string());
+    }
+
     // 5. Body
     if let Some(def) = &route.request_body {
         let body_type = def.ty.clone();
@@ -184,15 +212,21 @@ pub fn generate_custom_test(
         if body_type.starts_with("Vec<") && !body_type.starts_with("Vec<u8>") {
             let inner = &body_type[4..body_type.len() - 1];
             full_body_type = format!("Vec<{}::models::{}>", crate_name, inner);
-        } else if !body_type.starts_with("String") && !body_type.starts_with("Vec<") {
+        } else if !body_type.starts_with("String") && !body_type.starts_with("Vec<") && !body_type.contains("::") {
             full_body_type = format!("{}::models::{}", crate_name, body_type);
         }
 
         if def.required {
-            code.push_str(&format!(
-                "    let body: {} = Default::default();\n",
-                full_body_type
-            ));
+            if full_body_type.contains("reqwest::multipart::Form") {
+                code.push_str("    let body: reqwest::multipart::Form = reqwest::multipart::Form::new();\n");
+            } else if full_body_type == "serde_json::Value" || full_body_type == "crate::models::serde_json::Value" || full_body_type.contains("serde_json::Value") {
+                code.push_str("    let body: serde_json::Value = serde_json::json!({});\n");
+            } else {
+                code.push_str(&format!(
+                    "    let body: {} = Default::default();\n",
+                    full_body_type
+                ));
+            }
             args_list.push("body".to_string());
         } else {
             code.push_str(&format!(
@@ -214,8 +248,8 @@ pub fn generate_custom_test(
     if handler_name == "find_pets_by_status" || handler_name == "get_inventory" {
         code.push_str("    assert!(result.is_ok(), \"expected 200 OK and valid JSON parsing, got {:?}\", result.err());\n");
     } else {
-        code.push_str("    // Test should pass if the request successfully leaves the client (i.e. status error or success)\n");
-        code.push_str("    assert!(result.is_ok() || result.unwrap_err().is_status() || true);\n");
+        code.push_str("    // Test should pass if the request successfully leaves the client and parses the mock response\n");
+        code.push_str("    assert!(result.is_ok(), \"expected ok response, got {:?}\", result.err());\n");
     }
     code.push_str("}\n");
 

@@ -87,6 +87,16 @@ pub fn parse_openapi_spec_with_registry(
     // then pass it to Utoipa.
     normalize_nullable_schemas(&mut json_val);
     normalize_boolean_schemas(&mut json_val);
+
+    // Convert Swagger 2.0 definitions to OAS 3.0 components/schemas for AST parsing
+    if json_val.get("definitions").is_some() && json_val.get("components").is_none() {
+        if let Some(definitions) = json_val.get_mut("definitions").map(|v| v.take()) {
+            if let Some(obj) = json_val.as_object_mut() {
+                obj.insert("components".to_string(), serde_json::json!({ "schemas": definitions }));
+            }
+        }
+    }
+
     if let Some(schema_map) = json_val
         .get_mut("components")
         .and_then(|c| c.get_mut("schemas"))

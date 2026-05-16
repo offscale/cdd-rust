@@ -60,3 +60,11 @@ desktop.ini
 *~
 *.tmp
 *.log
+
+# Temporary integration artifacts
+package.json
+parse_test*
+path_test*
+swagger2_*.rs
+*.profraw
+

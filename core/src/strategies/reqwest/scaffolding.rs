@@ -42,6 +42,10 @@ pub fn handler_signature(route: &crate::openapi::parse::ParsedRoute, args: &[Str
     let mut format_args = vec!["base_url".to_string()];
     let mut format_str = String::from("{}");
 
+    if let Some(bp) = &route.base_path {
+        format_str.push_str(bp);
+    }
+
     let mut chars = route.path.chars().peekable();
     while let Some(c) = chars.next() {
         if c == '{' {
@@ -67,23 +71,82 @@ pub fn handler_signature(route: &crate::openapi::parse::ParsedRoute, args: &[Str
         format_str,
         format_args.join(", ")
     ));
-    body.push_str(&format!(
-        "    let mut req = client.request(reqwest::Method::from_bytes(b\"{}\").unwrap(), url);\n",
-        method
-    ));
-
     if args.iter().any(|a| a.starts_with("query:")) {
-        body.push_str("    req = req.query(&query);\n");
+        body.push_str("    let qs = serde_qs::Config::new().array_format(serde_qs::ArrayFormat::Unindexed).serialize_string(&query).unwrap_or_default();\n");
+        body.push_str("    let url = if url.contains('?') { format!(\"{}&{}\", url, qs) } else { format!(\"{}?{}\", url, qs) };\n");
+        body.push_str(&format!(
+            "    let mut req = client.request(reqwest::Method::from_bytes(b\"{}\").unwrap(), url);\n",
+            method
+        ));
+    } else {
+        body.push_str(&format!(
+            "    let mut req = client.request(reqwest::Method::from_bytes(b\"{}\").unwrap(), url);\n",
+            method
+        ));
     }
-    if args.iter().any(|a| a.starts_with("body:")) {
-        if args.iter().any(|a| a.contains("Option<")) {
-            body.push_str("    if let Some(b) = body { req = req.json(&b); }\n");
-        } else {
-            body.push_str("    req = req.json(&body);\n");
+
+    for param in &route.params {
+        let var_name = crate::openapi::parse::routes::naming::to_snake_case(&param.name);
+        match param.source {
+            crate::openapi::parse::ParamSource::Header => {
+                body.push_str(&format!("    req = req.header(\"{}\", &{});\n", param.name, var_name));
+            }
+            crate::openapi::parse::ParamSource::Cookie => {
+                body.push_str(&format!("    req = req.header(\"Cookie\", format!(\"{}={{}}\", {}));\n", param.name, var_name));
+            }
+            _ => {}
         }
     }
 
-    body.push_str("    let resp = req.send().await?;\n");
+    let mut has_security = false;
+    let mut auth_code = String::new();
+    for group in &route.security {
+        if group.is_anonymous() { continue; }
+        has_security = true;
+        for req in &group.schemes {
+            if let Some(info) = &req.scheme {
+                match &info.kind {
+                    crate::openapi::parse::models::SecuritySchemeKind::ApiKey { name, in_loc } => {
+                        if in_loc == &crate::openapi::parse::ParamSource::Header {
+                            auth_code.push_str(&format!("        req = req.header(\"{}\", token);\n", name));
+                        } else if in_loc == &crate::openapi::parse::ParamSource::Query {
+                            auth_code.push_str(&format!("        req = req.query(&[(\"{}\", token)]);\n", name));
+                        }
+                    }
+                    crate::openapi::parse::models::SecuritySchemeKind::OAuth2 { .. } |
+                    crate::openapi::parse::models::SecuritySchemeKind::Http { .. } |
+                    crate::openapi::parse::models::SecuritySchemeKind::OpenIdConnect { .. } => {
+                        auth_code.push_str("        req = req.bearer_auth(token);\n");
+                    }
+                    _ => {}
+                }
+            } else {
+                auth_code.push_str("        req = req.bearer_auth(token);\n");
+            }
+        }
+        break;
+    }
+
+    if has_security {
+        body.push_str("    if let Some(token) = auth_token {\n");
+        body.push_str(&auth_code);
+        body.push_str("    }\n");
+    }
+
+    if let Some(body_arg) = args.iter().find(|a| a.starts_with("body:")) {
+        let is_form = route.request_body.as_ref().map(|b| b.format == crate::openapi::parse::models::BodyFormat::Form).unwrap_or(false);
+        let is_multipart = route.request_body.as_ref().map(|b| b.format == crate::openapi::parse::models::BodyFormat::Multipart).unwrap_or(false);
+        
+        let method = if is_multipart { "multipart" } else if is_form { "form" } else { "json" };
+        
+        if body_arg.contains("Option<") {
+            body.push_str(&format!("    if let Some(b) = body {{ req = req.{}(&b); }}\n", method));
+        } else {
+            body.push_str(&format!("    req = req.{}(&body);\n", method));
+        }
+    }
+
+    body.push_str("    let resp = req.send().await?.error_for_status()?;\n");
 
     if !response_headers.is_empty() {
         body.push_str("    Ok(resp)\n");
