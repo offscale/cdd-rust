@@ -12,8 +12,10 @@ use crate::test_gen::TestGenArgs;
 /// Available server frameworks.
 #[derive(clap::ValueEnum, Clone, Debug, Default, PartialEq, Eq)]
 pub enum ServerFramework {
+    /// Actix Web framework
     #[default]
     ActixWeb,
+    /// Axum framework
     Axum,
 }
 
@@ -37,6 +39,7 @@ pub enum FromOpenApiCommands {
     /// Generate Server scaffolding
     #[clap(name = "to_server")]
     Server {
+        /// The common arguments for generation
         #[clap(flatten)]
         args: GenerateArgs,
         /// The target server framework (actix-web or axum). Defaults to actix-web.

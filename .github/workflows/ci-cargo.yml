@@ -63,7 +63,7 @@ jobs:
       - name: Check Documentation Coverage
         run: |
           rustup toolchain install nightly
-          cargo +nightly doc --workspace --no-deps -Z unstable-options --show-coverage
+          RUSTDOCFLAGS="-Z unstable-options --show-coverage" cargo +nightly doc --workspace --no-deps
 
       - name: Install cargo-tarpaulin
         run: cargo install cargo-tarpaulin

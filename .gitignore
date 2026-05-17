@@ -54,6 +54,9 @@ ehthumbs.db
 Thumbs.db
 desktop.ini
 
+# GitHub Actions generated for temporary test directories
+*/.github/
+
 # Backup and temporary files
 *.bak
 *.swp
