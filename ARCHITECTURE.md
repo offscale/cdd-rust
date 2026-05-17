@@ -77,7 +77,7 @@ The Backend's responsibility is to take the universal IR and generate valid targ
   * A **Server Emitter** creates Actix-web routing controllers and request-validation logic.
   * A **Client Emitter** creates Reqwest API wrappers, fetch functions, and response-parsing logic.
 * **Database & CLI Generation**: Emitters can also target Diesel ORM models or Clap command-line parsers by mapping IR properties to database columns or CLI arguments.
-* **Specification Generation**: Emitters translating back to OpenAPI serialize the IR into standard OpenAPI 3.2.0 JSON or YAML, rigorously formatting descriptions, type constraints, and endpoint schemas based on what was parsed from the source code.
+* **Specification Generation**: Emitters translating back to OpenAPI serialize the IR into standard Swagger 2.0 and OpenAPI 3.2.0 JSON or YAML, rigorously formatting descriptions, type constraints, and endpoint schemas based on what was parsed from the source code.
 
 ## 🔄 Extensibility
 

@@ -28,6 +28,6 @@ The primary CLI interaction uses the `cdd-rust` executable.
 
 ## Example: API First to Code
 
-1. Use an OpenAPI 3.2.0 yaml or json spec.
+1. Use an Swagger 2.0 and OpenAPI 3.2.0 yaml or json spec.
 2. Run `cdd-rust from_openapi to_server -i openapi.yaml -o my_actix_app`.
 3. The tool generates Actix scaffolding in `my_actix_app/handlers/`, Diesel models in `my_actix_app/models/`, and tests in `my_actix_app/tests/`.
