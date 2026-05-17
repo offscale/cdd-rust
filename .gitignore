@@ -68,3 +68,4 @@ path_test*
 swagger2_*.rs
 *.profraw
 
+tarpaulin-report.json

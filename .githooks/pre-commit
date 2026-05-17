@@ -25,6 +25,22 @@ cargo test --workspace
 echo "Running clippy..."
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+echo "Running Swagger 2.0 Petstore test..."
+cargo run -p cdd-cli -- from_openapi to_sdk -i ../petstore.json -o ./target/petstore2
+
+echo "Running OpenAPI 3.2.0 Petstore test..."
+cargo run -p cdd-cli -- from_openapi to_sdk -i ../petstore_oas3.json -o ./target/petstore3
+
+echo "Running WASM build test..."
+if command -v make >/dev/null 2>&1; then
+    make build_wasm
+elif [ -f "./make.bat" ]; then
+    ./make.bat build_wasm
+else
+    echo "Make not found, unable to run WASM build test."
+    exit 1
+fi
+
 echo "Calculating test coverage..."
 if ! cargo tarpaulin --version > /dev/null 2>&1; then
     echo "Warning: cargo-tarpaulin is not installed. Test coverage will be 0.00%."
