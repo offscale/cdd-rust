@@ -2983,35 +2983,49 @@ fn upgrade_swagger2_to_openapi3(json_val: &mut serde_json::Value) {
                 for (_, operation) in path_obj.iter_mut() {
                     if let Some(op_obj) = operation.as_object_mut() {
                         // Upgrade Responses
-                        if let Some(responses) = op_obj.get_mut("responses").and_then(|r| r.as_object_mut()) {
+                        if let Some(responses) =
+                            op_obj.get_mut("responses").and_then(|r| r.as_object_mut())
+                        {
                             for (_, response) in responses.iter_mut() {
                                 if let Some(resp_obj) = response.as_object_mut() {
                                     if let Some(schema) = resp_obj.remove("schema") {
                                         let mut content = serde_json::Map::new();
                                         let mut media = serde_json::Map::new();
                                         media.insert("schema".to_string(), schema);
-                                        content.insert("application/json".to_string(), serde_json::Value::Object(media));
-                                        resp_obj.insert("content".to_string(), serde_json::Value::Object(content));
+                                        content.insert(
+                                            "application/json".to_string(),
+                                            serde_json::Value::Object(media),
+                                        );
+                                        resp_obj.insert(
+                                            "content".to_string(),
+                                            serde_json::Value::Object(content),
+                                        );
                                     }
                                 }
                             }
                         }
-                        
+
                         // Upgrade Parameters (in: body -> requestBody)
-                        if let Some(parameters) = op_obj.get_mut("parameters").and_then(|p| p.as_array_mut()) {
+                        if let Some(parameters) =
+                            op_obj.get_mut("parameters").and_then(|p| p.as_array_mut())
+                        {
                             let mut body_param_idx = None;
                             for (i, param) in parameters.iter().enumerate() {
                                 if let Some(param_obj) = param.as_object() {
-                                    if param_obj.get("in").and_then(|v| v.as_str()) == Some("body") {
+                                    if param_obj.get("in").and_then(|v| v.as_str()) == Some("body")
+                                    {
                                         body_param_idx = Some(i);
                                         break;
                                     }
                                 }
                             }
-                            
+
                             if let Some(idx) = body_param_idx {
                                 let body_param = parameters.remove(idx);
-                                if let Some(mut body_obj) = match body_param { serde_json::Value::Object(o) => Some(o), _ => None } {
+                                if let Some(mut body_obj) = match body_param {
+                                    serde_json::Value::Object(o) => Some(o),
+                                    _ => None,
+                                } {
                                     let mut request_body = serde_json::Map::new();
                                     if let Some(desc) = body_obj.remove("description") {
                                         request_body.insert("description".to_string(), desc);
@@ -3023,10 +3037,19 @@ fn upgrade_swagger2_to_openapi3(json_val: &mut serde_json::Value) {
                                         let mut content = serde_json::Map::new();
                                         let mut media = serde_json::Map::new();
                                         media.insert("schema".to_string(), schema);
-                                        content.insert("application/json".to_string(), serde_json::Value::Object(media));
-                                        request_body.insert("content".to_string(), serde_json::Value::Object(content));
+                                        content.insert(
+                                            "application/json".to_string(),
+                                            serde_json::Value::Object(media),
+                                        );
+                                        request_body.insert(
+                                            "content".to_string(),
+                                            serde_json::Value::Object(content),
+                                        );
                                     }
-                                    op_obj.insert("requestBody".to_string(), serde_json::Value::Object(request_body));
+                                    op_obj.insert(
+                                        "requestBody".to_string(),
+                                        serde_json::Value::Object(request_body),
+                                    );
                                 }
                             }
                         }

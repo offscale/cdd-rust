@@ -55,7 +55,7 @@ pub fn handler_signature(route: &crate::openapi::parse::ParsedRoute, args: &[Str
                     chars.next();
                     break;
                 }
-                param_name.push(chars.next().unwrap());
+                param_name.push(chars.next().unwrap_or('_'));
             }
             format_str.push_str("{}");
             format_args.push(crate::openapi::parse::routes::naming::to_snake_case(
@@ -75,12 +75,12 @@ pub fn handler_signature(route: &crate::openapi::parse::ParsedRoute, args: &[Str
         body.push_str("    let qs = serde_qs::Config::new().array_format(serde_qs::ArrayFormat::Unindexed).serialize_string(&query).unwrap_or_default();\n");
         body.push_str("    let url = if url.contains('?') { format!(\"{}&{}\", url, qs) } else { format!(\"{}?{}\", url, qs) };\n");
         body.push_str(&format!(
-            "    let mut req = client.request(reqwest::Method::from_bytes(b\"{}\").unwrap(), url);\n",
+            "    let mut req = client.request(reqwest::Method::from_bytes(b\"{}\").expect(\"valid method\"), url);\n",
             method
         ));
     } else {
         body.push_str(&format!(
-            "    let mut req = client.request(reqwest::Method::from_bytes(b\"{}\").unwrap(), url);\n",
+            "    let mut req = client.request(reqwest::Method::from_bytes(b\"{}\").expect(\"valid method\"), url);\n",
             method
         ));
     }
@@ -89,10 +89,16 @@ pub fn handler_signature(route: &crate::openapi::parse::ParsedRoute, args: &[Str
         let var_name = crate::openapi::parse::routes::naming::to_snake_case(&param.name);
         match param.source {
             crate::openapi::parse::ParamSource::Header => {
-                body.push_str(&format!("    req = req.header(\"{}\", &{});\n", param.name, var_name));
+                body.push_str(&format!(
+                    "    req = req.header(\"{}\", &{});\n",
+                    param.name, var_name
+                ));
             }
             crate::openapi::parse::ParamSource::Cookie => {
-                body.push_str(&format!("    req = req.header(\"Cookie\", format!(\"{}={{}}\", {}));\n", param.name, var_name));
+                body.push_str(&format!(
+                    "    req = req.header(\"Cookie\", format!(\"{}={{}}\", {}));\n",
+                    param.name, var_name
+                ));
             }
             _ => {}
         }
@@ -101,21 +107,29 @@ pub fn handler_signature(route: &crate::openapi::parse::ParsedRoute, args: &[Str
     let mut has_security = false;
     let mut auth_code = String::new();
     for group in &route.security {
-        if group.is_anonymous() { continue; }
+        if group.is_anonymous() {
+            continue;
+        }
         has_security = true;
         for req in &group.schemes {
             if let Some(info) = &req.scheme {
                 match &info.kind {
                     crate::openapi::parse::models::SecuritySchemeKind::ApiKey { name, in_loc } => {
                         if in_loc == &crate::openapi::parse::ParamSource::Header {
-                            auth_code.push_str(&format!("        req = req.header(\"{}\", token);\n", name));
+                            auth_code.push_str(&format!(
+                                "        req = req.header(\"{}\", token);\n",
+                                name
+                            ));
                         } else if in_loc == &crate::openapi::parse::ParamSource::Query {
-                            auth_code.push_str(&format!("        req = req.query(&[(\"{}\", token)]);\n", name));
+                            auth_code.push_str(&format!(
+                                "        req = req.query(&[(\"{}\", token)]);\n",
+                                name
+                            ));
                         }
                     }
-                    crate::openapi::parse::models::SecuritySchemeKind::OAuth2 { .. } |
-                    crate::openapi::parse::models::SecuritySchemeKind::Http { .. } |
-                    crate::openapi::parse::models::SecuritySchemeKind::OpenIdConnect { .. } => {
+                    crate::openapi::parse::models::SecuritySchemeKind::OAuth2 { .. }
+                    | crate::openapi::parse::models::SecuritySchemeKind::Http { .. }
+                    | crate::openapi::parse::models::SecuritySchemeKind::OpenIdConnect { .. } => {
                         auth_code.push_str("        req = req.bearer_auth(token);\n");
                     }
                     _ => {}
@@ -134,13 +148,30 @@ pub fn handler_signature(route: &crate::openapi::parse::ParsedRoute, args: &[Str
     }
 
     if let Some(body_arg) = args.iter().find(|a| a.starts_with("body:")) {
-        let is_form = route.request_body.as_ref().map(|b| b.format == crate::openapi::parse::models::BodyFormat::Form).unwrap_or(false);
-        let is_multipart = route.request_body.as_ref().map(|b| b.format == crate::openapi::parse::models::BodyFormat::Multipart).unwrap_or(false);
-        
-        let method = if is_multipart { "multipart" } else if is_form { "form" } else { "json" };
-        
+        let is_form = route
+            .request_body
+            .as_ref()
+            .map(|b| b.format == crate::openapi::parse::models::BodyFormat::Form)
+            .unwrap_or(false);
+        let is_multipart = route
+            .request_body
+            .as_ref()
+            .map(|b| b.format == crate::openapi::parse::models::BodyFormat::Multipart)
+            .unwrap_or(false);
+
+        let method = if is_multipart {
+            "multipart"
+        } else if is_form {
+            "form"
+        } else {
+            "json"
+        };
+
         if body_arg.contains("Option<") {
-            body.push_str(&format!("    if let Some(b) = body {{ req = req.{}(&b); }}\n", method));
+            body.push_str(&format!(
+                "    if let Some(b) = body {{ req = req.{}(&b); }}\n",
+                method
+            ));
         } else {
             body.push_str(&format!("    req = req.{}(&body);\n", method));
         }

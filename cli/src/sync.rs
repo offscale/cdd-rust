@@ -86,7 +86,6 @@ pub fn execute(args: &SyncArgs, mapper: &impl ModelMapper) -> AppResult<()> {
 /// - Adds `#[derive(ToSchema)]`.
 /// - Adds `#[derive(Serialize, Deserialize)]`.
 /// - Patches field types if configured.
-/// - Prepends `#![allow(missing_docs)]` if missing.
 fn process_models_for_openapi(
     model_dir: &Path,
     type_overrides: &HashMap<String, String>,

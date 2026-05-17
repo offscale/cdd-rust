@@ -249,9 +249,9 @@ jobs:
                     let path = entry.path();
                     if path.is_file()
                         && path.extension().unwrap_or_default() == "rs"
-                        && path.file_name().unwrap() != "mod.rs"
+                        && path.file_name().unwrap_or_default() != "mod.rs"
                     {
-                        let mod_name = path.file_stem().unwrap().to_string_lossy();
+                        let mod_name = path.file_stem().unwrap_or_default().to_string_lossy();
                         mods.push(format!("pub mod {};\n", mod_name));
                     }
                 }
@@ -273,7 +273,7 @@ jobs:
             fs::create_dir_all(&tests_dir).unwrap_or_default();
             let crate_name = out_dir
                 .file_name()
-                .unwrap()
+                .unwrap_or_default()
                 .to_string_lossy()
                 .replace('-', "_");
             let test_gen_args = TestGenArgs {
@@ -491,10 +491,13 @@ components:
     }
 
     #[test]
-    fn test_run_generation_with_tests_flag() {
-        let dir = tempdir().unwrap();
+    fn test_run_generation_with_tests_flag() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = tempdir()?;
         let input = dir.path().join("spec.json");
-        std::fs::write(&input, r#"{"openapi": "3.0.0", "info": {"title": "Test", "version": "1.0"}, "paths": {}}"#).unwrap();
+        std::fs::write(
+            &input,
+            r#"{"openapi": "3.0.0", "info": {"title": "Test", "version": "1.0"}, "paths": {}}"#,
+        )?;
         let args = GenerateArgs {
             input: Some(input),
             input_dir: None,
@@ -504,5 +507,6 @@ components:
             tests: true,
         };
         let _ = run_generation(&args, &cdd_core::strategies::ActixStrategy);
+        Ok(())
     }
 }

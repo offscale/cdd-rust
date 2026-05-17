@@ -92,7 +92,10 @@ pub fn parse_openapi_spec_with_registry(
     if json_val.get("definitions").is_some() && json_val.get("components").is_none() {
         if let Some(definitions) = json_val.get_mut("definitions").map(|v| v.take()) {
             if let Some(obj) = json_val.as_object_mut() {
-                obj.insert("components".to_string(), serde_json::json!({ "schemas": definitions }));
+                obj.insert(
+                    "components".to_string(),
+                    serde_json::json!({ "schemas": definitions }),
+                );
             }
         }
     }

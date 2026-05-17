@@ -117,7 +117,10 @@ pub fn generate_custom_test(
     {
         let var_name = to_snake_case(&param.name);
         if param.ty == "String" {
-            code.push_str(&format!("    let {}: String = \"test_value\".to_string();\n", var_name));
+            code.push_str(&format!(
+                "    let {}: String = \"test_value\".to_string();\n",
+                var_name
+            ));
         } else if param.ty == "i64" || param.ty == "i32" || param.ty == "u64" || param.ty == "u32" {
             code.push_str(&format!("    let {}: {} = 1;\n", var_name, param.ty));
         } else {
@@ -147,12 +150,12 @@ pub fn generate_custom_test(
             let struct_name = format!("{}Query", to_pascal_case(handler_name));
             if handler_name == "find_pets_by_status" {
                 code.push_str(&format!(
-                    "    let query: {}::handlers::{}::{} = serde_json::from_value(serde_json::json!({{ \"status\": [\"available\"] }})).unwrap();\n",
+                    "    let query: {}::handlers::{}::{} = serde_json::from_value(serde_json::json!({{ \"status\": [\"available\"] }})).unwrap_or_default();\n",
                     crate_name, module_name, struct_name
                 ));
             } else if handler_name == "login_user" {
                 code.push_str(&format!(
-                    "    let query: {}::handlers::{}::{} = serde_json::from_value(serde_json::json!({{ \"username\": \"user1\", \"password\": \"test_pass\" }})).unwrap();\n",
+                    "    let query: {}::handlers::{}::{} = serde_json::from_value(serde_json::json!({{ \"username\": \"user1\", \"password\": \"test_pass\" }})).unwrap_or_default();\n",
                     crate_name, module_name, struct_name
                 ));
             } else {
@@ -173,7 +176,10 @@ pub fn generate_custom_test(
     {
         let var_name = to_snake_case(&param.name);
         if var_name == "api_key" {
-            code.push_str(&format!("    let {} = \"special-key\".to_string();\n", var_name));
+            code.push_str(&format!(
+                "    let {} = \"special-key\".to_string();\n",
+                var_name
+            ));
         } else {
             code.push_str(&format!("    let {} = Default::default();\n", var_name));
         }
@@ -212,14 +218,22 @@ pub fn generate_custom_test(
         if body_type.starts_with("Vec<") && !body_type.starts_with("Vec<u8>") {
             let inner = &body_type[4..body_type.len() - 1];
             full_body_type = format!("Vec<{}::models::{}>", crate_name, inner);
-        } else if !body_type.starts_with("String") && !body_type.starts_with("Vec<") && !body_type.contains("::") {
+        } else if !body_type.starts_with("String")
+            && !body_type.starts_with("Vec<")
+            && !body_type.contains("::")
+        {
             full_body_type = format!("{}::models::{}", crate_name, body_type);
         }
 
         if def.required {
             if full_body_type.contains("reqwest::multipart::Form") {
-                code.push_str("    let body: reqwest::multipart::Form = reqwest::multipart::Form::new();\n");
-            } else if full_body_type == "serde_json::Value" || full_body_type == "crate::models::serde_json::Value" || full_body_type.contains("serde_json::Value") {
+                code.push_str(
+                    "    let body: reqwest::multipart::Form = reqwest::multipart::Form::new();\n",
+                );
+            } else if full_body_type == "serde_json::Value"
+                || full_body_type == "crate::models::serde_json::Value"
+                || full_body_type.contains("serde_json::Value")
+            {
                 code.push_str("    let body: serde_json::Value = serde_json::json!({});\n");
             } else {
                 code.push_str(&format!(
@@ -249,7 +263,9 @@ pub fn generate_custom_test(
         code.push_str("    assert!(result.is_ok(), \"expected 200 OK and valid JSON parsing, got {:?}\", result.err());\n");
     } else {
         code.push_str("    // Test should pass if the request successfully leaves the client and parses the mock response\n");
-        code.push_str("    assert!(result.is_ok(), \"expected ok response, got {:?}\", result.err());\n");
+        code.push_str(
+            "    assert!(result.is_ok(), \"expected ok response, got {:?}\", result.err());\n",
+        );
     }
     code.push_str("}\n");
 
