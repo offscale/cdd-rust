@@ -27,7 +27,7 @@ install_base:
 	rustup target add wasm32-unknown-emscripten || true
 
 setup_hooks:
-	git config core.hooksPath .githooks
+	pre-commit install
 
 install_deps:
 	cargo fetch

@@ -1,9 +1,9 @@
-use actix_web::{web, HttpResponse, Responder};
 use actix_multipart::Multipart;
+use actix_web::{web, HttpResponse, Responder};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
-use chrono::{DateTime, Utc, NaiveDate, NaiveDateTime};
 
 /// Returns pet inventories by status
 ///
@@ -38,4 +38,3 @@ pub async fn get_order_by_id(order_id: web::Path<i64>) -> impl Responder {
 pub async fn delete_order(order_id: web::Path<i64>) -> impl Responder {
     todo!()
 }
-

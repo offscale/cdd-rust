@@ -33,7 +33,6 @@ out_native/
 out_wasm/
 out/
 tests/
-scripts/
 
 # Temporary / testing files
 test_*.rs

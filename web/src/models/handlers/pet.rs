@@ -1,9 +1,9 @@
-use actix_web::{web, HttpResponse, Responder};
 use actix_multipart::Multipart;
+use actix_web::{web, HttpResponse, Responder};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
-use chrono::{DateTime, Utc, NaiveDate, NaiveDateTime};
 
 /// Query parameters for `add_pet`.
 #[derive(Debug, Clone, Deserialize)]
@@ -14,7 +14,12 @@ pub struct AddPetQuery {
 
 /// Add a new pet to the store
 ///
-pub async fn add_pet(query: web::Query<AddPetQuery>, petstore_auth: web::ReqData<security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>>) -> impl Responder {
+pub async fn add_pet(
+    query: web::Query<AddPetQuery>,
+    petstore_auth: web::ReqData<
+        security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>,
+    >,
+) -> impl Responder {
     todo!()
 }
 
@@ -27,7 +32,12 @@ pub struct UpdatePetQuery {
 
 /// Update an existing pet
 ///
-pub async fn update_pet(query: web::Query<UpdatePetQuery>, petstore_auth: web::ReqData<security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>>) -> impl Responder {
+pub async fn update_pet(
+    query: web::Query<UpdatePetQuery>,
+    petstore_auth: web::ReqData<
+        security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>,
+    >,
+) -> impl Responder {
     todo!()
 }
 
@@ -41,7 +51,12 @@ pub struct FindPetsByStatusQuery {
 /// Finds Pets by status
 ///
 /// Multiple status values can be provided with comma separated strings
-pub async fn find_pets_by_status(query: web::Query<FindPetsByStatusQuery>, petstore_auth: web::ReqData<security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>>) -> impl Responder {
+pub async fn find_pets_by_status(
+    query: web::Query<FindPetsByStatusQuery>,
+    petstore_auth: web::ReqData<
+        security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>,
+    >,
+) -> impl Responder {
     todo!()
 }
 
@@ -56,14 +71,22 @@ pub struct FindPetsByTagsQuery {
 ///
 /// Multiple tags can be provided with comma separated strings. Use tag1, tag2, tag3 for testing.
 #[deprecated]
-pub async fn find_pets_by_tags(query: web::Query<FindPetsByTagsQuery>, petstore_auth: web::ReqData<security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>>) -> impl Responder {
+pub async fn find_pets_by_tags(
+    query: web::Query<FindPetsByTagsQuery>,
+    petstore_auth: web::ReqData<
+        security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>,
+    >,
+) -> impl Responder {
     todo!()
 }
 
 /// Find pet by ID
 ///
 /// Returns a single pet
-pub async fn get_pet_by_id(pet_id: web::Path<i64>, api_key: web::ReqData<security::ApiKey>) -> impl Responder {
+pub async fn get_pet_by_id(
+    pet_id: web::Path<i64>,
+    api_key: web::ReqData<security::ApiKey>,
+) -> impl Responder {
     todo!()
 }
 
@@ -78,13 +101,25 @@ pub struct UpdatePetWithFormQuery {
 
 /// Updates a pet in the store with form data
 ///
-pub async fn update_pet_with_form(pet_id: web::Path<i64>, query: web::Query<UpdatePetWithFormQuery>, petstore_auth: web::ReqData<security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>>) -> impl Responder {
+pub async fn update_pet_with_form(
+    pet_id: web::Path<i64>,
+    query: web::Query<UpdatePetWithFormQuery>,
+    petstore_auth: web::ReqData<
+        security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>,
+    >,
+) -> impl Responder {
     todo!()
 }
 
 /// Deletes a pet
 ///
-pub async fn delete_pet(pet_id: web::Path<i64>, api_key: web::Header<String>, petstore_auth: web::ReqData<security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>>) -> impl Responder {
+pub async fn delete_pet(
+    pet_id: web::Path<i64>,
+    api_key: web::Header<String>,
+    petstore_auth: web::ReqData<
+        security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>,
+    >,
+) -> impl Responder {
     todo!()
 }
 
@@ -100,7 +135,12 @@ pub struct UploadFileQuery {
 
 /// uploads an image
 ///
-pub async fn upload_file(pet_id: web::Path<i64>, query: web::Query<UploadFileQuery>, petstore_auth: web::ReqData<security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>>) -> impl Responder {
+pub async fn upload_file(
+    pet_id: web::Path<i64>,
+    query: web::Query<UploadFileQuery>,
+    petstore_auth: web::ReqData<
+        security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>,
+    >,
+) -> impl Responder {
     todo!()
 }
-

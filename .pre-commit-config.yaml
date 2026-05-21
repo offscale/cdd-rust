@@ -1,0 +1,72 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: mixed-line-ending
+        args: ['--fix=lf']
+        exclude: \.(bat|cmd|ps1)$
+
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --
+        language: system
+        types: [rust]
+        pass_filenames: true
+
+      - id: cargo-check
+        name: cargo check
+        entry: cargo check --workspace --all-targets
+        language: system
+        pass_filenames: false
+        types: [rust]
+
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        language: system
+        pass_filenames: false
+        types: [rust]
+
+      - id: cargo-build
+        name: cargo build
+        entry: cargo build --workspace --all-targets
+        language: system
+        pass_filenames: false
+        types: [rust]
+
+      - id: cargo-test
+        name: cargo test
+        entry: cargo test --workspace
+        language: system
+        pass_filenames: false
+        types: [rust]
+
+      - id: test-swagger-2
+        name: Test Swagger 2.0 Petstore
+        entry: cargo run -p cdd-cli -- from_openapi to_sdk -i ../petstore.json -o ./target/petstore2
+        language: system
+        pass_filenames: false
+        types: [rust]
+
+      - id: test-openapi-3
+        name: Test OpenAPI 3.2.0 Petstore
+        entry: cargo run -p cdd-cli -- from_openapi to_sdk -i ../petstore_oas3.json -o ./target/petstore3
+        language: system
+        pass_filenames: false
+        types: [rust]
+
+      - id: wasm-build
+        name: WASM Build Test
+        entry: python scripts/build_wasm.py
+        language: python
+        pass_filenames: false
+        types: [rust]
+
+      - id: update-coverage
+        name: Update Coverage Badges
+        entry: python scripts/update_coverage.py
+        language: python
+        pass_filenames: false
+        always_run: true

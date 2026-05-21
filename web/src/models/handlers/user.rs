@@ -1,9 +1,9 @@
-use actix_web::{web, HttpResponse, Responder};
 use actix_multipart::Multipart;
+use actix_web::{web, HttpResponse, Responder};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
-use chrono::{DateTime, Utc, NaiveDate, NaiveDateTime};
 
 /// Query parameters for `create_user`.
 #[derive(Debug, Clone, Deserialize)]
@@ -28,7 +28,9 @@ pub struct CreateUsersWithArrayInputQuery {
 
 /// Creates list of users with given input array
 ///
-pub async fn create_users_with_array_input(query: web::Query<CreateUsersWithArrayInputQuery>) -> impl Responder {
+pub async fn create_users_with_array_input(
+    query: web::Query<CreateUsersWithArrayInputQuery>,
+) -> impl Responder {
     todo!()
 }
 
@@ -41,7 +43,9 @@ pub struct CreateUsersWithListInputQuery {
 
 /// Creates list of users with given input array
 ///
-pub async fn create_users_with_list_input(query: web::Query<CreateUsersWithListInputQuery>) -> impl Responder {
+pub async fn create_users_with_list_input(
+    query: web::Query<CreateUsersWithListInputQuery>,
+) -> impl Responder {
     todo!()
 }
 
@@ -88,7 +92,10 @@ pub struct UpdateUserQuery {
 /// Updated user
 ///
 /// This can only be done by the logged in user.
-pub async fn update_user(username: web::Path<String>, query: web::Query<UpdateUserQuery>) -> impl Responder {
+pub async fn update_user(
+    username: web::Path<String>,
+    query: web::Query<UpdateUserQuery>,
+) -> impl Responder {
     todo!()
 }
 
@@ -98,4 +105,3 @@ pub async fn update_user(username: web::Path<String>, query: web::Query<UpdateUs
 pub async fn delete_user(username: web::Path<String>) -> impl Responder {
     todo!()
 }
-
