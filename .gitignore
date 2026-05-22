@@ -18,12 +18,6 @@ __pycache__/
 target/
 .idea/
 
-# Python scripts and utilities
-*.py
-*.js
-
-
-
 # Executables
 cdd-rust-*
 *.wasm
@@ -32,16 +26,15 @@ cdd-rust-*
 out_native/
 out_wasm/
 out/
-tests/
+/tests/
 
 # Temporary / testing files
-test_*.rs
+/test_*.rs
 patch_*.py
 patch_*.js
 petstore*
 v2_spec.yaml
-spec.json
-.pre-commit-config.yaml
+*spec.json
 
 # OS generated files
 .DS_Store

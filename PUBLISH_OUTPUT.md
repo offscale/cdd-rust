@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout SDK Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
 
       - name: Setup Rust
         uses: actions-rs/toolchain@v1
@@ -71,7 +71,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
       
       - name: Setup Rust
         uses: actions-rs/toolchain@v1
