@@ -44,21 +44,19 @@ def get_doc_coverage():
     documented = 0.0
 
     for pkg in packages:
-        doc_output = run_cmd(f"cargo +nightly rustdoc -p {pkg} -- -Z unstable-options --show-coverage", ignore_errors=True)
+        doc_output = run_cmd(f"cargo +nightly rustdoc -p {pkg} -- -Z unstable-options --show-coverage --output-format json", ignore_errors=True)
+        # The JSON output is usually on the last line or mixed with Cargo output.
+        # We can find the JSON object by looking for the line starting with "{"
         for line in doc_output.splitlines():
-            if line.startswith("| Total"):
-                parts = [p.strip() for p in line.split('|')]
-                if len(parts) >= 5:
-                    try:
-                        pkg_total = int(parts[3])
-                        pkg_doc_pct_str = parts[4].replace('%', '')
-                        pkg_doc_pct = float(pkg_doc_pct_str)
-                        
-                        total_docs += pkg_total
-                        documented += (pkg_total * pkg_doc_pct / 100.0)
-                    except ValueError:
-                        pass
-                break
+            if line.startswith("{") and line.endswith("}"):
+                import json
+                try:
+                    data = json.loads(line)
+                    for file_path, stats in data.items():
+                        total_docs += stats.get("total", 0)
+                        documented += stats.get("with_docs", 0)
+                except Exception:
+                    pass
 
     if total_docs == 0:
         return "0.00"
