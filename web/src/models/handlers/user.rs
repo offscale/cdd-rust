@@ -1,3 +1,8 @@
+#![allow(unused_variables)]
+#![allow(unused_imports)]
+
+use crate::models::*;
+use crate::security;
 use actix_multipart::Multipart;
 use actix_web::{web, HttpResponse, Responder};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
@@ -16,7 +21,7 @@ pub struct CreateUserQuery {
 ///
 /// This can only be done by the logged in user.
 pub async fn create_user(query: web::Query<CreateUserQuery>) -> impl Responder {
-    todo!()
+    HttpResponse::NotImplemented().finish()
 }
 
 /// Query parameters for `create_users_with_array_input`.
@@ -31,7 +36,7 @@ pub struct CreateUsersWithArrayInputQuery {
 pub async fn create_users_with_array_input(
     query: web::Query<CreateUsersWithArrayInputQuery>,
 ) -> impl Responder {
-    todo!()
+    HttpResponse::NotImplemented().finish()
 }
 
 /// Query parameters for `create_users_with_list_input`.
@@ -46,7 +51,7 @@ pub struct CreateUsersWithListInputQuery {
 pub async fn create_users_with_list_input(
     query: web::Query<CreateUsersWithListInputQuery>,
 ) -> impl Responder {
-    todo!()
+    HttpResponse::NotImplemented().finish()
 }
 
 /// Query parameters for `login_user`.
@@ -67,19 +72,19 @@ pub async fn login_user(query: web::Query<LoginUserQuery>) -> actix_web::Result<
     // Example:
     // HttpResponse::[Status]()
     //     .finish()
-    todo!()
+    Ok(HttpResponse::NotImplemented().finish())
 }
 
 /// Logs out current logged in user session
 ///
 pub async fn logout_user() -> impl Responder {
-    todo!()
+    HttpResponse::NotImplemented().finish()
 }
 
 /// Get user by user name
 ///
 pub async fn get_user_by_name(username: web::Path<String>) -> impl Responder {
-    todo!()
+    HttpResponse::NotImplemented().finish()
 }
 
 /// Query parameters for `update_user`.
@@ -96,12 +101,12 @@ pub async fn update_user(
     username: web::Path<String>,
     query: web::Query<UpdateUserQuery>,
 ) -> impl Responder {
-    todo!()
+    HttpResponse::NotImplemented().finish()
 }
 
 /// Delete user
 ///
 /// This can only be done by the logged in user.
 pub async fn delete_user(username: web::Path<String>) -> impl Responder {
-    todo!()
+    HttpResponse::NotImplemented().finish()
 }

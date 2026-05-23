@@ -1,3 +1,8 @@
+#![allow(unused_variables)]
+#![allow(unused_imports)]
+
+use crate::models::*;
+use crate::security;
 use actix_multipart::Multipart;
 use actix_web::{web, HttpResponse, Responder};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
@@ -20,7 +25,7 @@ pub async fn add_pet(
         security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>,
     >,
 ) -> impl Responder {
-    todo!()
+    HttpResponse::NotImplemented().finish()
 }
 
 /// Query parameters for `update_pet`.
@@ -38,7 +43,7 @@ pub async fn update_pet(
         security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>,
     >,
 ) -> impl Responder {
-    todo!()
+    HttpResponse::NotImplemented().finish()
 }
 
 /// Query parameters for `find_pets_by_status`.
@@ -57,7 +62,7 @@ pub async fn find_pets_by_status(
         security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>,
     >,
 ) -> impl Responder {
-    todo!()
+    HttpResponse::NotImplemented().finish()
 }
 
 /// Query parameters for `find_pets_by_tags`.
@@ -77,7 +82,7 @@ pub async fn find_pets_by_tags(
         security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>,
     >,
 ) -> impl Responder {
-    todo!()
+    HttpResponse::NotImplemented().finish()
 }
 
 /// Find pet by ID
@@ -87,7 +92,7 @@ pub async fn get_pet_by_id(
     pet_id: web::Path<i64>,
     api_key: web::ReqData<security::ApiKey>,
 ) -> impl Responder {
-    todo!()
+    HttpResponse::NotImplemented().finish()
 }
 
 /// Query parameters for `update_pet_with_form`.
@@ -108,7 +113,7 @@ pub async fn update_pet_with_form(
         security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>,
     >,
 ) -> impl Responder {
-    todo!()
+    HttpResponse::NotImplemented().finish()
 }
 
 /// Deletes a pet
@@ -120,7 +125,7 @@ pub async fn delete_pet(
         security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>,
     >,
 ) -> impl Responder {
-    todo!()
+    HttpResponse::NotImplemented().finish()
 }
 
 /// Query parameters for `upload_file`.
@@ -142,5 +147,5 @@ pub async fn upload_file(
         security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>,
     >,
 ) -> impl Responder {
-    todo!()
+    HttpResponse::NotImplemented().finish()
 }

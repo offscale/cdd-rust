@@ -6,3 +6,5 @@ pub type Order = serde_json::Value;
 pub type User = serde_json::Value;
 /// Documented
 pub type ApiResponse = serde_json::Value;
+/// Documented
+pub mod handlers;
