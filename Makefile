@@ -20,6 +20,7 @@ help:
 	@echo "  build_docker   - Build alpine and debian Docker images."
 	@echo "  run_docker     - Run the built Docker images to test them."
 	@echo "  setup_hooks    - Setup git pre-commit hooks."
+	@echo "  docs           - Generate API documentation and symlink to docs/html."
 
 install_base:
 	rustup update
@@ -36,7 +37,12 @@ install_deps:
 
 DOC_DIR ?= target/doc
 build_docs:
-	cargo doc --no-deps --target-dir $(DOC_DIR)
+	cargo doc --no-deps --workspace --target-dir $(DOC_DIR)
+
+docs: build_docs
+	mkdir -p docs
+	ln -sfn ../$(DOC_DIR) docs/html
+	@echo '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>cdd-rust workspace</title></head><body><h1>cdd-rust Workspace Documentation</h1><ul><li><a href="cdd_core/index.html">cdd-core</a></li><li><a href="cdd_rust/index.html">cdd-cli</a></li><li><a href="cdd_web/index.html">cdd-web</a></li></ul></body></html>' > $(DOC_DIR)/index.html
 
 BIN_DIR ?= target/release
 build:

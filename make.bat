@@ -7,6 +7,7 @@ IF "%1"=="all" GOTO help
 IF "%1"=="install_base" GOTO install_base
 IF "%1"=="install_deps" GOTO install_deps
 IF "%1"=="build_docs" GOTO build_docs
+IF "%1"=="docs" GOTO docs
 IF "%1"=="build" GOTO build
 IF "%1"=="test" GOTO test
 IF "%1"=="run" GOTO run
@@ -22,6 +23,7 @@ ECHO Available commands:
 ECHO   install_base   - Install Rust and WASM targets
 ECHO   install_deps   - Fetch dependencies
 ECHO   build_docs     - Build API docs (Use DOC_DIR to override path)
+ECHO   docs           - Build API docs and create docs/html symlink
 ECHO   build          - Build CLI binary (Use BIN_DIR to override path)
 ECHO   test           - Run tests
 ECHO   run            - Run the CLI tool (e.g., make.bat run --version)
@@ -41,7 +43,15 @@ GOTO :EOF
 
 :build_docs
 IF "%DOC_DIR%"=="" SET DOC_DIR=target\doc
-cargo doc --no-deps --target-dir %DOC_DIR%
+cargo doc --no-deps --workspace --target-dir %DOC_DIR%
+GOTO :EOF
+
+:docs
+CALL :build_docs
+IF NOT EXIST "docs" MKDIR "docs"
+IF EXIST "docs\html" RMDIR /S /Q "docs\html"
+MKLINK /J "docs\html" "%DOC_DIR%"
+ECHO ^<!DOCTYPE html^>^<html lang="en"^>^<head^>^<meta charset="utf-8"^>^<title^>cdd-rust workspace^</title^>^</head^>^<body^>^<h1^>cdd-rust Workspace Documentation^</h1^>^<ul^>^<li^>^<a href="cdd_core/index.html"^>cdd-core^</a^>^</li^>^<li^>^<a href="cdd_rust/index.html"^>cdd-cli^</a^>^</li^>^<li^>^<a href="cdd_web/index.html"^>cdd-web^</a^>^</li^>^</ul^>^</body^>^</html^> > "%DOC_DIR%\index.html"
 GOTO :EOF
 
 :build

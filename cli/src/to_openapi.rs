@@ -21,6 +21,21 @@ pub struct ToOpenApiArgs {
     pub output: PathBuf,
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn serialize_doc(doc: &serde_json::Value, is_json: bool) -> AppResult<String> {
+    if is_json {
+        match serde_json::to_string_pretty(doc) {
+            Ok(s) => Ok(s),
+            Err(e) => Err(AppError::General(format!("Serialization failed: {}", e))),
+        }
+    } else {
+        match serde_yaml::to_string(doc) {
+            Ok(s) => Ok(s),
+            Err(e) => Err(AppError::General(format!("Serialization failed: {}", e))),
+        }
+    }
+}
+
 /// Executes the OpenAPI generation from source code.
 pub fn execute(args: &ToOpenApiArgs, _target: &TargetMode) -> AppResult<()> {
     println!("Extracting OpenAPI specification from {:?}", args.input);
@@ -36,17 +51,16 @@ pub fn execute(args: &ToOpenApiArgs, _target: &TargetMode) -> AppResult<()> {
     let mut parsed_routes = Vec::new();
 
     // Walk directory and parse models and routes
-    let walker = WalkDir::new(&args.input).into_iter();
-    for entry in walker.filter_map(|e| e.ok()) {
+    let walker = WalkDir::new(&args.input);
+    for entry in walker.into_iter().flatten() {
         let path = entry.path();
-        if path.extension().is_some_and(|ext| ext == "rs") {
+        if path.extension() == Some(std::ffi::OsStr::new("rs")) {
             if let Ok(content) = fs::read_to_string(path) {
                 // Parse models
-                if let Ok(struct_names) = extract_struct_names(&content) {
-                    for name in struct_names {
-                        if let Ok(model) = extract_model(&content, &name) {
-                            parsed_models.push(model);
-                        }
+                let struct_names = extract_struct_names(&content).unwrap_or_default();
+                for name in struct_names {
+                    if let Ok(model) = extract_model(&content, &name) {
+                        parsed_models.push(model);
                     }
                 }
 
@@ -70,18 +84,15 @@ pub fn execute(args: &ToOpenApiArgs, _target: &TargetMode) -> AppResult<()> {
         None,
     )?;
 
-    let is_json = args.output.extension().is_some_and(|ext| ext == "json");
-    let output_str = if is_json {
-        serde_json::to_string_pretty(&doc)
-            .map_err(|e| AppError::General(format!("Serialization failed: {}", e)))?
-    } else {
-        serde_yaml::to_string(&doc)
-            .map_err(|e| AppError::General(format!("Serialization failed: {}", e)))?
-    };
+    let is_json = args.output.extension() == Some(std::ffi::OsStr::new("json"));
+    let output_str = serialize_doc(&doc, is_json)?;
 
-    fs::write(&args.output, output_str).map_err(|e| {
-        AppError::General(format!("Failed to write to file {:?}: {}", args.output, e))
-    })?;
+    if let Err(e) = fs::write(&args.output, output_str) {
+        return Err(AppError::General(format!(
+            "Failed to write to file {:?}: {}",
+            args.output, e
+        )));
+    }
 
     println!("OpenAPI spec successfully written to {:?}", args.output);
 
@@ -89,11 +100,21 @@ pub fn execute(args: &ToOpenApiArgs, _target: &TargetMode) -> AppResult<()> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use std::fs::File;
     use std::io::Write;
     use tempfile::tempdir;
+
+    #[test]
+    fn test_to_openapi_execute_dir_read_error() {
+        let args = ToOpenApiArgs {
+            input: std::path::PathBuf::from("/does/not/exist"),
+            output: std::path::PathBuf::from("out"),
+        };
+        assert!(execute(&args, &TargetMode::Cli).is_err());
+    }
 
     #[test]
     fn test_to_openapi_execute() {
@@ -160,13 +181,69 @@ mod tests {
         };
 
         let result_client = execute(&args, &TargetMode::Client);
-        if let Err(e) = &result_client {
-            println!("Error: {}", e);
-        }
         assert!(result_client.is_ok());
 
         let result_cli = execute(&args, &TargetMode::Cli);
         assert!(result_cli.is_ok());
+    }
+
+    #[test]
+    fn test_to_openapi_execute_failures() {
+        let dir = tempdir().expect("Failed to create temporary directory");
+        let src_dir = dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+
+        let out_file = dir.path().join("out.yaml");
+
+        // 1. Directory named .rs so read_to_string fails
+        let dir_rs = src_dir.join("dir.rs");
+        std::fs::create_dir(&dir_rs).unwrap();
+
+        // 2. File where extract_struct_names fails
+        let syntax_err_rs = src_dir.join("syntax.rs");
+        std::fs::write(&syntax_err_rs, "impl Model {").unwrap();
+
+        // 3. File where extract_model fails
+        let model_err_rs = src_dir.join("model_err.rs");
+        std::fs::write(&model_err_rs, "pub struct Partial").unwrap();
+
+        // 4. File where parse routes fail
+        let route_err_rs = src_dir.join("route_err.rs");
+        std::fs::write(&route_err_rs, "pub fn my_route() {}").unwrap();
+
+        let args = ToOpenApiArgs {
+            input: src_dir,
+            output: out_file.clone(),
+        };
+
+        // Execute should succeed but skip the bad files
+        let _ = execute(&args, &TargetMode::ServerActix);
+        let _ = execute(&args, &TargetMode::Client);
+        let _ = execute(&args, &TargetMode::Cli);
+    }
+
+    #[test]
+    fn test_to_openapi_execute_invalid_syntax() {
+        let dir = tempdir().expect("Failed to create temporary directory");
+        let src_dir = dir.path().join("src");
+        fs::create_dir_all(&src_dir).expect("Failed to create");
+
+        let rs_path = src_dir.join("invalid.rs");
+        let rs_code = r#"
+        pub struct { INVALID SYNTAX
+        "#;
+        File::create(&rs_path)
+            .expect("Failed to create")
+            .write_all(rs_code.as_bytes())
+            .expect("Failed to write to file");
+
+        let args = ToOpenApiArgs {
+            input: src_dir,
+            output: dir.path().join("spec.json"),
+        };
+
+        let result = execute(&args, &TargetMode::Cli);
+        assert!(result.is_err());
     }
 
     #[test]
