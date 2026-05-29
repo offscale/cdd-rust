@@ -3,8 +3,8 @@ cdd-rust
 [![License](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![interactive WASM web demo](https://img.shields.io/badge/interactive-WASM_web_demo-blue.svg)](https://offscale.io/wasm_web_demo)
 [![CI](https://github.com/offscale/cdd-rust/actions/workflows/ci.yml/badge.svg)](https://github.com/offscale/cdd-rust/actions)
-[![Test Coverage](https://img.shields.io/badge/test_coverage-97.56%25-brightgreen.svg)](#)
-[![Doc Coverage](https://img.shields.io/badge/doc_coverage-99.83%25-brightgreen.svg)](#)
+[![Test Coverage](https://img.shields.io/badge/test_coverage-77.24%25-yellow.svg)](#)
+[![Doc Coverage](https://img.shields.io/badge/doc_coverage-100.00%25-brightgreen.svg)](#)
 
 ----
 
@@ -21,9 +21,9 @@ The CLI—at a minimum—has:
 - `cdd-rust from_openapi to_sdk_cli -i spec.json`
 - `cdd-rust from_openapi to_sdk -i spec.json`
 - `cdd-rust from_openapi to_server -i spec.json`
-- `cdd-rust to_openapi -f path/to/code`
+- `cdd-rust to_openapi -i path/to/code`
 - `cdd-rust to_docs_json --no-imports --no-wrapping -i spec.json`
-- `cdd-rust serve_json_rpc --port 8080 --listen 0.0.0.0`
+- `cdd-rust serve_json_rpc -p 8080 -l 0.0.0.0`
 
 ## SDK Example
 
@@ -96,10 +96,10 @@ Commands:
   test-gen        Generates integration tests based on OpenAPI contracts
   scaffold        Scaffolds handler functions from OpenAPI Routes
   schema-gen      Generates a JSON Schema from a Rust struct or enum
-  to_docs_json    Generates a JSON output with documentation code snippets for an OpenAPI spec
-  from_openapi    Generates code from an OpenAPI specification
-  to_openapi      Generates an OpenAPI specification from source code
-  serve_json_rpc  Expose CLI interface as JSON-RPC server over HTTP
+  to_docs_json    Generate JSON documentation with code snippets for an OpenAPI specification.
+  from_openapi    Generate code from an OpenAPI specification.
+  to_openapi      Generate an OpenAPI specification from source code.
+  serve_json_rpc  Expose CLI interface as a JSON-RPC server.
   help            Print this message or the help of the given subcommand(s)
 
 Options:

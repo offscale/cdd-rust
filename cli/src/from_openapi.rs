@@ -59,19 +59,19 @@ pub struct GenerateArgs {
     #[clap(long, required_unless_present = "input", env = "CDD_INPUT_DIR")]
     pub input_dir: Option<PathBuf>,
 
-    /// Output directory for generated code. Defaults to current directory.
-    #[clap(short, long, env = "CDD_OUTPUT_DIR")]
+    /// Output file or directory path.
+    #[clap(short, long = "output", env = "CDD_OUTPUT")]
     pub output_dir: Option<PathBuf>,
 
     /// Do not generate GitHub Actions scaffolding.
     #[clap(long, env = "CDD_NO_GITHUB_ACTIONS")]
     pub no_github_actions: bool,
 
-    /// Do not generate an installable package scaffolding (e.g. Cargo.toml).
+    /// Do not generate installable package scaffolding.
     #[clap(long, env = "CDD_NO_INSTALLABLE_PACKAGE")]
     pub no_installable_package: bool,
 
-    /// Generate integration tests.
+    /// Generate integration tests and mocks.
     #[clap(long, env = "CDD_TESTS")]
     pub tests: bool,
 }
@@ -511,5 +511,45 @@ components:
         };
         let _ = run_generation(&args, &cdd_core::strategies::ActixStrategy);
         Ok(())
+    }
+}
+
+/// Configuration for `from_openapi` programmatic API
+#[derive(Debug, Default)]
+pub struct FromOpenApiConfig {
+    pub subcommand: String,
+    pub input: Option<PathBuf>,
+    pub input_dir: Option<PathBuf>,
+    pub output_dir: Option<PathBuf>,
+    pub no_github_actions: bool,
+    pub no_installable_package: bool,
+    pub tests: bool,
+    pub framework: ServerFramework,
+}
+
+/// Generate code from an OpenAPI specification.
+pub fn generate_from_openapi(config: &FromOpenApiConfig) -> AppResult<()> {
+    let gen_args = GenerateArgs {
+        input: config.input.clone(),
+        input_dir: config.input_dir.clone(),
+        output_dir: config.output_dir.clone(),
+        no_github_actions: config.no_github_actions,
+        no_installable_package: config.no_installable_package,
+        tests: config.tests,
+    };
+
+    match config.subcommand.as_str() {
+        "to_sdk_cli" => run_generation(&gen_args, &ClapCliStrategy),
+        "to_sdk" => run_generation(&gen_args, &ReqwestStrategy),
+        "to_server" => match config.framework {
+            ServerFramework::ActixWeb => {
+                run_generation(&gen_args, &cdd_core::strategies::ActixStrategy)
+            }
+            ServerFramework::Axum => run_generation(&gen_args, &cdd_core::strategies::AxumStrategy),
+        },
+        _ => Err(AppError::General(format!(
+            "Unknown subcommand: {}",
+            config.subcommand
+        ))),
     }
 }

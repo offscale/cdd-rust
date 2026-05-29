@@ -33,3 +33,7 @@ workspace = true
 default = ["server", "client"]
 server = ["actix-web", "actix-rt", "tokio"]
 client = ["ureq"]
+
+[lib]
+name = "cdd_cli"
+path = "src/lib.rs"

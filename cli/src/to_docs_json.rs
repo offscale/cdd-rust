@@ -1,4 +1,5 @@
 //! Documentation JSON generation module.
+
 use cdd_core::error::{AppError, AppResult};
 use cdd_core::openapi::parse::document::parse_openapi_document;
 use cdd_core::openapi::parse::models::RouteKind;
@@ -21,7 +22,7 @@ pub struct ToDocsJsonArgs {
     #[clap(long, env = "CDD_NO_WRAPPING")]
     pub no_wrapping: bool,
 
-    /// Output file for the generated JSON.
+    /// Output file or directory path.
     #[clap(short, long, env = "CDD_OUTPUT")]
     pub output: Option<String>,
 }
@@ -101,7 +102,7 @@ fn read_input(input: &str) -> AppResult<String> {
 pub fn execute(args: &ToDocsJsonArgs) -> AppResult<()> {
     let yaml_content = read_input(&args.input)?;
 
-    let output = generate_docs_json(&yaml_content, args)?;
+    let output = generate_docs_json_impl(&yaml_content, args)?;
 
     let json = serde_json::to_string_pretty(&output)
         .map_err(|e| AppError::General(format!("JSON Serialization error: {}", e)))?;
@@ -117,7 +118,10 @@ pub fn execute(args: &ToDocsJsonArgs) -> AppResult<()> {
 }
 
 /// Generates the internal `DocsJsonOutput` structures from a parsed OpenAPI spec.
-fn generate_docs_json(yaml_content: &str, args: &ToDocsJsonArgs) -> AppResult<Vec<DocsJsonOutput>> {
+fn generate_docs_json_impl(
+    yaml_content: &str,
+    args: &ToDocsJsonArgs,
+) -> AppResult<Vec<DocsJsonOutput>> {
     let parsed = parse_openapi_document(yaml_content)?;
 
     let mut operations = Vec::new();
@@ -208,7 +212,7 @@ paths:
             output: None,
         };
 
-        let output = generate_docs_json(yaml, &args).expect("Failed to generate docs json");
+        let output = generate_docs_json_impl(yaml, &args).expect("Failed to generate docs json");
         assert_eq!(output.len(), 1);
         let rust_docs = &output[0];
         assert_eq!(rust_docs.language, "rust");
@@ -251,7 +255,7 @@ paths:
             output: None,
         };
 
-        let output = generate_docs_json(yaml, &args).expect("Failed to generate docs json");
+        let output = generate_docs_json_impl(yaml, &args).expect("Failed to generate docs json");
         let op = &output[0].operations[0];
 
         assert!(op.code.imports.is_none());
@@ -284,7 +288,7 @@ webhooks:
             output: None,
         };
 
-        let output = generate_docs_json(yaml, &args).expect("Failed to generate docs json");
+        let output = generate_docs_json_impl(yaml, &args).expect("Failed to generate docs json");
         // The webhook should be skipped, so operations should be empty
         assert_eq!(output.len(), 1);
         assert_eq!(output[0].operations.len(), 0);
@@ -357,4 +361,24 @@ paths: {}
         let result = execute(&args);
         assert!(result.is_err());
     }
+}
+
+/// Configuration for `to_docs_json` programmatic API
+#[derive(Debug, Default)]
+pub struct ToDocsJsonConfig {
+    pub input: String,
+    pub output: Option<String>,
+    pub no_imports: bool,
+    pub no_wrapping: bool,
+}
+
+/// Generate JSON documentation with code snippets for an OpenAPI specification.
+pub fn generate_docs_json(config: &ToDocsJsonConfig) -> AppResult<()> {
+    let args = ToDocsJsonArgs {
+        input: config.input.clone(),
+        output: config.output.clone(),
+        no_imports: config.no_imports,
+        no_wrapping: config.no_wrapping,
+    };
+    execute(&args)
 }

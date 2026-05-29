@@ -11,7 +11,7 @@ The primary CLI interaction uses the `cdd-rust` executable.
     *   `to_sdk`: Generate a Reqwest API client.
     *   `to_server`: Generate an Actix-web server scaffold.
 
-*   `cdd-rust to_openapi -f <src_dir> -o <spec.yaml>`
+*   `cdd-rust to_openapi -i <src_dir> -o <spec.yaml>`
     Parse an existing Actix-web or generic Rust workspace and build an OpenAPI spec.
 
 *   `cdd-rust to_docs_json -i <spec.yaml> -o <docs.json>`
@@ -23,7 +23,7 @@ The primary CLI interaction uses the `cdd-rust` executable.
 ## Example: Code First to API
 
 1. Define a basic handler with `actix-web` macros in your project.
-2. Run `cdd-rust to_openapi -f src/api -o output.yaml`.
+2. Run `cdd-rust to_openapi -i src/api -o output.yaml`.
 3. An `output.yaml` file natively reflecting your Rust structs and handlers is created.
 
 ## Example: API First to Code

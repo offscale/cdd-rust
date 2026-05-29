@@ -12,11 +12,11 @@ use walkdir::WalkDir;
 /// Arguments for generating an OpenAPI spec from source code.
 #[derive(Args, Debug)]
 pub struct ToOpenApiArgs {
-    /// Path to the code directory or file to parse.
+    /// Path to source code directory or file.
     #[clap(short = 'i', long, env = "CDD_INPUT")]
     pub input: PathBuf,
 
-    /// Output file for the generated OpenAPI spec.
+    /// Output file or directory path.
     #[clap(short = 'o', long, env = "CDD_OUTPUT", default_value = "spec.json")]
     pub output: PathBuf,
 }
@@ -113,7 +113,7 @@ mod tests {
             input: std::path::PathBuf::from("/does/not/exist"),
             output: std::path::PathBuf::from("out"),
         };
-        assert!(execute(&args, &TargetMode::Cli).is_err());
+        assert!(execute(&args, &TargetMode::ClientInternal).is_err());
     }
 
     #[test]
@@ -180,10 +180,10 @@ mod tests {
             output: dir.path().join("spec.json"),
         };
 
-        let result_client = execute(&args, &TargetMode::Client);
+        let result_client = execute(&args, &TargetMode::ClientReqwest);
         assert!(result_client.is_ok());
 
-        let result_cli = execute(&args, &TargetMode::Cli);
+        let result_cli = execute(&args, &TargetMode::ClientInternal);
         assert!(result_cli.is_ok());
     }
 
@@ -218,8 +218,8 @@ mod tests {
 
         // Execute should succeed but skip the bad files
         let _ = execute(&args, &TargetMode::ServerActix);
-        let _ = execute(&args, &TargetMode::Client);
-        let _ = execute(&args, &TargetMode::Cli);
+        let _ = execute(&args, &TargetMode::ClientReqwest);
+        let _ = execute(&args, &TargetMode::ClientInternal);
     }
 
     #[test]
@@ -242,7 +242,7 @@ mod tests {
             output: dir.path().join("spec.json"),
         };
 
-        let result = execute(&args, &TargetMode::Cli);
+        let result = execute(&args, &TargetMode::ClientInternal);
         assert!(result.is_err());
     }
 
@@ -293,4 +293,20 @@ mod tests {
         let result = execute(&args, &crate::TargetMode::ServerActix);
         assert!(result.is_err());
     }
+}
+
+/// Configuration for `to_openapi` programmatic API
+#[derive(Debug, Default)]
+pub struct ToOpenApiConfig {
+    pub input: PathBuf,
+    pub output: PathBuf,
+}
+
+/// Generate an OpenAPI specification from source code.
+pub fn generate_to_openapi(config: &ToOpenApiConfig) -> AppResult<()> {
+    let args = ToOpenApiArgs {
+        input: config.input.clone(),
+        output: config.output.clone(),
+    };
+    execute(&args, &crate::TargetMode::ServerActix)
 }
