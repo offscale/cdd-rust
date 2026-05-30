@@ -134,18 +134,10 @@ jobs:
 
   release:
     needs: [build-native, build-wasm]
-    if: github.event_name == 'push'
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-
-      - name: Update latest tag
-        if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git tag -f latest
-          git push origin -f latest
 
       - name: Download Artifacts
         uses: actions/download-artifact@v4
@@ -153,21 +145,23 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      - name: Release Artifacts
+      - name: Release Version
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG_NAME="${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}"
-          IS_PRERELEASE="${{ !startsWith(github.ref, 'refs/tags/') }}"
+          TAG_NAME="${{ github.ref_name }}"
           
-          # Create release if it doesn't exist
+          # Create version release if it doesn't exist, marked as latest
           if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
-            if [ "$IS_PRERELEASE" = "true" ]; then
-              gh release create "$TAG_NAME" --title "$TAG_NAME" --prerelease
-            else
-              gh release create "$TAG_NAME" --title "$TAG_NAME"
-            fi
+            gh release create "$TAG_NAME" --title "$TAG_NAME" --generate-notes --latest
           fi
           
           # Upload files with clobber (overwrite)
           gh release upload "$TAG_NAME" artifacts/* --clobber
+
+          # Force update 'latest' tag to the current commit and push
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag -f latest
+          git push -f origin latest
+
