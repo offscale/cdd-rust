@@ -20,6 +20,9 @@ pub mod openapi;
 /// Classes (Models/Structs) parsing and emitting.
 pub mod classes;
 
+/// Model Context Protocol.
+pub mod mcp;
+
 /// Functions (Handlers) parsing and emitting.
 pub mod functions;
 

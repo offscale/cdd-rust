@@ -93,6 +93,9 @@ enum Commands {
     /// Fallback for missing server feature
     #[cfg(any(not(feature = "server"), target_os = "wasi"))]
     ServeJsonRpc,
+    /// Expose CLI interface as an MCP server over STDIO.
+    #[clap(name = "mcp")]
+    Mcp(cdd_cli::mcp::McpArgs),
 }
 
 /// The main entry point of the CLI application.
@@ -145,6 +148,9 @@ fn main() -> AppResult<()> {
             return Err(cdd_core::error::AppError::General(
                 "Server feature is not compiled or not supported on this platform".to_string(),
             ));
+        }
+        Commands::Mcp(args) => {
+            cdd_cli::mcp::serve_mcp(args)?;
         }
     }
 

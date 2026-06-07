@@ -18,4 +18,8 @@ pub use axum::AxumStrategy;
 pub use reqwest::ReqwestStrategy;
 pub use traits::BackendStrategy;
 pub mod clap_cli;
+pub mod mcp_client;
+pub mod mcp_server;
 pub use clap_cli::ClapCliStrategy;
+pub use mcp_client::McpClientStrategy;
+pub use mcp_server::McpServerStrategy;

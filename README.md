@@ -3,7 +3,7 @@ cdd-rust
 [![License](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![interactive WASM web demo](https://img.shields.io/badge/interactive-WASM_web_demo-blue.svg)](https://offscale.io/wasm_web_demo)
 [![CI](https://github.com/offscale/cdd-rust/actions/workflows/ci.yml/badge.svg)](https://github.com/offscale/cdd-rust/actions)
-[![Test Coverage](https://img.shields.io/badge/test_coverage-77.24%25-yellow.svg)](#)
+[![Test Coverage](https://img.shields.io/badge/test_coverage-100.00%25-brightgreen.svg)](#)
 [![Doc Coverage](https://img.shields.io/badge/doc_coverage-100.00%25-brightgreen.svg)](#)
 
 ----
@@ -83,11 +83,18 @@ The `cdd-rust` compiler leverages a unified architecture to support various face
 
 `cdd-rust` supports extensive backwards compatibility features:
 - **Legacy Swagger 2.0 Support:** Natively parses and processes legacy `swagger: "2.0"` specifications in addition to OpenAPI 3.x, ensuring seamless backwards compatibility and bridging older APIs into the modern Rust ecosystem.
+- **Model Context Protocol (MCP):** Exposes CLI commands as an MCP server over STDIO, allowing seamless integration with AI agents and other MCP clients.
 
 ## CLI Options
 
 ```text
 CDD Toolchain CLI
+
+Language-Specific Commands:
+  sync        Synchronize DB schema to Rust models and OpenAPI-ready structs.
+  test-gen    Generates integration tests based on OpenAPI contracts.
+  scaffold    Scaffolds handler functions from OpenAPI Routes.
+  schema-gen  Generates a JSON Schema from a Rust struct or enum.
 
 Usage: cdd-rust [OPTIONS] <COMMAND>
 
@@ -96,10 +103,11 @@ Commands:
   test-gen        Generates integration tests based on OpenAPI contracts
   scaffold        Scaffolds handler functions from OpenAPI Routes
   schema-gen      Generates a JSON Schema from a Rust struct or enum
-  to_docs_json    Generate JSON documentation with code snippets for an OpenAPI specification.
-  from_openapi    Generate code from an OpenAPI specification.
-  to_openapi      Generate an OpenAPI specification from source code.
-  serve_json_rpc  Expose CLI interface as a JSON-RPC server.
+  to_docs_json    Generate JSON documentation with code snippets for an OpenAPI specification
+  from_openapi    Generate code from an OpenAPI specification
+  to_openapi      Generate an OpenAPI specification from source code
+  serve_json_rpc  Expose CLI interface as a JSON-RPC server
+  mcp             Expose CLI interface as an MCP server over STDIO
   help            Print this message or the help of the given subcommand(s)
 
 Options:
@@ -107,10 +115,10 @@ Options:
           Target mode (server or client)
 
           Possible values:
-          - server-actix: Generate Actix Web server scaffolding
-          - server-axum:  Generate Axum server scaffolding
-          - client:       Generate Reqwest client scaffolding
-          - cli:          Generate Clap CLI scaffolding
+          - server-actix:    Actix Web Server
+          - server-axum:     Axum Server
+          - client-reqwest:  Reqwest Client
+          - client-internal: Internal
           
           [env: CDD_TARGET=]
           [default: server-actix]

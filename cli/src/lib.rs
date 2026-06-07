@@ -3,6 +3,7 @@
 
 pub mod from_openapi;
 pub mod generator;
+pub mod mcp;
 pub mod scaffold;
 pub mod schema_gen;
 #[cfg(all(feature = "server", not(target_os = "wasi")))]

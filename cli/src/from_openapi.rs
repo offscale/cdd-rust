@@ -36,6 +36,9 @@ pub enum FromOpenApiCommands {
     /// Generate a Client SDK
     #[clap(name = "to_sdk")]
     Sdk(GenerateArgs),
+    /// Generate an MCP Programmatic Tool Adapter SDK
+    #[clap(name = "to_sdk_mcp")]
+    SdkMcp(GenerateArgs),
     /// Generate Server scaffolding
     #[clap(name = "to_server")]
     Server {
@@ -120,6 +123,10 @@ pub fn execute(args: &FromOpenApiArgs) -> AppResult<()> {
         FromOpenApiCommands::Sdk(gen_args) => {
             println!("Generating SDK...");
             run_generation(gen_args, &ReqwestStrategy)?;
+        }
+        FromOpenApiCommands::SdkMcp(gen_args) => {
+            println!("Generating MCP SDK...");
+            run_generation(gen_args, &cdd_core::strategies::McpClientStrategy)?;
         }
         FromOpenApiCommands::Server {
             args: gen_args,
@@ -432,6 +439,19 @@ components:
         };
         assert!(execute(&args).is_ok());
 
+        // Test SdkMcp
+        let args = FromOpenApiArgs {
+            command: FromOpenApiCommands::SdkMcp(GenerateArgs {
+                input: Some(input_file.clone()),
+                input_dir: None,
+                output_dir: Some(dir.path().join("out_mcp")),
+                no_github_actions: false,
+                no_installable_package: false,
+                tests: false,
+            }),
+        };
+        assert!(execute(&args).is_ok());
+
         // Test Server with ActixWeb
         let args = FromOpenApiArgs {
             command: FromOpenApiCommands::Server {
@@ -512,6 +532,15 @@ components:
         let _ = run_generation(&args, &cdd_core::strategies::ActixStrategy);
         Ok(())
     }
+    #[test]
+    fn test_generate_from_openapi_unknown_subcommand() {
+        let config = FromOpenApiConfig {
+            subcommand: "unknown_cmd".to_string(),
+            ..Default::default()
+        };
+        let result = generate_from_openapi(&config);
+        assert!(result.is_err());
+    }
 }
 
 /// Configuration for `from_openapi` programmatic API
@@ -541,6 +570,7 @@ pub fn generate_from_openapi(config: &FromOpenApiConfig) -> AppResult<()> {
     match config.subcommand.as_str() {
         "to_sdk_cli" => run_generation(&gen_args, &ClapCliStrategy),
         "to_sdk" => run_generation(&gen_args, &ReqwestStrategy),
+        "to_sdk_mcp" => run_generation(&gen_args, &cdd_core::strategies::McpClientStrategy),
         "to_server" => match config.framework {
             ServerFramework::ActixWeb => {
                 run_generation(&gen_args, &cdd_core::strategies::ActixStrategy)
