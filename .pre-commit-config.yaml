@@ -45,14 +45,14 @@ repos:
 
       - id: test-swagger-2
         name: Test Swagger 2.0 Petstore
-        entry: cargo run -p cdd-cli -- from_openapi to_sdk -i ../petstore.json -o ./target/petstore2
+        entry: bash scripts/test_sdk.sh ../petstore.json ./target/petstore2
         language: system
         pass_filenames: false
         types: [rust]
 
       - id: test-openapi-3
         name: Test OpenAPI 3.2.0 Petstore
-        entry: cargo run -p cdd-cli -- from_openapi to_sdk -i ../petstore_oas3.json -o ./target/petstore3
+        entry: bash scripts/test_sdk.sh ../petstore_oas3.json ./target/petstore3
         language: system
         pass_filenames: false
         types: [rust]
