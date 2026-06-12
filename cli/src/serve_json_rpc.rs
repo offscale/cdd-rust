@@ -216,6 +216,7 @@ async fn handle_rpc(req: web::Json<RpcRequest>) -> impl Responder {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
                 let tests = map.get("tests").and_then(|v| v.as_bool()).unwrap_or(false);
+                let mcp = map.get("mcp").and_then(|v| v.as_bool()).unwrap_or(false);
 
                 let config = FromOpenApiConfig {
                     subcommand,
@@ -225,6 +226,7 @@ async fn handle_rpc(req: web::Json<RpcRequest>) -> impl Responder {
                     no_github_actions,
                     no_installable_package,
                     tests,
+                    mcp,
                     framework: ServerFramework::ActixWeb, // default
                 };
 

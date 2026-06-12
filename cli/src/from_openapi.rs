@@ -76,7 +76,13 @@ pub struct GenerateArgs {
 
     /// Generate integration tests and mocks.
     #[clap(long, env = "CDD_TESTS")]
+    #[clap(long, env = "CDD_TESTS")]
     pub tests: bool,
+
+    /// Generate Model Context Protocol (MCP) server and adapter.
+
+    #[clap(long, env = "CDD_MCP")]
+    pub mcp: bool,
 }
 
 impl GenerateArgs {
@@ -119,6 +125,9 @@ pub fn execute(args: &FromOpenApiArgs) -> AppResult<()> {
         FromOpenApiCommands::SdkCli(gen_args) => {
             println!("Generating SDK CLI...");
             run_generation(gen_args, &ClapCliStrategy)?;
+            if gen_args.mcp {
+                run_generation(gen_args, &cdd_core::strategies::McpClientStrategy)?;
+            }
         }
         FromOpenApiCommands::Sdk(gen_args) => {
             println!("Generating SDK...");
@@ -312,6 +321,7 @@ mod tests {
             no_github_actions: false,
             no_installable_package: false,
             tests: false,
+            mcp: false,
         };
         let dir = args.get_output_dir();
         assert_eq!(
@@ -330,6 +340,7 @@ mod tests {
             no_github_actions: false,
             no_installable_package: false,
             tests: false,
+            mcp: false,
         };
         assert_eq!(args.get_output_dir(), path);
     }
@@ -344,6 +355,7 @@ mod tests {
             no_github_actions: false,
             no_installable_package: false,
             tests: false,
+            mcp: false,
         };
         assert_eq!(args.get_input_files(), vec![path]);
     }
@@ -365,6 +377,7 @@ mod tests {
             no_github_actions: false,
             no_installable_package: false,
             tests: false,
+            mcp: false,
         };
         let mut files = args.get_input_files();
         files.sort();
@@ -382,6 +395,7 @@ mod tests {
             no_github_actions: false,
             no_installable_package: false,
             tests: false,
+            mcp: false,
         };
         assert!(args.get_input_files().is_empty());
     }
@@ -422,6 +436,7 @@ components:
                 no_github_actions: false,
                 no_installable_package: false,
                 tests: false,
+                mcp: false,
             }),
         };
         assert!(execute(&args).is_ok());
@@ -435,6 +450,7 @@ components:
                 no_github_actions: false,
                 no_installable_package: false,
                 tests: false,
+                mcp: false,
             }),
         };
         assert!(execute(&args).is_ok());
@@ -448,6 +464,7 @@ components:
                 no_github_actions: false,
                 no_installable_package: false,
                 tests: false,
+                mcp: false,
             }),
         };
         assert!(execute(&args).is_ok());
@@ -462,6 +479,7 @@ components:
                     no_github_actions: false,
                     no_installable_package: false,
                     tests: false,
+                    mcp: false,
                 },
                 framework: ServerFramework::ActixWeb,
             },
@@ -478,6 +496,7 @@ components:
                     no_github_actions: false,
                     no_installable_package: false,
                     tests: false,
+                    mcp: false,
                 },
                 framework: ServerFramework::Axum,
             },
@@ -494,6 +513,7 @@ components:
             no_github_actions: false,
             no_installable_package: false,
             tests: false,
+            mcp: false,
         };
         let result = run_generation(&args, &cdd_core::strategies::ActixStrategy);
         assert!(result.is_err());
@@ -508,6 +528,7 @@ components:
             no_github_actions: false,
             no_installable_package: false,
             tests: false,
+            mcp: false,
         };
         let result = run_generation(&args, &cdd_core::strategies::ActixStrategy);
         assert!(result.is_err());
@@ -528,6 +549,7 @@ components:
             no_github_actions: true,
             no_installable_package: true,
             tests: true,
+            mcp: false,
         };
         let _ = run_generation(&args, &cdd_core::strategies::ActixStrategy);
         Ok(())
@@ -552,7 +574,11 @@ pub struct FromOpenApiConfig {
     pub output_dir: Option<PathBuf>,
     pub no_github_actions: bool,
     pub no_installable_package: bool,
+
     pub tests: bool,
+
+    /// Generate Model Context Protocol (MCP) server and adapter.
+    pub mcp: bool,
     pub framework: ServerFramework,
 }
 
@@ -565,10 +591,18 @@ pub fn generate_from_openapi(config: &FromOpenApiConfig) -> AppResult<()> {
         no_github_actions: config.no_github_actions,
         no_installable_package: config.no_installable_package,
         tests: config.tests,
+        mcp: config.mcp,
     };
 
     match config.subcommand.as_str() {
-        "to_sdk_cli" => run_generation(&gen_args, &ClapCliStrategy),
+        "to_sdk_cli" => {
+            let res = run_generation(&gen_args, &ClapCliStrategy);
+            if gen_args.mcp && res.is_ok() {
+                run_generation(&gen_args, &cdd_core::strategies::McpClientStrategy)
+            } else {
+                res
+            }
+        }
         "to_sdk" => run_generation(&gen_args, &ReqwestStrategy),
         "to_sdk_mcp" => run_generation(&gen_args, &cdd_core::strategies::McpClientStrategy),
         "to_server" => match config.framework {
