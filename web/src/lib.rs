@@ -15,13 +15,25 @@ pub use diesel;
 /// Documented
 pub mod schema;
 
+/// Data Access Objects
+pub mod dao;
+/// Central error enum
+pub mod error;
 /// Documented
 pub mod handlers;
+/// Identity Provider
+pub mod idp;
 /// Data models generated from schema.
 /// Documented
 pub mod models;
 /// Documented
 pub mod security;
+/// Fake data generator and seeder
+pub mod seeder;
+/// Request Validation
+pub mod validation;
+/// Webhooks
+pub mod webhooks;
 
 /// A simple health check handler.
 #[get("/health")]

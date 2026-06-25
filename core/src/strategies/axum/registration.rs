@@ -12,6 +12,12 @@ pub fn route_registration_statement(route: &ParsedRoute, handler_full_path: &str
     // Convert OpenAPI path format /path/{param} to Axum format /path/:param
     let mut axum_path = route.path.clone();
 
+    if let Some(bp) = &route.base_path {
+        if !axum_path.starts_with(bp) {
+            axum_path = format!("{}{}", bp, axum_path);
+        }
+    }
+
     // Quick regex replacement simulation for {param} -> :param
     while let Some(start) = axum_path.find('{') {
         if let Some(end) = axum_path[start..].find('}') {

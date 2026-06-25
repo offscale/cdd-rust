@@ -151,8 +151,8 @@ pub fn config(cfg: &mut web::ServiceConfig) {
         let code = register_routes(source, "users", &[parser_route], &strategy)
             .expect("Failed to register routes");
 
-        assert!(code.contains("cfg.service(web::resource(\"/users\")"));
-        assert!(code.contains(".route(web::get().to(handlers::users::get_users)));"));
+        assert!(code.contains("cfg.route(\"/users\""));
+        assert!(code.contains(", web::get().to(handlers::users::get_users));"));
     }
 
     #[test]

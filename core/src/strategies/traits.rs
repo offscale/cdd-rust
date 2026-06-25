@@ -16,6 +16,11 @@ use crate::openapi::parse::RequestBodyDefinition;
 /// and route registrations for a specific backend.
 /// Also includes methods for generating integration tests.
 pub trait BackendStrategy {
+    /// Indicates if this strategy is generating a server (true) or a client/SDK (false).
+    fn is_server(&self) -> bool {
+        false
+    }
+
     // --- Scaffolding & Routing ---
 
     /// Returns the standard imports for a handler file in this framework.

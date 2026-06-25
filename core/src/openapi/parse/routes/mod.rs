@@ -878,8 +878,11 @@ fn resolve_base_path(openapi: &ShimOpenApi, retrieval_uri: Option<&str>) -> Opti
     // 1. Swagger 2.0 basePath
     if let Some(bp) = &openapi.base_path {
         let trimmed = bp.trim_end_matches('/');
+        if !trimmed.starts_with('/') && !trimmed.is_empty() {
+            return normalize_base_path(&format!("/{}", trimmed));
+        }
         if !trimmed.is_empty() {
-            return Some(trimmed.to_string());
+            return normalize_base_path(trimmed);
         }
     }
 

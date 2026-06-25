@@ -10,9 +10,12 @@ use crate::strategies::actix::links::generate_link_construction;
 /// Returns standard imports for Actix handlers.
 pub fn handler_imports() -> String {
     let mut imports = String::new();
+    imports.push_str("use crate::models::*;\n");
+    imports.push_str("use crate::security;\n");
+    imports.push_str("use crate::security::scopes;\n");
     imports.push_str("use actix_web::{web, HttpResponse, Responder};\n");
     imports.push_str("use actix_multipart::Multipart;\n");
-    imports.push_str("use serde::Deserialize;\n");
+    imports.push_str("use serde::{Deserialize, Serialize};\n");
     imports.push_str("use serde_json::Value;\n");
     imports.push_str("use uuid::Uuid;\n");
     imports.push_str("use chrono::{DateTime, Utc, NaiveDate, NaiveDateTime};\n");
@@ -85,7 +88,21 @@ pub fn handler_signature(route: &crate::openapi::parse::ParsedRoute, args: &[Str
         }
     }
 
-    body.push_str("    todo!()");
+    if response_type.is_none() && !has_headers && !has_links {
+        body.push_str("    actix_web::HttpResponse::Ok().finish()");
+    } else if has_headers || has_links {
+        body.push_str("    Ok(HttpResponse::Ok().finish())");
+    } else {
+        if let Some(t) = response_type {
+            if t.contains("Vec<") {
+                body.push_str("    Ok(web::Json(vec![]))");
+            } else {
+                body.push_str("    Ok(web::Json(Default::default()))");
+            }
+        } else {
+            body.push_str("    Ok(HttpResponse::Ok().finish())");
+        }
+    }
 
     format!(
         "pub async fn {}({}) -> {} {{\n{}\n}}\n",
@@ -151,7 +168,7 @@ mod tests {
     fn test_handler_imports_contains_expected_use() {
         let imports = handler_imports();
         assert!(imports.contains("actix_web::{web, HttpResponse, Responder}"));
-        assert!(imports.contains("use serde::Deserialize;"));
+        assert!(imports.contains("use serde::{Deserialize, Serialize};"));
         assert!(imports.contains("chrono::{DateTime, Utc, NaiveDate, NaiveDateTime}"));
     }
 
@@ -162,7 +179,7 @@ mod tests {
         let sig = handler_signature(&route, &args);
         assert!(sig.contains("pub async fn get_user"));
         assert!(sig.contains("-> actix_web::Result<web::Json<User>>"));
-        assert!(sig.contains("todo!()"));
+        assert!(sig.contains("Ok(web::Json(Default::default()))"));
     }
 
     #[test]
@@ -200,9 +217,8 @@ mod tests {
         let route = dummy_route("get_user", Some("User"), headers, Some(links));
         let sig = handler_signature(&route, &[]);
         assert!(sig.contains("-> actix_web::Result<HttpResponse>"));
-        assert!(sig.contains("Required Response Headers"));
-        assert!(sig.contains("Generated Links"));
-        assert!(sig.contains("todo!()"));
+        assert!(sig.contains("HttpResponse::[Status]()"));
+        assert!(sig.contains("Ok(HttpResponse::Ok().finish())"));
     }
 
     #[test]

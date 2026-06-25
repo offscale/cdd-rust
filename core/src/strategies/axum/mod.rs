@@ -17,6 +17,10 @@ use crate::strategies::BackendStrategy;
 pub struct AxumStrategy;
 
 impl BackendStrategy for AxumStrategy {
+    fn is_server(&self) -> bool {
+        true
+    }
+
     // --- Scaffolding ---
 
     fn handler_imports(&self) -> String {

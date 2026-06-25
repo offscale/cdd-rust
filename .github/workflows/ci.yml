@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Rust
         run: |
@@ -63,6 +63,12 @@ jobs:
       - name: Test OpenAPI 3.2.0 Petstore SDK Generation
         run: cargo run -p cdd-cli -- from_openapi to_sdk -i ./petstore_oas3.yaml -o ./target/petstore3
 
+      - name: Test Swagger 2.0 Petstore Server & Client
+        run: bash scripts/test_server_and_client.sh ./petstore.json ./target/server_petstore2 ./target/client_petstore2
+
+      - name: Test OpenAPI 3.2.0 Petstore Server & Client
+        run: bash scripts/test_server_and_client.sh ./petstore_oas3.yaml ./target/server_petstore3 ./target/client_petstore3
+
       - name: Check Documentation Coverage
         run: |
           rustup toolchain install nightly
@@ -89,7 +95,7 @@ jobs:
             artifact_name: cdd-rust-aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -109,7 +115,7 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -137,7 +143,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Download Artifacts
         uses: actions/download-artifact@v8

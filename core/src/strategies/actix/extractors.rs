@@ -48,12 +48,12 @@ pub fn query_string_extractor(
 
 /// Generates the type string for header extraction.
 pub fn header_extractor(_inner_type: &str) -> String {
-    "web::Header<String>".to_string()
+    "actix_web::HttpRequest".to_string()
 }
 
 /// Generates the type string for cookie extraction.
 pub fn cookie_extractor() -> String {
-    "web::Cookie".to_string()
+    "actix_web::HttpRequest".to_string()
 }
 
 /// Generates the type string for JSON body extraction.

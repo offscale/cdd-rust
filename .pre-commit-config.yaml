@@ -44,15 +44,29 @@ repos:
         types: [rust]
 
       - id: test-swagger-2
-        name: Test Swagger 2.0 Petstore
+        name: Test Swagger 2.0 Petstore SDK
         entry: bash scripts/test_sdk.sh ../petstore.json ./target/petstore2
         language: system
         pass_filenames: false
         types: [rust]
 
       - id: test-openapi-3
-        name: Test OpenAPI 3.2.0 Petstore
+        name: Test OpenAPI 3.2.0 Petstore SDK
         entry: bash scripts/test_sdk.sh ../petstore_oas3.json ./target/petstore3
+        language: system
+        pass_filenames: false
+        types: [rust]
+
+      - id: test-server-swagger-2
+        name: Test Swagger 2.0 Petstore Server & Client
+        entry: bash scripts/test_server_and_client.sh ../petstore.json ./target/server_petstore2 ./target/client_petstore2
+        language: system
+        pass_filenames: false
+        types: [rust]
+
+      - id: test-server-openapi-3
+        name: Test OpenAPI 3.2.0 Petstore Server & Client
+        entry: bash scripts/test_server_and_client.sh ../petstore_oas3.json ./target/server_petstore3 ./target/client_petstore3
         language: system
         pass_filenames: false
         types: [rust]

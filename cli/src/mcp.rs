@@ -296,9 +296,10 @@ pub fn serve_mcp_inner(stdin: &mut dyn BufRead, stdout: &mut dyn Write) -> AppRe
                                     args.get("out_models_dir").and_then(|v| v.as_str());
 
                                 if let (Some(db), Some(out)) = (db_path, out_models_dir) {
-                                    use crate::sync::SyncArgs;
+                                    use crate::sync::{SyncArgs, SyncTruth};
                                     use std::path::PathBuf;
                                     let sync_args = SyncArgs {
+                                        truth: SyncTruth::Database,
                                         schema_path: PathBuf::from(db),
                                         model_dir: PathBuf::from(out),
                                         no_gen: false,

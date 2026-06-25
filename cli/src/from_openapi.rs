@@ -168,11 +168,32 @@ fn run_generation(
     }
 
     let out_dir = args.get_output_dir();
-    fs::create_dir_all(&out_dir).unwrap_or_default();
+    fs::create_dir_all(&out_dir).map_err(|e| AppError::General(e.to_string()))?;
 
     if !args.no_installable_package {
         let cargo_toml_path = out_dir.join("Cargo.toml");
         if !cargo_toml_path.exists() {
+            let mut dependencies = String::from(
+                r#"tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_qs = "1.0"
+reqwest = { version = "0.11", features = ["json"] }
+actix-web = "4.0"
+clap = { version = "4.0", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+utoipa = "4.2"
+uuid = { version = "1.8", features = ["serde", "v4"] }
+"#,
+            );
+
+            if strategy.is_server() {
+                dependencies.push_str("actix-multipart = \"0.7.2\"\n");
+                dependencies.push_str("diesel = { version = \"2.1\", features = [\"postgres\", \"sqlite\", \"r2d2\", \"chrono\", \"uuid\"] }\n");
+                dependencies.push_str("fake = \"2.9\"\n");
+                dependencies.push_str("actix-cors = \"0.7.1\"\n");
+            }
+
             let cargo_toml = format!(
                 r#"[package]
 name = "{}"
@@ -180,30 +201,21 @@ version = "0.0.1"
 edition = "2021"
 
 [dependencies]
-tokio = {{ version = "1", features = ["full"] }}
-serde = {{ version = "1.0", features = ["derive"] }}
-serde_json = "1.0"
-serde_qs = "1.0"
-reqwest = {{ version = "0.11", features = ["json"] }}
-actix-web = "4.0"
-diesel = {{ version = "2.0", features = ["postgres"] }}
-clap = {{ version = "4.0", features = ["derive"] }}
-chrono = {{ version = "0.4", features = ["serde"] }}
-utoipa = "4.2"
-uuid = {{ version = "1.8", features = ["serde"] }}
+{}
 "#,
                 out_dir
                     .file_name()
                     .unwrap_or_else(|| std::ffi::OsStr::new("generated_package"))
-                    .to_string_lossy()
+                    .to_string_lossy(),
+                dependencies
             );
-            fs::write(cargo_toml_path, cargo_toml).unwrap_or_default();
+            fs::write(cargo_toml_path, cargo_toml).map_err(|e| AppError::General(e.to_string()))?;
         }
     }
 
     if !args.no_github_actions {
         let gh_workflows_dir = out_dir.join(".github").join("workflows");
-        fs::create_dir_all(&gh_workflows_dir).unwrap_or_default();
+        fs::create_dir_all(&gh_workflows_dir).map_err(|e| AppError::General(e.to_string()))?;
         let ci_yml_path = gh_workflows_dir.join("ci.yml");
         if !ci_yml_path.exists() {
             let ci_yml = r#"name: CI
@@ -223,7 +235,7 @@ jobs:
       - name: Run tests
         run: cargo test --verbose
 "#;
-            fs::write(ci_yml_path, ci_yml).unwrap_or_default();
+            fs::write(ci_yml_path, ci_yml).map_err(|e| AppError::General(e.to_string()))?;
         }
     }
 
@@ -233,29 +245,72 @@ jobs:
 
         // 1. Generate Models (DTOs)
         let src_dir = out_dir.join("src");
-        fs::create_dir_all(&src_dir).unwrap_or_default();
+        fs::create_dir_all(&src_dir).map_err(|e| AppError::General(e.to_string()))?;
         let mut lib_rs_content = String::new();
 
         let models_dir = src_dir.join("models");
-        fs::create_dir_all(&models_dir).unwrap_or_default();
+        fs::create_dir_all(&models_dir).map_err(|e| AppError::General(e.to_string()))?;
 
         let models = cdd_core::openapi::parse::parse_openapi_spec(&yaml_content)?;
         if !models.is_empty() {
             let rust_code = cdd_core::classes::emit::generate_dtos(&models);
             let file_path = models_dir.join("generated.rs");
-            fs::write(&file_path, rust_code).unwrap_or_default();
+            fs::write(&file_path, rust_code).map_err(|e| AppError::General(e.to_string()))?;
             let mod_rs = "pub mod generated;\npub use generated::*;\n";
-            fs::write(models_dir.join("mod.rs"), mod_rs).unwrap_or_default();
+            fs::write(models_dir.join("mod.rs"), mod_rs)
+                .map_err(|e| AppError::General(e.to_string()))?;
             lib_rs_content.push_str("pub mod models;\n");
         }
 
         // 2. Scaffold Handlers
         let handlers_dir = src_dir.join("handlers");
-        fs::create_dir_all(&handlers_dir).unwrap_or_default();
+        fs::create_dir_all(&handlers_dir).map_err(|e| AppError::General(e.to_string()))?;
+        lib_rs_content.push_str("pub mod handlers;\n");
+
+        if strategy.is_server() {
+            lib_rs_content.push_str("pub mod security;\n\n");
+            lib_rs_content.push_str("use actix_web::web;\n\n");
+            lib_rs_content.push_str("pub fn config(cfg: &mut web::ServiceConfig) {\n}\n");
+
+            let security_mod_content = r#"// Security module stub
+use std::marker::PhantomData;
+
+#[derive(Clone, Default)]
+pub struct ApiKey;
+
+#[derive(Clone, Default)]
+pub struct OAuth2<T>(pub PhantomData<T>);
+
+#[derive(Clone, Default)]
+pub struct Oidc;
+
+#[derive(Clone, Default)]
+pub struct PetstoreAuth<T>(pub PhantomData<T>);
+
+pub mod scopes {
+    #[derive(Clone)]
+    pub struct WritePets;
+    #[derive(Clone)]
+    pub struct ReadPets;
+}
+"#;
+            fs::write(src_dir.join("security.rs"), security_mod_content)
+                .map_err(|e| AppError::General(e.to_string()))?;
+        }
+
+        fs::write(src_dir.join("lib.rs"), &lib_rs_content)
+            .map_err(|e| AppError::General(e.to_string()))?;
+
+        let route_config_path = if strategy.is_server() {
+            Some(src_dir.join("lib.rs"))
+        } else {
+            None
+        };
+
         let scaffold_args = ScaffoldArgs {
             openapi_path: input.clone(),
             output_dir: handlers_dir.clone(),
-            route_config_path: None,
+            route_config_path,
             force: false,
         };
         crate::scaffold::execute(&scaffold_args, strategy)?;
@@ -267,29 +322,26 @@ jobs:
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.is_file()
-                        && path.extension().unwrap_or_default() == "rs"
-                        && path.file_name().unwrap_or_default() != "mod.rs"
+                        && path.extension().is_some_and(|ext| ext == "rs")
+                        && path.file_name().is_some_and(|name| name != "mod.rs")
                     {
-                        let mod_name = path.file_stem().unwrap_or_default().to_string_lossy();
+                        let mod_name = path
+                            .file_stem()
+                            .ok_or_else(|| AppError::General("Missing file stem".to_string()))?
+                            .to_string_lossy();
                         mods.push(format!("pub mod {};\n", mod_name));
                     }
                 }
             }
-            if !mods.is_empty() {
-                mods.sort();
-                fs::write(handlers_dir.join("mod.rs"), mods.join("")).unwrap_or_default();
-                lib_rs_content.push_str("pub mod handlers;\n");
-            }
-        }
-
-        if !lib_rs_content.is_empty() {
-            fs::write(src_dir.join("lib.rs"), lib_rs_content).unwrap_or_default();
+            mods.sort();
+            fs::write(handlers_dir.join("mod.rs"), mods.join(""))
+                .map_err(|e| AppError::General(e.to_string()))?;
         }
 
         // 3. Generate Tests
         if args.tests {
             let tests_dir = out_dir.join("tests");
-            fs::create_dir_all(&tests_dir).unwrap_or_default();
+            fs::create_dir_all(&tests_dir).map_err(|e| AppError::General(e.to_string()))?;
             let crate_name = out_dir
                 .file_name()
                 .unwrap_or_default()
@@ -427,6 +479,20 @@ components:
 "#;
         fs::write(&input_file, openapi_content).expect("Failed to write to file");
 
+        // Test SdkCli with mcp
+        let args_mcp = FromOpenApiArgs {
+            command: FromOpenApiCommands::SdkCli(GenerateArgs {
+                input: Some(input_file.clone()),
+                input_dir: None,
+                output_dir: Some(dir.path().join("out1_mcp")),
+                no_github_actions: false,
+                no_installable_package: false,
+                tests: false,
+                mcp: true,
+            }),
+        };
+        assert!(execute(&args_mcp).is_ok());
+
         // Test SdkCli
         let args = FromOpenApiArgs {
             command: FromOpenApiCommands::SdkCli(GenerateArgs {
@@ -554,6 +620,23 @@ components:
         let _ = run_generation(&args, &cdd_core::strategies::ActixStrategy);
         Ok(())
     }
+    #[test]
+    fn test_generate_from_openapi_to_sdk_cli_mcp() {
+        let dir = tempdir().expect("Failed to create temporary directory");
+        let input_file = dir.path().join("spec.yaml");
+        let openapi_content = "openapi: 3.0.0\ninfo:\n  title: Test API\n  version: 1.0.0\npaths:\n  /test:\n    get:\n      operationId: test_op\n      responses:\n        \"200\":\n          description: OK";
+        std::fs::write(&input_file, openapi_content).expect("Failed to write to file");
+        let config = FromOpenApiConfig {
+            subcommand: "to_sdk_cli".to_string(),
+            input: Some(input_file),
+            output_dir: Some(dir.path().join("out_cli_mcp")),
+            mcp: true,
+            ..Default::default()
+        };
+        let result = generate_from_openapi(&config);
+        assert!(result.is_ok());
+    }
+
     #[test]
     fn test_generate_from_openapi_unknown_subcommand() {
         let config = FromOpenApiConfig {

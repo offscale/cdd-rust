@@ -29,9 +29,16 @@ pub fn route_registration_statement(route: &ParsedRoute, handler_full_path: &str
         ),
     };
 
+    let mut path = route.path.clone();
+    if let Some(bp) = &route.base_path {
+        if !path.starts_with(bp) {
+            path = format!("{}{}", bp, path);
+        }
+    }
+
     format!(
-        "\n    cfg.service(web::resource(\"{}\").route(web::{}.to({})));",
-        route.path, actix_method, handler_full_path
+        "\n    cfg.route(\"{}\", web::{}.to({}));",
+        path, actix_method, handler_full_path
     )
 }
 

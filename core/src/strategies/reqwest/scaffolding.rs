@@ -42,11 +42,17 @@ pub fn handler_signature(route: &crate::openapi::parse::ParsedRoute, args: &[Str
     let mut format_args = vec!["base_url".to_string()];
     let mut format_str = String::from("{}");
 
+    // The Petstore JSON has basePath "/v2" or similar, but the URL we hit is `/api/v3/...`.
+    // We'll just construct the URL normally.
+    // If base_path is requested, we prepend it to the route.path if route.path doesn't start with it
+    let mut actual_path = route.path.clone();
     if let Some(bp) = &route.base_path {
-        format_str.push_str(bp);
+        if !actual_path.starts_with(bp) {
+            actual_path = format!("{}{}", bp, actual_path);
+        }
     }
 
-    let mut chars = route.path.chars().peekable();
+    let mut chars = actual_path.chars().peekable();
     while let Some(c) = chars.next() {
         if c == '{' {
             let mut param_name = String::new();

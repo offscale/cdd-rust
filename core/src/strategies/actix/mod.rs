@@ -20,6 +20,10 @@ use crate::strategies::BackendStrategy;
 pub struct ActixStrategy;
 
 impl BackendStrategy for ActixStrategy {
+    fn is_server(&self) -> bool {
+        true
+    }
+
     // --- Scaffolding ---
 
     fn handler_imports(&self) -> String {
@@ -241,7 +245,7 @@ mod tests {
         };
         let code = s.route_registration_statement(&route, "mod::qh");
         assert!(code.contains(
-            ".route(web::method(actix_web::http::Method::from_bytes(b\"QUERY\").expect(\"expected value\")).to(mod::qh)));"
+            "cfg.route(\"/path\", web::method(actix_web::http::Method::from_bytes(b\"QUERY\").expect(\"expected value\")).to(mod::qh));"
         ));
     }
 

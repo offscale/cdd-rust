@@ -64,3 +64,6 @@ swagger2_*.rs
 *.profraw
 
 tarpaulin-report.json
+coverage*
+Lcov
+Html

@@ -8,3 +8,5 @@ pub type User = serde_json::Value;
 pub type ApiResponse = serde_json::Value;
 /// Documented
 pub mod handlers;
+/// Documented
+pub mod users;
