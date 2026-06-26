@@ -64,10 +64,10 @@ jobs:
         run: cargo run -p cdd-cli -- from_openapi to_sdk -i ./petstore_oas3.yaml -o ./target/petstore3
 
       - name: Test Swagger 2.0 Petstore Server & Client
-        run: bash scripts/test_server_and_client.sh ./petstore.json ./target/server_petstore2 ./target/client_petstore2
+        run: python scripts/test_server_and_client.py ./petstore.json ./target/server_petstore2 ./target/client_petstore2
 
       - name: Test OpenAPI 3.2.0 Petstore Server & Client
-        run: bash scripts/test_server_and_client.sh ./petstore_oas3.yaml ./target/server_petstore3 ./target/client_petstore3
+        run: python scripts/test_server_and_client.py ./petstore_oas3.yaml ./target/server_petstore3 ./target/client_petstore3
 
       - name: Check Documentation Coverage
         run: |
