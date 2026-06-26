@@ -40,7 +40,7 @@ pub fn test_request_builder(_method: &str, _uri: &str, _body_setup: &str) -> Str
 
 /// Returns the API call code.
 pub fn test_api_call() -> String {
-    "    // let resp = super::some_handler(args, client, base_url).await.unwrap();\n".to_string()
+    "    // let resp = super::some_handler(args, client, base_url).await.expect(\"must succeed\");\n".to_string()
 }
 
 /// Returns assertion code.

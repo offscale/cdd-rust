@@ -15,10 +15,12 @@ use std::path::PathBuf;
 pub struct ServeJsonRpcArgs {
     /// Port to listen on.
     #[clap(short, long, default_value = "8080", env = "CDD_PORT")]
+    /// The port to listen on
     pub port: u16,
 
     /// Interface to listen on.
     #[clap(short, long, default_value = "127.0.0.1", env = "CDD_LISTEN")]
+    /// The address to listen on
     pub listen: String,
 }
 
@@ -369,7 +371,9 @@ mod tests {
 /// Configuration for `serve_json_rpc` programmatic API
 #[derive(Debug)]
 pub struct ServeJsonRpcConfig {
+    /// The port to listen on
     pub port: u16,
+    /// The address to listen on
     pub listen: String,
 }
 
@@ -428,7 +432,7 @@ mod extra_rpc_tests {
             id: None,
         };
         let res = send_rpc(&req).await;
-        assert_eq!(res.error.unwrap().code, -32602);
+        assert_eq!(res.error.expect("must succeed").code, -32602);
 
         // Invalid params
         let req = RpcRequest {
@@ -438,7 +442,7 @@ mod extra_rpc_tests {
             id: None,
         };
         let res = send_rpc(&req).await;
-        assert_eq!(res.error.unwrap().code, -32602);
+        assert_eq!(res.error.expect("must succeed").code, -32602);
 
         // Success execution - pointing to something that will error inside generate
         let req = RpcRequest {
@@ -448,7 +452,7 @@ mod extra_rpc_tests {
             id: None,
         };
         let res = send_rpc(&req).await;
-        assert_eq!(res.error.unwrap().code, -32000);
+        assert_eq!(res.error.expect("must succeed").code, -32000);
     }
 
     #[actix_rt::test]
@@ -461,7 +465,7 @@ mod extra_rpc_tests {
             id: None,
         };
         let res = send_rpc(&req).await;
-        assert_eq!(res.error.unwrap().code, -32602);
+        assert_eq!(res.error.expect("must succeed").code, -32602);
 
         // Invalid params
         let req = RpcRequest {
@@ -471,7 +475,7 @@ mod extra_rpc_tests {
             id: None,
         };
         let res = send_rpc(&req).await;
-        assert_eq!(res.error.unwrap().code, -32602);
+        assert_eq!(res.error.expect("must succeed").code, -32602);
 
         // Fail inside generate
         let req = RpcRequest {
@@ -481,7 +485,7 @@ mod extra_rpc_tests {
             id: None,
         };
         let res = send_rpc(&req).await;
-        assert_eq!(res.error.unwrap().code, -32000);
+        assert_eq!(res.error.expect("must succeed").code, -32000);
     }
 
     #[actix_rt::test]
@@ -494,7 +498,7 @@ mod extra_rpc_tests {
             id: None,
         };
         let res = send_rpc(&req).await;
-        assert_eq!(res.error.unwrap().code, -32602);
+        assert_eq!(res.error.expect("must succeed").code, -32602);
 
         // Success inside, but it will error
         let req = RpcRequest {
@@ -504,7 +508,7 @@ mod extra_rpc_tests {
             id: None,
         };
         let res = send_rpc(&req).await;
-        assert_eq!(res.error.unwrap().code, -32000);
+        assert_eq!(res.error.expect("must succeed").code, -32000);
 
         let req = RpcRequest {
             jsonrpc: "2.0".to_string(),
@@ -558,21 +562,21 @@ mod extra_rpc_success_tests {
     #[actix_rt::test]
     async fn test_to_openapi_rpc_success() {
         use tempfile::tempdir;
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("must succeed");
         let src_dir = dir.path().join("src");
-        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::create_dir_all(&src_dir).expect("must succeed");
         let input = src_dir.join("input.rs");
         let output = dir.path().join("out.yaml");
         let schema =
             "pub struct User { pub id: i32 } \n #[get(\"/users\")] pub async fn get_users() {}";
-        std::fs::write(&input, schema).unwrap();
+        std::fs::write(&input, schema).expect("must succeed");
 
         let req = RpcRequest {
             jsonrpc: "2.0".to_string(),
             method: "to_openapi".to_string(),
             params: Some(serde_json::json!({
-                "input": src_dir.to_str().unwrap(),
-                "output": output.to_str().unwrap()
+                "input": src_dir.to_str().expect("must succeed"),
+                "output": output.to_str().expect("must succeed")
             })),
             id: None,
         };
@@ -583,18 +587,18 @@ mod extra_rpc_success_tests {
     #[actix_rt::test]
     async fn test_to_docs_json_rpc_success() {
         use tempfile::tempdir;
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("must succeed");
         let input = dir.path().join("input.rs");
         let output = dir.path().join("out.yaml");
         let schema = "openapi: 3.0.0\ninfo:\n  title: API\n  version: 1.0.0\npaths: {}";
-        std::fs::write(&input, schema).unwrap();
+        std::fs::write(&input, schema).expect("must succeed");
 
         let req = RpcRequest {
             jsonrpc: "2.0".to_string(),
             method: "to_docs_json".to_string(),
             params: Some(serde_json::json!({
-                "input": input.to_str().unwrap(),
-                "output": output.to_str().unwrap()
+                "input": input.to_str().expect("must succeed"),
+                "output": output.to_str().expect("must succeed")
             })),
             id: None,
         };
@@ -605,7 +609,7 @@ mod extra_rpc_success_tests {
     #[actix_rt::test]
     async fn test_from_openapi_rpc_success() {
         use tempfile::tempdir;
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("must succeed");
         let input = dir.path().join("openapi.yaml");
         let output = dir.path().join("out");
 
@@ -616,14 +620,14 @@ info:
   version: 1.0.0
 paths: {}
         "#;
-        std::fs::write(&input, schema).unwrap();
+        std::fs::write(&input, schema).expect("must succeed");
 
         let req = RpcRequest {
             jsonrpc: "2.0".to_string(),
             method: "from_openapi_to_sdk".to_string(),
             params: Some(serde_json::json!({
-                "input": input.to_str().unwrap(),
-                "output": output.to_str().unwrap()
+                "input": input.to_str().expect("must succeed"),
+                "output": output.to_str().expect("must succeed")
             })),
             id: None,
         };

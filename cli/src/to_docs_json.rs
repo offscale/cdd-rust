@@ -12,18 +12,22 @@ use std::fs;
 pub struct ToDocsJsonArgs {
     /// Path or URL to the OpenAPI specification.
     #[clap(short, long, env = "CDD_INPUT")]
+    /// The input file path
     pub input: String,
 
     /// If provided, omit the imports field in the code object.
     #[clap(long, env = "CDD_NO_IMPORTS")]
+    /// Whether to exclude imports
     pub no_imports: bool,
 
     /// If provided, omit the wrapper_start and wrapper_end fields in the code object.
     #[clap(long, env = "CDD_NO_WRAPPING")]
+    /// Whether to disable wrapping
     pub no_wrapping: bool,
 
     /// Output file or directory path.
     #[clap(short, long, env = "CDD_OUTPUT")]
+    /// The output file path
     pub output: Option<String>,
 }
 
@@ -366,9 +370,13 @@ paths: {}
 /// Configuration for `to_docs_json` programmatic API
 #[derive(Debug, Default)]
 pub struct ToDocsJsonConfig {
+    /// The input file path
     pub input: String,
+    /// The output file path
     pub output: Option<String>,
+    /// Whether to exclude imports
     pub no_imports: bool,
+    /// Whether to disable wrapping
     pub no_wrapping: bool,
 }
 

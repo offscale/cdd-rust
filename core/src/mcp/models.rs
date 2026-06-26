@@ -314,10 +314,10 @@ mod tests {
             method: "test".to_string(),
             params: Some(json!({"foo": "bar"})),
         };
-        let serialized = serde_json::to_string(&req).unwrap();
+        let serialized = serde_json::to_string(&req).expect("must succeed");
         assert!(serialized.contains("test"));
 
-        let deserialized: JsonRpcRequest = serde_json::from_str(&serialized).unwrap();
+        let deserialized: JsonRpcRequest = serde_json::from_str(&serialized).expect("must succeed");
         assert_eq!(deserialized.method, "test");
     }
 
@@ -329,10 +329,11 @@ mod tests {
             result: Some(json!({"foo": "bar"})),
             error: None,
         };
-        let serialized = serde_json::to_string(&res).unwrap();
+        let serialized = serde_json::to_string(&res).expect("must succeed");
         assert!(serialized.contains("bar"));
 
-        let deserialized: JsonRpcResponse = serde_json::from_str(&serialized).unwrap();
+        let deserialized: JsonRpcResponse =
+            serde_json::from_str(&serialized).expect("must succeed");
         assert!(deserialized.result.is_some());
     }
 
@@ -343,10 +344,10 @@ mod tests {
             message: "error".to_string(),
             data: None,
         };
-        let serialized = serde_json::to_string(&err).unwrap();
+        let serialized = serde_json::to_string(&err).expect("must succeed");
         assert!(serialized.contains("error"));
 
-        let deserialized: JsonRpcError = serde_json::from_str(&serialized).unwrap();
+        let deserialized: JsonRpcError = serde_json::from_str(&serialized).expect("must succeed");
         assert_eq!(deserialized.message, "error");
     }
 
@@ -357,10 +358,11 @@ mod tests {
             method: "notif".to_string(),
             params: None,
         };
-        let serialized = serde_json::to_string(&notif).unwrap();
+        let serialized = serde_json::to_string(&notif).expect("must succeed");
         assert!(serialized.contains("notif"));
 
-        let deserialized: JsonRpcNotification = serde_json::from_str(&serialized).unwrap();
+        let deserialized: JsonRpcNotification =
+            serde_json::from_str(&serialized).expect("must succeed");
         assert_eq!(deserialized.method, "notif");
     }
 
@@ -375,10 +377,11 @@ mod tests {
                 version: "1.0".to_string(),
             },
         };
-        let serialized = serde_json::to_string(&req).unwrap();
+        let serialized = serde_json::to_string(&req).expect("must succeed");
         assert!(serialized.contains("2024-11-05"));
 
-        let deserialized: InitializeRequestParams = serde_json::from_str(&serialized).unwrap();
+        let deserialized: InitializeRequestParams =
+            serde_json::from_str(&serialized).expect("must succeed");
         assert_eq!(deserialized.protocol_version, "2024-11-05");
     }
 
@@ -394,10 +397,11 @@ mod tests {
             },
             instructions: None,
         };
-        let serialized = serde_json::to_string(&res).unwrap();
+        let serialized = serde_json::to_string(&res).expect("must succeed");
         assert!(serialized.contains("2024-11-05"));
 
-        let deserialized: InitializeResult = serde_json::from_str(&serialized).unwrap();
+        let deserialized: InitializeResult =
+            serde_json::from_str(&serialized).expect("must succeed");
         assert_eq!(deserialized.protocol_version, "2024-11-05");
     }
 
@@ -412,10 +416,10 @@ mod tests {
                 required: None,
             },
         };
-        let serialized = serde_json::to_string(&tool).unwrap();
+        let serialized = serde_json::to_string(&tool).expect("must succeed");
         assert!(serialized.contains("test"));
 
-        let deserialized: Tool = serde_json::from_str(&serialized).unwrap();
+        let deserialized: Tool = serde_json::from_str(&serialized).expect("must succeed");
         assert_eq!(deserialized.name, "test");
     }
 
@@ -426,10 +430,11 @@ mod tests {
             name: "test".to_string(),
             arguments: None,
         };
-        let serialized = serde_json::to_string(&req).unwrap();
+        let serialized = serde_json::to_string(&req).expect("must succeed");
         assert!(serialized.contains("test"));
 
-        let deserialized: CallToolRequestParams = serde_json::from_str(&serialized).unwrap();
+        let deserialized: CallToolRequestParams =
+            serde_json::from_str(&serialized).expect("must succeed");
         assert_eq!(deserialized.name, "test");
     }
 
@@ -442,10 +447,10 @@ mod tests {
             })],
             is_error: None,
         };
-        let serialized = serde_json::to_string(&res).unwrap();
+        let serialized = serde_json::to_string(&res).expect("must succeed");
         assert!(serialized.contains("test"));
 
-        let deserialized: CallToolResult = serde_json::from_str(&serialized).unwrap();
+        let deserialized: CallToolResult = serde_json::from_str(&serialized).expect("must succeed");
         assert_eq!(deserialized.content.len(), 1);
     }
 
@@ -455,7 +460,7 @@ mod tests {
             data: "data".to_string(),
             mime_type: "image/png".to_string(),
         });
-        let serialized = serde_json::to_string(&image).unwrap();
+        let serialized = serde_json::to_string(&image).expect("must succeed");
         assert!(serialized.contains("image"));
 
         let resource = CallToolResultContent::EmbeddedResource(EmbeddedResource {
@@ -463,7 +468,7 @@ mod tests {
             resource: json!({"foo": "bar"}),
             annotations: None,
         });
-        let serialized2 = serde_json::to_string(&resource).unwrap();
+        let serialized2 = serde_json::to_string(&resource).expect("must succeed");
         assert!(serialized2.contains("resource"));
     }
 
@@ -473,10 +478,11 @@ mod tests {
             cursor: None,
             meta: None,
         };
-        let serialized = serde_json::to_string(&req).unwrap();
+        let serialized = serde_json::to_string(&req).expect("must succeed");
         assert!(serialized.contains("{}"));
 
-        let deserialized: ListToolsRequestParams = serde_json::from_str(&serialized).unwrap();
+        let deserialized: ListToolsRequestParams =
+            serde_json::from_str(&serialized).expect("must succeed");
         assert!(deserialized.cursor.is_none());
     }
 
@@ -487,10 +493,11 @@ mod tests {
             tools: vec![],
             next_cursor: None,
         };
-        let serialized = serde_json::to_string(&res).unwrap();
+        let serialized = serde_json::to_string(&res).expect("must succeed");
         assert!(serialized.contains("tools"));
 
-        let deserialized: ListToolsResult = serde_json::from_str(&serialized).unwrap();
+        let deserialized: ListToolsResult =
+            serde_json::from_str(&serialized).expect("must succeed");
         assert!(deserialized.tools.is_empty());
     }
 }
@@ -694,7 +701,9 @@ mod additional_tests_more {
             description: None,
             mime_type: None,
         };
-        assert!(serde_json::to_string(&r).unwrap().contains("file:///a"));
+        assert!(serde_json::to_string(&r)
+            .expect("must succeed")
+            .contains("file:///a"));
     }
 
     #[test]
@@ -707,7 +716,9 @@ mod additional_tests_more {
                 text: "text".to_string(),
             })],
         };
-        assert!(serde_json::to_string(&r).unwrap().contains("text"));
+        assert!(serde_json::to_string(&r)
+            .expect("must succeed")
+            .contains("text"));
 
         let rb = ReadResourceResult {
             meta: None,
@@ -717,7 +728,9 @@ mod additional_tests_more {
                 blob: "base64".to_string(),
             })],
         };
-        assert!(serde_json::to_string(&rb).unwrap().contains("base64"));
+        assert!(serde_json::to_string(&rb)
+            .expect("must succeed")
+            .contains("base64"));
     }
 
     #[test]
@@ -727,7 +740,9 @@ mod additional_tests_more {
             description: None,
             arguments: None,
         };
-        assert!(serde_json::to_string(&p).unwrap().contains("test"));
+        assert!(serde_json::to_string(&p)
+            .expect("must succeed")
+            .contains("test"));
     }
 
     #[test]
@@ -736,7 +751,9 @@ mod additional_tests_more {
             cursor: None,
             meta: None,
         };
-        assert!(serde_json::to_string(&req).unwrap().contains("{}"));
+        assert!(serde_json::to_string(&req)
+            .expect("must succeed")
+            .contains("{}"));
     }
 
     #[test]
@@ -745,7 +762,9 @@ mod additional_tests_more {
             cursor: None,
             meta: None,
         };
-        assert!(serde_json::to_string(&req).unwrap().contains("{}"));
+        assert!(serde_json::to_string(&req)
+            .expect("must succeed")
+            .contains("{}"));
     }
 
     #[test]
@@ -755,7 +774,9 @@ mod additional_tests_more {
             name: "a".to_string(),
             arguments: None,
         };
-        assert!(serde_json::to_string(&req).unwrap().contains("a"));
+        assert!(serde_json::to_string(&req)
+            .expect("must succeed")
+            .contains("a"));
     }
 
     #[test]
@@ -765,7 +786,9 @@ mod additional_tests_more {
             description: None,
             messages: vec![],
         };
-        assert!(serde_json::to_string(&res).unwrap().contains("messages"));
+        assert!(serde_json::to_string(&res)
+            .expect("must succeed")
+            .contains("messages"));
     }
 }
 
@@ -836,7 +859,9 @@ mod additional_tests2 {
             include_context: None,
             metadata: None,
         };
-        assert!(serde_json::to_string(&req).unwrap().contains("messages"));
+        assert!(serde_json::to_string(&req)
+            .expect("must succeed")
+            .contains("messages"));
     }
 
     #[test]
@@ -850,7 +875,9 @@ mod additional_tests2 {
             model: "model".to_string(),
             stop_reason: None,
         };
-        assert!(serde_json::to_string(&res).unwrap().contains("user"));
+        assert!(serde_json::to_string(&res)
+            .expect("must succeed")
+            .contains("user"));
     }
 }
 
@@ -1096,7 +1123,9 @@ mod additional_tests3 {
             meta: None,
             level: "info".to_string(),
         };
-        assert!(serde_json::to_string(&req).unwrap().contains("info"));
+        assert!(serde_json::to_string(&req)
+            .expect("must succeed")
+            .contains("info"));
     }
 
     #[test]
@@ -1105,7 +1134,9 @@ mod additional_tests3 {
             meta: None,
             uri: "file:///a".to_string(),
         };
-        assert!(serde_json::to_string(&req).unwrap().contains("file:///a"));
+        assert!(serde_json::to_string(&req)
+            .expect("must succeed")
+            .contains("file:///a"));
     }
 
     #[test]
@@ -1114,7 +1145,9 @@ mod additional_tests3 {
             meta: None,
             uri: "file:///a".to_string(),
         };
-        assert!(serde_json::to_string(&req).unwrap().contains("file:///a"));
+        assert!(serde_json::to_string(&req)
+            .expect("must succeed")
+            .contains("file:///a"));
     }
 
     #[test]
@@ -1125,7 +1158,9 @@ mod additional_tests3 {
             logger: None,
             data: Value::Null,
         };
-        assert!(serde_json::to_string(&notif).unwrap().contains("info"));
+        assert!(serde_json::to_string(&notif)
+            .expect("must succeed")
+            .contains("info"));
     }
 
     #[test]
@@ -1136,7 +1171,9 @@ mod additional_tests3 {
             progress: 1.0,
             total: None,
         };
-        assert!(serde_json::to_string(&notif).unwrap().contains("progress"));
+        assert!(serde_json::to_string(&notif)
+            .expect("must succeed")
+            .contains("progress"));
     }
 
     #[test]
@@ -1145,13 +1182,17 @@ mod additional_tests3 {
             meta: None,
             uri: "file:///a".to_string(),
         };
-        assert!(serde_json::to_string(&notif).unwrap().contains("file:///a"));
+        assert!(serde_json::to_string(&notif)
+            .expect("must succeed")
+            .contains("file:///a"));
     }
 
     #[test]
     fn test_ping_request_serialization() {
         let req = PingRequestParams {};
-        assert!(serde_json::to_string(&req).unwrap().contains("{}"));
+        assert!(serde_json::to_string(&req)
+            .expect("must succeed")
+            .contains("{}"));
     }
 
     #[test]
@@ -1161,13 +1202,17 @@ mod additional_tests3 {
             request_id: Value::Null,
             reason: None,
         };
-        assert!(serde_json::to_string(&notif).unwrap().contains("requestId"));
+        assert!(serde_json::to_string(&notif)
+            .expect("must succeed")
+            .contains("requestId"));
     }
 
     #[test]
     fn test_list_roots_request_serialization() {
         let req = ListRootsRequestParams {};
-        assert!(serde_json::to_string(&req).unwrap().contains("{}"));
+        assert!(serde_json::to_string(&req)
+            .expect("must succeed")
+            .contains("{}"));
     }
 
     #[test]
@@ -1179,7 +1224,9 @@ mod additional_tests3 {
                 name: None,
             }],
         };
-        assert!(serde_json::to_string(&res).unwrap().contains("file:///a"));
+        assert!(serde_json::to_string(&res)
+            .expect("must succeed")
+            .contains("file:///a"));
     }
 
     #[test]
@@ -1194,7 +1241,9 @@ mod additional_tests3 {
                 value: "test".to_string(),
             },
         };
-        assert!(serde_json::to_string(&req).unwrap().contains("ref/prompt"));
+        assert!(serde_json::to_string(&req)
+            .expect("must succeed")
+            .contains("ref/prompt"));
     }
 
     #[test]
@@ -1207,7 +1256,9 @@ mod additional_tests3 {
                 has_more: None,
             },
         };
-        assert!(serde_json::to_string(&res).unwrap().contains("completion"));
+        assert!(serde_json::to_string(&res)
+            .expect("must succeed")
+            .contains("completion"));
     }
 
     #[test]
@@ -1218,13 +1269,17 @@ mod additional_tests3 {
                 text: "t".to_string(),
             }),
         };
-        assert!(serde_json::to_string(&msg).unwrap().contains("user"));
+        assert!(serde_json::to_string(&msg)
+            .expect("must succeed")
+            .contains("user"));
     }
 
     #[test]
     fn test_empty_result_serialization() {
         let res = EmptyResult {};
-        assert!(serde_json::to_string(&res).unwrap().contains("{}"));
+        assert!(serde_json::to_string(&res)
+            .expect("must succeed")
+            .contains("{}"));
     }
 
     #[test]
@@ -1235,7 +1290,9 @@ mod additional_tests3 {
             description: None,
             mime_type: None,
         };
-        assert!(serde_json::to_string(&rt).unwrap().contains("test"));
+        assert!(serde_json::to_string(&rt)
+            .expect("must succeed")
+            .contains("test"));
     }
 
     #[test]
@@ -1244,7 +1301,9 @@ mod additional_tests3 {
             cursor: None,
             meta: None,
         };
-        assert!(serde_json::to_string(&req).unwrap().contains("{}"));
+        assert!(serde_json::to_string(&req)
+            .expect("must succeed")
+            .contains("{}"));
     }
 
     #[test]
@@ -1255,7 +1314,7 @@ mod additional_tests3 {
             next_cursor: None,
         };
         assert!(serde_json::to_string(&res)
-            .unwrap()
+            .expect("must succeed")
             .contains("resourceTemplates"));
     }
 }
@@ -1700,13 +1759,17 @@ mod additional_tests_events {
     #[test]
     fn test_tool_list_changed_notification_serialization() {
         let notif = ToolListChangedNotificationParams {};
-        assert!(serde_json::to_string(&notif).unwrap().contains("{}"));
+        assert!(serde_json::to_string(&notif)
+            .expect("must succeed")
+            .contains("{}"));
     }
 
     #[test]
     fn test_annotated_serialization() {
         let ann = Annotated { annotations: None };
-        assert!(serde_json::to_string(&ann).unwrap().contains("{}"));
+        assert!(serde_json::to_string(&ann)
+            .expect("must succeed")
+            .contains("{}"));
 
         let ann2 = Annotated {
             annotations: Some(Annotations {
@@ -1714,7 +1777,9 @@ mod additional_tests_events {
                 priority: Some(1.0),
             }),
         };
-        assert!(serde_json::to_string(&ann2).unwrap().contains("audience"));
+        assert!(serde_json::to_string(&ann2)
+            .expect("must succeed")
+            .contains("audience"));
     }
 
     #[test]
@@ -1723,7 +1788,9 @@ mod additional_tests_events {
             method: "a".to_string(),
             params: InitializedNotificationParams {},
         });
-        assert!(serde_json::to_string(&n).unwrap().contains("method"));
+        assert!(serde_json::to_string(&n)
+            .expect("must succeed")
+            .contains("method"));
     }
 
     #[test]
@@ -1732,7 +1799,9 @@ mod additional_tests_events {
             method: "a".to_string(),
             params: ToolListChangedNotificationParams {},
         });
-        assert!(serde_json::to_string(&n).unwrap().contains("method"));
+        assert!(serde_json::to_string(&n)
+            .expect("must succeed")
+            .contains("method"));
     }
 
     #[test]
@@ -1745,7 +1814,9 @@ mod additional_tests_events {
             speed_priority: None,
             intelligence_priority: None,
         };
-        assert!(serde_json::to_string(&p).unwrap().contains("hints"));
+        assert!(serde_json::to_string(&p)
+            .expect("must succeed")
+            .contains("hints"));
     }
 
     #[test]
@@ -1754,7 +1825,9 @@ mod additional_tests_events {
             method: "a".to_string(),
             params: None,
         });
-        assert!(serde_json::to_string(&req).unwrap().contains("method"));
+        assert!(serde_json::to_string(&req)
+            .expect("must succeed")
+            .contains("method"));
     }
 
     #[test]
@@ -1763,19 +1836,25 @@ mod additional_tests_events {
             method: "a".to_string(),
             params: None,
         });
-        assert!(serde_json::to_string(&req).unwrap().contains("method"));
+        assert!(serde_json::to_string(&req)
+            .expect("must succeed")
+            .contains("method"));
     }
 
     #[test]
     fn test_client_result_serialization() {
         let res = ClientResult::Empty(EmptyResult {});
-        assert!(serde_json::to_string(&res).unwrap().contains("{}"));
+        assert!(serde_json::to_string(&res)
+            .expect("must succeed")
+            .contains("{}"));
     }
 
     #[test]
     fn test_server_result_serialization() {
         let res = ServerResult::Empty(EmptyResult {});
-        assert!(serde_json::to_string(&res).unwrap().contains("{}"));
+        assert!(serde_json::to_string(&res)
+            .expect("must succeed")
+            .contains("{}"));
     }
 
     #[test]
@@ -1784,7 +1863,9 @@ mod additional_tests_events {
             method: "a".to_string(),
             params: None,
         };
-        assert!(serde_json::to_string(&req).unwrap().contains("method"));
+        assert!(serde_json::to_string(&req)
+            .expect("must succeed")
+            .contains("method"));
     }
 
     #[test]
@@ -1793,7 +1874,9 @@ mod additional_tests_events {
             next_cursor: None,
             meta: None,
         };
-        assert!(serde_json::to_string(&res).unwrap().contains("{}"));
+        assert!(serde_json::to_string(&res)
+            .expect("must succeed")
+            .contains("{}"));
     }
 }
 
@@ -1826,7 +1909,9 @@ mod additional_tests5 {
     #[test]
     fn test_logging_level_serialization() {
         let level = LoggingLevel::Info;
-        assert!(serde_json::to_string(&level).unwrap().contains("info"));
+        assert!(serde_json::to_string(&level)
+            .expect("must succeed")
+            .contains("info"));
     }
 }
 
@@ -1926,23 +2011,33 @@ mod additional_tests6 {
         let cursor = Cursor {
             next_cursor: "a".to_string(),
         };
-        assert!(serde_json::to_string(&cursor).unwrap().contains("a"));
+        assert!(serde_json::to_string(&cursor)
+            .expect("must succeed")
+            .contains("a"));
     }
 
     #[test]
     fn test_request_id_serialization() {
         let id_str = RequestId::String("a".to_string());
-        assert!(serde_json::to_string(&id_str).unwrap().contains("a"));
+        assert!(serde_json::to_string(&id_str)
+            .expect("must succeed")
+            .contains("a"));
         let id_num = RequestId::Number(1);
-        assert!(serde_json::to_string(&id_num).unwrap().contains("1"));
+        assert!(serde_json::to_string(&id_num)
+            .expect("must succeed")
+            .contains("1"));
     }
 
     #[test]
     fn test_progress_token_serialization() {
         let t_str = ProgressToken::String("a".to_string());
-        assert!(serde_json::to_string(&t_str).unwrap().contains("a"));
+        assert!(serde_json::to_string(&t_str)
+            .expect("must succeed")
+            .contains("a"));
         let t_num = ProgressToken::Number(1);
-        assert!(serde_json::to_string(&t_num).unwrap().contains("1"));
+        assert!(serde_json::to_string(&t_num)
+            .expect("must succeed")
+            .contains("1"));
     }
 
     #[test]
@@ -1953,13 +2048,17 @@ mod additional_tests6 {
             method: "m".to_string(),
             params: None,
         });
-        assert!(serde_json::to_string(&msg).unwrap().contains("method"));
+        assert!(serde_json::to_string(&msg)
+            .expect("must succeed")
+            .contains("method"));
     }
 
     #[test]
     fn test_role_serialization() {
         let role = Role::User;
-        assert!(serde_json::to_string(&role).unwrap().contains("user"));
+        assert!(serde_json::to_string(&role)
+            .expect("must succeed")
+            .contains("user"));
     }
 
     #[test]
@@ -1968,7 +2067,9 @@ mod additional_tests6 {
             ref_type: PromptReferenceType::Prompt,
             name: "a".to_string(),
         };
-        assert!(serde_json::to_string(&r).unwrap().contains("prompt"));
+        assert!(serde_json::to_string(&r)
+            .expect("must succeed")
+            .contains("prompt"));
     }
 
     #[test]
@@ -1977,6 +2078,8 @@ mod additional_tests6 {
             ref_type: ResourceReferenceType::Resource,
             uri: "file:///a".to_string(),
         };
-        assert!(serde_json::to_string(&r).unwrap().contains("resource"));
+        assert!(serde_json::to_string(&r)
+            .expect("must succeed")
+            .contains("resource"));
     }
 }

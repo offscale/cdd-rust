@@ -540,9 +540,9 @@ invalid json
         let mut stdin = input.as_bytes();
         let mut stdout = Vec::new();
 
-        serve_mcp_inner(&mut stdin, &mut stdout).unwrap();
+        serve_mcp_inner(&mut stdin, &mut stdout).expect("must succeed");
 
-        let output = String::from_utf8(stdout).unwrap();
+        let output = String::from_utf8(stdout).expect("must succeed");
         let lines: Vec<&str> = output.trim().split('\n').collect();
 
         assert_eq!(lines.len(), 36);
@@ -601,7 +601,7 @@ invalid json
     fn test_serve_mcp_inner_read_error() {
         let mut stdin = ErrorReader;
         let mut stdout = Vec::new();
-        serve_mcp_inner(&mut stdin, &mut stdout).unwrap();
+        serve_mcp_inner(&mut stdin, &mut stdout).expect("must succeed");
         assert!(stdout.is_empty());
     }
 }

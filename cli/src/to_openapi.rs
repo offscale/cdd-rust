@@ -14,10 +14,12 @@ use walkdir::WalkDir;
 pub struct ToOpenApiArgs {
     /// Path to source code directory or file.
     #[clap(short = 'i', long, env = "CDD_INPUT")]
+    /// The input directory path
     pub input: PathBuf,
 
     /// Output file or directory path.
     #[clap(short = 'o', long, env = "CDD_OUTPUT", default_value = "spec.json")]
+    /// The output directory path
     pub output: PathBuf,
 }
 
@@ -190,25 +192,25 @@ mod tests {
     fn test_to_openapi_execute_failures() {
         let dir = tempdir().expect("Failed to create temporary directory");
         let src_dir = dir.path().join("src");
-        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::create_dir_all(&src_dir).expect("must succeed");
 
         let out_file = dir.path().join("out.yaml");
 
         // 1. Directory named .rs so read_to_string fails
         let dir_rs = src_dir.join("dir.rs");
-        std::fs::create_dir(&dir_rs).unwrap();
+        std::fs::create_dir(&dir_rs).expect("must succeed");
 
         // 2. File where extract_struct_names fails
         let syntax_err_rs = src_dir.join("syntax.rs");
-        std::fs::write(&syntax_err_rs, "impl Model {").unwrap();
+        std::fs::write(&syntax_err_rs, "impl Model {").expect("must succeed");
 
         // 3. File where extract_model fails
         let model_err_rs = src_dir.join("model_err.rs");
-        std::fs::write(&model_err_rs, "pub struct Partial").unwrap();
+        std::fs::write(&model_err_rs, "pub struct Partial").expect("must succeed");
 
         // 4. File where parse routes fail
         let route_err_rs = src_dir.join("route_err.rs");
-        std::fs::write(&route_err_rs, "pub fn my_route() {}").unwrap();
+        std::fs::write(&route_err_rs, "pub fn my_route() {}").expect("must succeed");
 
         let args = ToOpenApiArgs {
             input: src_dir,
@@ -297,7 +299,9 @@ mod tests {
 /// Configuration for `to_openapi` programmatic API
 #[derive(Debug, Default)]
 pub struct ToOpenApiConfig {
+    /// The input directory path
     pub input: PathBuf,
+    /// The output directory path
     pub output: PathBuf,
 }
 
@@ -317,10 +321,10 @@ mod extra_coverage_tests {
 
     #[test]
     fn test_generate_to_openapi() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("must succeed");
         let input_file = dir.path().join("input.rs");
         let output_file = dir.path().join("output.yaml");
-        std::fs::write(&input_file, "pub struct MyStruct { pub id: i32 }").unwrap();
+        std::fs::write(&input_file, "pub struct MyStruct { pub id: i32 }").expect("must succeed");
 
         let config = ToOpenApiConfig {
             input: input_file,

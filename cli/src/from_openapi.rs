@@ -56,27 +56,33 @@ pub enum FromOpenApiCommands {
 pub struct GenerateArgs {
     /// Path or URL to the OpenAPI specification.
     #[clap(short, long, required_unless_present = "input_dir", env = "CDD_INPUT")]
+    /// The input file path
     pub input: Option<PathBuf>,
 
     /// Directory containing OpenAPI specifications.
     #[clap(long, required_unless_present = "input", env = "CDD_INPUT_DIR")]
+    /// The input directory path
     pub input_dir: Option<PathBuf>,
 
     /// Output file or directory path.
     #[clap(short, long = "output", env = "CDD_OUTPUT")]
+    /// The output directory path
     pub output_dir: Option<PathBuf>,
 
     /// Do not generate GitHub Actions scaffolding.
     #[clap(long, env = "CDD_NO_GITHUB_ACTIONS")]
+    /// Whether to skip github actions generation
     pub no_github_actions: bool,
 
     /// Do not generate installable package scaffolding.
     #[clap(long, env = "CDD_NO_INSTALLABLE_PACKAGE")]
+    /// Whether to skip package generation
     pub no_installable_package: bool,
 
     /// Generate integration tests and mocks.
     #[clap(long, env = "CDD_TESTS")]
     #[clap(long, env = "CDD_TESTS")]
+    /// Whether to generate tests
     pub tests: bool,
 
     /// Generate Model Context Protocol (MCP) server and adapter.
@@ -651,17 +657,25 @@ components:
 /// Configuration for `from_openapi` programmatic API
 #[derive(Debug, Default)]
 pub struct FromOpenApiConfig {
+    /// The parsed subcommand
     pub subcommand: String,
+    /// The input file path
     pub input: Option<PathBuf>,
+    /// The input directory path
     pub input_dir: Option<PathBuf>,
+    /// The output directory path
     pub output_dir: Option<PathBuf>,
+    /// Whether to skip github actions generation
     pub no_github_actions: bool,
+    /// Whether to skip package generation
     pub no_installable_package: bool,
 
+    /// Whether to generate tests
     pub tests: bool,
 
     /// Generate Model Context Protocol (MCP) server and adapter.
     pub mcp: bool,
+    /// The server framework to use
     pub framework: ServerFramework,
 }
 

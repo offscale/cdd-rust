@@ -122,7 +122,7 @@ mod additional_seeder_tests {
     #[actix_web::test]
     async fn test_seed_database_success() {
         let dao = Arc::new(SuccessUserDao);
-        let res = seed_database(dao).await.unwrap();
+        let res = seed_database(dao).await.expect("must succeed");
         assert_eq!(res.users.len(), 10);
     }
 }

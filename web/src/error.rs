@@ -66,7 +66,7 @@ mod tests {
             ServerError::DatabaseError(diesel::result::Error::NotFound).status_code(),
             actix_web::http::StatusCode::INTERNAL_SERVER_ERROR
         );
-        let uuid_err = uuid::Uuid::parse_str("invalid").unwrap_err();
+        let uuid_err = uuid::Uuid::parse_str("invalid").expect_err("must fail");
         assert_eq!(
             ServerError::UuidError(uuid_err).status_code(),
             actix_web::http::StatusCode::BAD_REQUEST
