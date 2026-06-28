@@ -11,23 +11,19 @@ use std::fs;
 #[derive(Args, Debug)]
 pub struct ToDocsJsonArgs {
     /// Path or URL to the OpenAPI specification.
-    #[clap(short, long, env = "CDD_INPUT")]
-    /// The input file path
+    #[clap(short = 'i', long, env = "CDD_INPUT")]
     pub input: String,
 
     /// If provided, omit the imports field in the code object.
     #[clap(long, env = "CDD_NO_IMPORTS")]
-    /// Whether to exclude imports
     pub no_imports: bool,
 
     /// If provided, omit the wrapper_start and wrapper_end fields in the code object.
     #[clap(long, env = "CDD_NO_WRAPPING")]
-    /// Whether to disable wrapping
     pub no_wrapping: bool,
 
     /// Output file or directory path.
-    #[clap(short, long, env = "CDD_OUTPUT")]
-    /// The output file path
+    #[clap(short = 'o', long, env = "CDD_OUTPUT")]
     pub output: Option<String>,
 }
 
@@ -103,7 +99,7 @@ fn read_input(input: &str) -> AppResult<String> {
 }
 
 /// Executes the documentation JSON generation pipeline.
-pub fn execute(args: &ToDocsJsonArgs) -> AppResult<()> {
+pub fn run_to_docs_json(args: &ToDocsJsonArgs) -> AppResult<()> {
     let yaml_content = read_input(&args.input)?;
 
     let output = generate_docs_json_impl(&yaml_content, args)?;
@@ -314,7 +310,7 @@ webhooks:
             no_wrapping: false,
             output: None,
         };
-        let result = execute(&args);
+        let result = run_to_docs_json(&args);
         assert!(result.is_ok());
     }
 
@@ -326,7 +322,7 @@ webhooks:
             no_wrapping: false,
             output: None,
         };
-        let result = execute(&args);
+        let result = run_to_docs_json(&args);
         assert!(result.is_err());
     }
 
@@ -338,7 +334,7 @@ webhooks:
             no_wrapping: false,
             output: None,
         };
-        let result = execute(&args);
+        let result = run_to_docs_json(&args);
         assert!(result.is_err());
     }
 
@@ -362,31 +358,31 @@ paths: {}
             no_wrapping: false,
             output: Some("/nonexistent_dir/output.json".to_string()),
         };
-        let result = execute(&args);
+        let result = run_to_docs_json(&args);
         assert!(result.is_err());
     }
 }
 
-/// Configuration for `to_docs_json` programmatic API
+/// Configuration for `to_docs_json` programmatic API.
 #[derive(Debug, Default)]
 pub struct ToDocsJsonConfig {
-    /// The input file path
+    /// The input file path.
     pub input: String,
-    /// The output file path
+    /// The output file path.
     pub output: Option<String>,
-    /// Whether to exclude imports
+    /// Whether to exclude imports.
     pub no_imports: bool,
-    /// Whether to disable wrapping
+    /// Whether to disable wrapping.
     pub no_wrapping: bool,
 }
 
 /// Generate JSON documentation with code snippets for an OpenAPI specification.
-pub fn generate_docs_json(config: &ToDocsJsonConfig) -> AppResult<()> {
+pub fn to_docs_json(config: &ToDocsJsonConfig) -> AppResult<()> {
     let args = ToDocsJsonArgs {
         input: config.input.clone(),
         output: config.output.clone(),
         no_imports: config.no_imports,
         no_wrapping: config.no_wrapping,
     };
-    execute(&args)
+    run_to_docs_json(&args)
 }

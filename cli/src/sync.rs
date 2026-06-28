@@ -3,7 +3,7 @@
 
 //! # Sync Command
 //!
-//! Implements the pipeline: DB -> Diesel -> Model -> Schema -> OpenAPI.
+//! Synchronize an OpenAPI specification with source code.
 //!
 //! 1. **DB -> Diesel -> Model**: Uses `dsync` via the provided `ModelMapper`.
 //! 2. **Model -> Schema**: Processing generated models to inject `#[derive(ToSchema)]` and other attributes.
@@ -21,28 +21,38 @@ use walkdir::WalkDir;
 /// Source of truth for synchronization.
 #[derive(clap::ValueEnum, Clone, Debug, PartialEq)]
 pub enum SyncTruth {
-    /// Synchronize from Database schema (dsync to models).
-    Database,
+    /// Synchronize from Db schema (dsync to models).
+    Db,
     /// Synchronize from OpenAPI spec to models (and potentially back to DB).
-    Openapi,
+    Api,
     /// Synchronize from Rust classes (models) to OpenAPI/DB.
-    Class,
+    Code,
 }
 
-/// Arguments for the sync command.
+/// Synchronize an OpenAPI specification with source code.
 #[derive(clap::Args, Debug, Clone)]
 pub struct SyncArgs {
     /// The source of truth for the synchronization.
-    #[clap(long, value_enum, default_value_t = SyncTruth::Database)]
+    #[clap(long, value_enum, default_value_t = SyncTruth::Db)]
     pub truth: SyncTruth,
 
     /// Path to the Diesel schema file (e.g. web/src/schema.rs).
-    #[clap(long, default_value = "web/src/schema.rs")]
-    pub schema_path: PathBuf,
+    #[clap(
+        short = 'i',
+        long,
+        env = "CDD_INPUT",
+        default_value = "web/src/schema.rs"
+    )]
+    pub input: PathBuf,
 
     /// Output directory for generated models (e.g. web/src/models).
-    #[clap(long, default_value = "web/src/models")]
-    pub model_dir: PathBuf,
+    #[clap(
+        short = 'o',
+        long,
+        env = "CDD_OUTPUT",
+        default_value = "web/src/models"
+    )]
+    pub output: PathBuf,
 
     /// Skip the dsync generation step (only process existing files).
     #[clap(long)]
@@ -69,20 +79,20 @@ fn parse_key_val(s: &str) -> Result<(String, String), String> {
 ///
 /// * `args` - Command arguments.
 /// * `mapper` - The strategy/mapper used to generate models (e.g. Diesel/dsync).
-pub fn execute(args: &SyncArgs, mapper: &impl ModelMapper) -> AppResult<()> {
+pub fn run_sync(args: &SyncArgs, mapper: &impl ModelMapper) -> AppResult<()> {
     println!("Starting Sync Pipeline...");
 
     match args.truth {
-        SyncTruth::Database => {
+        SyncTruth::Db => {
             // 1. DB -> Models (using decoupled Mapper)
             if !args.no_gen {
                 println!(
                     "Generating models from {:?} into {:?}...",
-                    args.schema_path, args.model_dir
+                    args.input, args.output
                 );
 
                 mapper
-                    .generate(&args.schema_path, &args.model_dir)
+                    .generate(&args.input, &args.output)
                     .map_err(|e| AppError::General(e.to_string()))?;
             } else {
                 println!("Skipping model generation (--no-gen).");
@@ -92,11 +102,11 @@ pub fn execute(args: &SyncArgs, mapper: &impl ModelMapper) -> AppResult<()> {
             let type_overrides: HashMap<String, String> = args.force_type.iter().cloned().collect();
 
             // 2. Models -> Schema (Injecting attributes & Enforcing Types)
-            process_models_for_openapi(&args.model_dir, &type_overrides)?;
+            process_models_for_openapi(&args.output, &type_overrides)?;
         }
-        SyncTruth::Class | SyncTruth::Openapi => {
+        SyncTruth::Code | SyncTruth::Api => {
             println!("Synchronization from {:?} truth is currently a stub for reverse propagation. Bi-directional sync requires extending AST parsing.", args.truth);
-            // This represents the stub for pushing Class/OpenAPI changes back to the DB schema
+            // This represents the stub for pushing Code/OpenAPI changes back to the DB schema
             // which satisfies the `--truth` contract capability.
         }
     }
@@ -219,6 +229,28 @@ fn process_file(path: &Path, type_overrides: &HashMap<String, String>) -> AppRes
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn test_sync_programmatic_api() {
+        let config = super::SyncConfig {
+            truth: "code".to_string(),
+            input: std::path::PathBuf::from("fake"),
+            output: std::path::PathBuf::from("fake_dir"),
+            no_gen: false,
+            force_type: vec![],
+        };
+        let mapper = crate::generator::DieselMapper;
+        let res = super::sync(&config, &mapper);
+        assert!(res.is_ok());
+
+        let invalid_config = super::SyncConfig {
+            truth: "invalid".to_string(),
+            ..config
+        };
+        let err_res = super::sync(&invalid_config, &mapper);
+        assert!(err_res.is_err());
+    }
+
     use super::*;
     use crate::generator::DieselMapper;
     use std::fs::File;
@@ -297,22 +329,22 @@ pub struct Post {
     #[test]
     fn test_sync_truth_stub_execution() {
         let args = SyncArgs {
-            truth: SyncTruth::Class,
-            schema_path: PathBuf::from("fake"),
-            model_dir: PathBuf::from("fake_dir"),
+            truth: SyncTruth::Code,
+            input: PathBuf::from("fake"),
+            output: PathBuf::from("fake_dir"),
             no_gen: false,
             force_type: vec![],
         };
         let mapper = DieselMapper;
-        let res = execute(&args, &mapper);
+        let res = run_sync(&args, &mapper);
         // It's a stub, so it should succeed
         assert!(res.is_ok());
 
         let args2 = SyncArgs {
-            truth: SyncTruth::Openapi,
+            truth: SyncTruth::Api,
             ..args
         };
-        let res2 = execute(&args2, &mapper);
+        let res2 = run_sync(&args2, &mapper);
         // Also stub
         assert!(res2.is_ok());
     }
@@ -320,15 +352,15 @@ pub struct Post {
     #[test]
     fn test_sync_no_gen() {
         let args = SyncArgs {
-            truth: SyncTruth::Database,
-            schema_path: PathBuf::from("fake"),
-            model_dir: PathBuf::from("fake_dir"),
+            truth: SyncTruth::Db,
+            input: PathBuf::from("fake"),
+            output: PathBuf::from("fake_dir"),
             no_gen: true,
             force_type: vec![],
         };
         // Expect error because model dir doesn't exist for processing
         let mapper = DieselMapper;
-        let res = execute(&args, &mapper);
+        let res = run_sync(&args, &mapper);
         assert!(res.is_err());
     }
 
@@ -340,4 +372,46 @@ pub struct Post {
         let invalid = parse_key_val("invalid");
         assert!(invalid.is_err());
     }
+}
+
+/// Configuration for `sync` programmatic API.
+#[derive(Debug, Default)]
+pub struct SyncConfig {
+    /// The source of truth for the synchronization.
+    pub truth: String,
+    /// Path to the Diesel schema file.
+    pub input: std::path::PathBuf,
+    /// Output directory for generated models.
+    pub output: std::path::PathBuf,
+    /// Skip the dsync generation step.
+    pub no_gen: bool,
+    /// Enforce specific types for fields matching a name.
+    pub force_type: Vec<(String, String)>,
+}
+
+/// Synchronize an OpenAPI specification with source code.
+pub fn sync(
+    config: &SyncConfig,
+    mapper: &impl crate::generator::ModelMapper,
+) -> cdd_core::AppResult<()> {
+    let truth = match config.truth.to_lowercase().as_str() {
+        "db" => SyncTruth::Db,
+        "api" => SyncTruth::Api,
+        "code" => SyncTruth::Code,
+        _ => {
+            return Err(cdd_core::AppError::General(format!(
+                "Invalid sync truth: {}",
+                config.truth
+            )))
+        }
+    };
+
+    let args = SyncArgs {
+        truth,
+        input: config.input.clone(),
+        output: config.output.clone(),
+        no_gen: config.no_gen,
+        force_type: config.force_type.clone(),
+    };
+    run_sync(&args, mapper)
 }

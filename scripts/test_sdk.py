@@ -6,19 +6,29 @@ import random
 import time
 import atexit
 import shutil
+import urllib.request
+import urllib.error
 
 server_process = None
-mock_server_path = None
+container_id = None
+port = 8080
 
 def cleanup():
-    global server_process, mock_server_path
-    if server_process:
-        server_process.terminate()
-        server_process.wait()
-    if mock_server_path and os.path.exists(mock_server_path):
-        os.remove(mock_server_path)
+    global container_id
+    if container_id:
+        print(f"Stopping docker container {container_id}...")
+        subprocess.run(["docker", "stop", container_id], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["docker", "rm", container_id], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 atexit.register(cleanup)
+
+def is_pingable(p):
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{p}/", method="GET")
+        with urllib.request.urlopen(req, timeout=1) as response:
+            return response.status == 200
+    except Exception:
+        return False
 
 def main():
     if len(sys.argv) < 3:
@@ -28,43 +38,34 @@ def main():
     spec_file = sys.argv[1]
     output_dir = sys.argv[2]
     
-    port = random.randint(8000, 8999)
+    global port
+    global container_id
     
-    global mock_server_path
-    mock_server_path = os.path.abspath(f"mock_server_{port}.py")
-    
-    mock_server_code = """
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import sys
-port = int(sys.argv[1])
-class MockHandler(BaseHTTPRequestHandler):
-    def log_message(self, format, *args): pass
-    def do_GET(self): self.mock()
-    def do_POST(self): self.mock()
-    def do_PUT(self): self.mock()
-    def do_DELETE(self): self.mock()
-    def mock(self):
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        path = self.path
-        if "findByStatus" in path or "findByTags" in path or "createWithList" in path or "createWithArray" in path:
-            if "pet" in path: self.wfile.write(b"[{\\"name\\": \\"mocked\\", \\"photoUrls\\": []}]")
-            else: self.wfile.write(b"[]")
-        else:
-            if "pet" in path: self.wfile.write(b"{\\"name\\": \\"mocked\\", \\"photoUrls\\": []}")
-            elif "user/login" in path: self.wfile.write(b"\\"token\\"")
-            else: self.wfile.write(b"{}")
-if __name__ == "__main__": HTTPServer(("", port), MockHandler).serve_forever()
-"""
-    with open(mock_server_path, "w") as f:
-        f.write(mock_server_code)
-
-    global server_process
-    server_process = subprocess.Popen([sys.executable, mock_server_path, str(port)])
-    
-    time.sleep(2)
-    
+    if is_pingable(port):
+        print(f"Reusing active swaggerapi/petstore instance on port {port}")
+    else:
+        port = random.randint(8000, 8999)
+        print(f"Starting swaggerapi/petstore on port {port}")
+        # Start docker container
+        try:
+            res = subprocess.run(
+                ["docker", "run", "-d", "-p", f"{port}:8080", "swaggerapi/petstore"],
+                capture_output=True, text=True, check=True
+            )
+            container_id = res.stdout.strip()
+            
+            # wait for it to be pingable
+            for _ in range(30):
+                if is_pingable(port):
+                    break
+                time.sleep(1)
+            else:
+                print("Failed to start or connect to swaggerapi/petstore docker container")
+                sys.exit(1)
+        except subprocess.CalledProcessError as e:
+            print(f"Failed to start docker container: {e.stderr}")
+            sys.exit(1)
+            
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir)
         
@@ -77,6 +78,8 @@ if __name__ == "__main__": HTTPServer(("", port), MockHandler).serve_forever()
     if os.path.exists(api_contracts_path):
         with open(api_contracts_path, "r") as f:
             content = f.read()
+        # Replace base URL logic for petstore API
+        # By default the petstore runs at /api/v3 or /v2
         content = content.replace("localhost:8080", f"127.0.0.1:{port}")
         with open(api_contracts_path, "w") as f:
             f.write(content)

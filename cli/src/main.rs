@@ -8,36 +8,27 @@
 //!
 //! Supported Commands:
 //! - `sync`: Pipeline DB -> Diesel -> Model -> Schema -> OpenAPI.
-//! - `test-gen`: Generates integration tests from OpenAPI specs.
-//! - `scaffold`: Generates handler scaffolding from OpenAPI specs.
-//! - `schema-gen`: Generates JSON Schemas from Rust structs.
+//! - `from_openapi`: Generate code from an OpenAPI specification.
+//! - `to_openapi`: Generate an OpenAPI specification from source code.
+//! - `to_docs_json`: Generate JSON documentation.
+//! - `serve_json_rpc`: Expose CLI interface as a JSON-RPC server.
+//! - `mcp`: Run the generator as an MCP server.
 
-use cdd_core::strategies::{ActixStrategy, AxumStrategy, ClapCliStrategy, ReqwestStrategy};
 use cdd_core::AppResult;
 use clap::{Parser, Subcommand, ValueEnum};
 
 use cdd_cli::generator::DieselMapper;
 
-// mod from_openapi;
-// mod generator;
-// mod scaffold;
-// mod schema_gen;
-// mod serve_json_rpc;
-// mod sync;
-// mod test_gen;
-// mod to_docs_json;
-// mod to_openapi;
-
 /// Target generation mode.
 #[derive(ValueEnum, Clone, Debug, PartialEq)]
 pub enum TargetModeDuplicate {
-    /// Generate Actix Web server scaffolding
+    /// Generate Actix Web server scaffolding.
     ServerActix,
-    /// Generate Axum server scaffolding
+    /// Generate Axum server scaffolding.
     ServerAxum,
-    /// Generate Reqwest client scaffolding
+    /// Generate Reqwest client scaffolding.
     Client,
-    /// Generate Clap CLI scaffolding
+    /// Generate Clap CLI scaffolding.
     Cli,
 }
 
@@ -46,7 +37,7 @@ pub enum TargetModeDuplicate {
 #[clap(
     author,
     version,
-    about = "CDD Toolchain CLI\n\nLanguage-Specific Commands:\n  sync        Synchronize DB schema to Rust models and OpenAPI-ready structs.\n  test-gen    Generates integration tests based on OpenAPI contracts.\n  scaffold    Scaffolds handler functions from OpenAPI Routes.\n  schema-gen  Generates a JSON Schema from a Rust struct or enum."
+    about = "CDD Toolchain CLI\n\nStandard Commands:\n  from_openapi    Generate code from an OpenAPI specification.\n  to_openapi      Generate an OpenAPI specification from source code.\n  sync            Synchronize an OpenAPI specification with source code.\n  to_docs_json    Generate JSON documentation with code snippets.\n  serve_json_rpc  Expose CLI interface as a JSON-RPC server.\n  mcp             Run the generator as an MCP server over stdio."
 )]
 struct Cli {
     /// The subcommand to execute.
@@ -68,15 +59,8 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 #[allow(clippy::large_enum_variant)]
 enum Commands {
-    /// Synchronize DB schema to Rust models and OpenAPI-ready structs.
+    /// Synchronize an OpenAPI specification with source code.
     Sync(cdd_cli::sync::SyncArgs),
-    /// Generates integration tests based on OpenAPI contracts.
-    TestGen(cdd_cli::test_gen::TestGenArgs),
-    /// Scaffolds handler functions from OpenAPI Routes.
-    Scaffold(cdd_cli::scaffold::ScaffoldArgs),
-    /// Generates a JSON Schema from a Rust struct or enum.
-    #[clap(name = "schema-gen")]
-    SchemaGen(cdd_cli::schema_gen::SchemaGenArgs),
     /// Generate JSON documentation with code snippets for an OpenAPI specification.
     #[clap(name = "to_docs_json")]
     ToDocsJson(cdd_cli::to_docs_json::ToDocsJsonArgs),
@@ -90,10 +74,10 @@ enum Commands {
     #[clap(name = "serve_json_rpc")]
     #[cfg(all(feature = "server", not(target_os = "wasi")))]
     ServeJsonRpc(cdd_cli::serve_json_rpc::ServeJsonRpcArgs),
-    /// Fallback for missing server feature
+    /// Fallback for missing server feature.
     #[cfg(any(not(feature = "server"), target_os = "wasi"))]
     ServeJsonRpc,
-    /// Expose CLI interface as an MCP server over STDIO.
+    /// Run the generator as an MCP server over stdio.
     #[clap(name = "mcp")]
     Mcp(cdd_cli::mcp::McpArgs),
 }
@@ -105,43 +89,20 @@ fn main() -> AppResult<()> {
     match &cli.command {
         Commands::Sync(args) => {
             let mapper = DieselMapper;
-            cdd_cli::sync::execute(args, &mapper)?;
-        }
-        Commands::TestGen(args) => match cli.target {
-            cdd_cli::TargetMode::ServerActix => cdd_cli::test_gen::execute(args, &ActixStrategy)?,
-            cdd_cli::TargetMode::ServerAxum => cdd_cli::test_gen::execute(args, &AxumStrategy)?,
-            cdd_cli::TargetMode::ClientReqwest => {
-                cdd_cli::test_gen::execute(args, &ReqwestStrategy)?
-            }
-            cdd_cli::TargetMode::ClientInternal => {
-                cdd_cli::test_gen::execute(args, &ClapCliStrategy)?
-            }
-        },
-        Commands::Scaffold(args) => match cli.target {
-            cdd_cli::TargetMode::ServerActix => cdd_cli::scaffold::execute(args, &ActixStrategy)?,
-            cdd_cli::TargetMode::ServerAxum => cdd_cli::scaffold::execute(args, &AxumStrategy)?,
-            cdd_cli::TargetMode::ClientReqwest => {
-                cdd_cli::scaffold::execute(args, &ReqwestStrategy)?
-            }
-            cdd_cli::TargetMode::ClientInternal => {
-                cdd_cli::scaffold::execute(args, &ClapCliStrategy)?
-            }
-        },
-        Commands::SchemaGen(args) => {
-            cdd_cli::schema_gen::execute(args)?;
+            cdd_cli::sync::run_sync(args, &mapper)?;
         }
         Commands::ToDocsJson(args) => {
-            cdd_cli::to_docs_json::execute(args)?;
+            cdd_cli::to_docs_json::run_to_docs_json(args)?;
         }
         Commands::FromOpenApi(args) => {
-            cdd_cli::from_openapi::execute(args)?;
+            cdd_cli::from_openapi::run_from_openapi(args)?;
         }
         Commands::ToOpenApi(args) => {
-            cdd_cli::to_openapi::execute(args, &cli.target)?;
+            cdd_cli::to_openapi::run_to_openapi(args, &cli.target)?;
         }
         #[cfg(all(feature = "server", not(target_os = "wasi")))]
         Commands::ServeJsonRpc(args) => {
-            cdd_cli::serve_json_rpc::execute(args)?;
+            cdd_cli::serve_json_rpc::run_serve_json_rpc(args)?;
         }
         #[cfg(any(not(feature = "server"), target_os = "wasi"))]
         Commands::ServeJsonRpc => {
@@ -150,7 +111,7 @@ fn main() -> AppResult<()> {
             ));
         }
         Commands::Mcp(args) => {
-            cdd_cli::mcp::serve_mcp(args)?;
+            cdd_cli::mcp::run_mcp_server(args)?;
         }
     }
 

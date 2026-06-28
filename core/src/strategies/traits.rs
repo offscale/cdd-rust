@@ -21,6 +21,11 @@ pub trait BackendStrategy {
         false
     }
 
+    /// Indicates if this strategy is generating a CLI client.
+    fn is_cli(&self) -> bool {
+        false
+    }
+
     // --- Scaffolding & Routing ---
 
     /// Returns the standard imports for a handler file in this framework.

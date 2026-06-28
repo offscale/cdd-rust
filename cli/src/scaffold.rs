@@ -24,11 +24,21 @@ use std::path::PathBuf;
 #[derive(clap::Args, Debug, Clone)]
 pub struct ScaffoldArgs {
     /// Path to the OpenAPI spec.
-    #[clap(long, default_value = "docs/openapi.yaml")]
+    #[clap(
+        short = 'i',
+        long,
+        env = "CDD_INPUT",
+        default_value = "docs/openapi.yaml"
+    )]
     pub openapi_path: PathBuf,
 
     /// Output directory for handler modules (e.g., `web/src/http/handlers`).
-    #[clap(long, default_value = "web/src/http/handlers")]
+    #[clap(
+        short = 'o',
+        long,
+        env = "CDD_OUTPUT",
+        default_value = "web/src/http/handlers"
+    )]
     pub output_dir: PathBuf,
 
     /// Path to the file containing the route configuration function.
@@ -49,7 +59,7 @@ pub struct ScaffoldArgs {
 ///
 /// * `args` - Command arguments including paths.
 /// * `strategy` - The backend strategy (e.g. Actix) used for code generation.
-pub fn execute(args: &ScaffoldArgs, strategy: &impl BackendStrategy) -> AppResult<()> {
+pub fn run_scaffold(args: &ScaffoldArgs, strategy: &impl BackendStrategy) -> AppResult<()> {
     println!("Scaffolding handlers from {:?}...", args.openapi_path);
 
     if !args.openapi_path.exists() {
@@ -221,7 +231,7 @@ paths:
         let strategy = ActixStrategy;
 
         // 2. Execute
-        execute(&args, &strategy).expect("Failed to execute command");
+        run_scaffold(&args, &strategy).expect("Failed to execute command");
 
         // 3. Verify Handlers Generated
         let users_file = output_dir.join("users.rs");
@@ -252,7 +262,7 @@ paths:
 
         // 5. Idempotency Check
         // Running it again should not duplicate lines (core logic test, but verified via CLI flow)
-        execute(&args, &strategy).expect("Failed to execute command");
+        run_scaffold(&args, &strategy).expect("Failed to execute command");
         let config_code_2 =
             fs::read_to_string(&route_config_path).expect("Failed to read file to string");
 
@@ -287,7 +297,7 @@ paths:
             route_config_path: None, // Optional: skip injection
             force: false,
         };
-        execute(&args, &ActixStrategy).expect("Failed to execute command");
+        run_scaffold(&args, &ActixStrategy).expect("Failed to execute command");
 
         let default_file = output_dir.join("default.rs");
         assert!(default_file.exists());

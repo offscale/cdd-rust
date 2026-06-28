@@ -4,8 +4,8 @@ cdd-rust
 [![License](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![interactive WASM web demo](https://img.shields.io/badge/interactive-WASM_web_demo-blue.svg)](https://offscale.io/wasm_web_demo)
 [![CI](https://github.com/SamuelMarks/cdd-rust/actions/workflows/ci.yml/badge.svg)](https://github.com/SamuelMarks/cdd-rust/actions)
-[![Test Coverage](https://img.shields.io/badge/test_coverage-100.00%25-brightgreen.svg)](#)
-[![Doc Coverage](https://img.shields.io/badge/doc_coverage-100.00%25-brightgreen.svg)](#)
+[![Test Coverage](https://img.shields.io/badge/test_coverage-99.65%25-brightgreen.svg)](#)
+[![Doc Coverage](https://img.shields.io/badge/doc_coverage-0.00%25-red.svg)](#)
 
 **Compiler Driven Development (CDD)** is a development approach designed to eradicate the disconnect between: API specifications; server implementations; client SDKs; and command-line tooling.
 
@@ -118,39 +118,9 @@ A true ecosystem requires standardized tooling. Once a developer learns the CDD 
 
 ### Core Subcommands
 
-#### `from_openapi to_sdk_cli`
-Generate a client SDK and a corresponding command-line interface (CLI) from an OpenAPI specification.
-- `--input, -i <spec>`: Path to the OpenAPI specification file.
-
-#### `from_openapi to_sdk`
-Generate a client SDK from an OpenAPI specification.
-- `--input, -i <spec>`: Path to the OpenAPI specification file.
-
-#### `from_openapi to_server`
-Generate server boilerplate, models, and routing logic from an OpenAPI specification.
-- `--input, -i <spec>`: Path to the OpenAPI specification file.
-
-#### `to_openapi`
-Parse the existing codebase and extract an authoritative OpenAPI specification.
-- `--input, -i <path>` (or `-f <path>`): Path to the source code directory or file to parse.
-
-#### `to_docs_json`
-Convert an OpenAPI specification into a localized, documentation-optimized JSON format.
-- `--input, -i <spec>`: Path to the OpenAPI specification file.
-- `--no-imports`: Disable import statements in the generated documentation.
-- `--no-wrapping`: Disable line wrapping in the generated documentation.
-
-#### `serve_json_rpc`
-Launch a JSON-RPC server for editor and tool integrations.
-- `--port <port>` (or `-p`): Port to listen on (e.g., `8080`).
-- `--listen <address>` (or `-l`): Address to bind to (e.g., `0.0.0.0`).
-
-#### `mcp`
-Run the Model Context Protocol server via stdio.
-
 #### `sync`
-```text
-Synchronize DB schema to Rust models and OpenAPI-ready structs
+```console
+Synchronize an OpenAPI specification with source code
 
 Usage: cdd-rust sync [OPTIONS]
 
@@ -165,14 +135,16 @@ Options:
           
           [default: database]
 
-      --schema-path <SCHEMA_PATH>
+  -i, --input <INPUT>
           Path to the Diesel schema file (e.g. web/src/schema.rs)
           
+          [env: CDD_INPUT=]
           [default: web/src/schema.rs]
 
-      --model-dir <MODEL_DIR>
+  -o, --output <OUTPUT>
           Output directory for generated models (e.g. web/src/models)
           
+          [env: CDD_OUTPUT=]
           [default: web/src/models]
 
       --no-gen
@@ -199,20 +171,22 @@ Options:
 ```
 
 #### `test-gen`
-```text
-Generates integration tests based on OpenAPI contracts
+```console
+Generate integration tests based on OpenAPI contracts
 
 Usage: cdd-rust test-gen [OPTIONS]
 
 Options:
-      --openapi-path <OPENAPI_PATH>
+  -i, --openapi-path <OPENAPI_PATH>
           Path to the OpenAPI spec
           
+          [env: CDD_INPUT=]
           [default: docs/openapi.yaml]
 
-      --output-path <OUTPUT_PATH>
+  -o, --output-path <OUTPUT_PATH>
           Output path for the test file
           
+          [env: CDD_OUTPUT=]
           [default: tests/api_contracts.rs]
 
       --app-factory <APP_FACTORY>
@@ -238,20 +212,22 @@ Options:
 ```
 
 #### `scaffold`
-```text
-Scaffolds handler functions from OpenAPI Routes
+```console
+Scaffold handler functions from OpenAPI Routes
 
 Usage: cdd-rust scaffold [OPTIONS]
 
 Options:
-      --openapi-path <OPENAPI_PATH>
+  -i, --openapi-path <OPENAPI_PATH>
           Path to the OpenAPI spec
           
+          [env: CDD_INPUT=]
           [default: docs/openapi.yaml]
 
-      --output-dir <OUTPUT_DIR>
+  -o, --output-dir <OUTPUT_DIR>
           Output directory for handler modules (e.g., `web/src/http/handlers`)
           
+          [env: CDD_OUTPUT=]
           [default: web/src/http/handlers]
 
       --route-config-path <ROUTE_CONFIG_PATH>
@@ -280,21 +256,25 @@ Options:
 ```
 
 #### `schema-gen`
-```text
-Generates a JSON Schema from a Rust struct or enum
+```console
+Generate a JSON Schema from a Rust struct or enum
 
 Usage: cdd-rust schema-gen [OPTIONS] --source-path <SOURCE_PATH> --name <NAME>
 
 Options:
-      --source-path <SOURCE_PATH>
+  -i, --source-path <SOURCE_PATH>
           Path to the Rust source file containing the model
+          
+          [env: CDD_INPUT=]
 
       --name <NAME>
           Name of the Struct or Enum to generate schema for
 
-      --output <OUTPUT>
+  -o, --output <OUTPUT>
           Output path for the schema file. Supports .json and .yaml/.yml extensions. If not provided,
           prints JSON to stdout
+          
+          [env: CDD_OUTPUT=]
 
       --dialect <DIALECT>
           Optional JSON Schema Dialect URI to include in $schema. Example:
@@ -354,6 +334,356 @@ Options:
   -h, --help
           Print help (see a summary with '-h')
 ```
+
+#### `to_docs_json`
+```console
+Generate JSON documentation with code snippets for an OpenAPI specification
+
+Usage: cdd-rust to_docs_json [OPTIONS] --input <INPUT>
+
+Options:
+  -i, --input <INPUT>
+          Path or URL to the OpenAPI specification
+          
+          [env: CDD_INPUT=]
+
+      --no-imports
+          If provided, omit the imports field in the code object
+          
+          [env: CDD_NO_IMPORTS=]
+
+      --no-wrapping
+          If provided, omit the wrapper_start and wrapper_end fields in the code object
+          
+          [env: CDD_NO_WRAPPING=]
+
+  -o, --output <OUTPUT>
+          Output file or directory path
+          
+          [env: CDD_OUTPUT=]
+
+  -t, --target <TARGET>
+          Target mode (server or client)
+
+          Possible values:
+          - server-actix:    Actix Web Server
+          - server-axum:     Axum Server
+          - client-reqwest:  Reqwest Client
+          - client-internal: Internal
+          
+          [env: CDD_TARGET=]
+          [default: server-actix]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `from_openapi`
+```console
+Generate code from an OpenAPI specification
+
+Usage: cdd-rust from_openapi [OPTIONS] <COMMAND>
+
+Commands:
+  to_sdk_cli  Generate a CLI SDK
+  to_sdk      Generate a Client SDK
+  to_server   Generate Server scaffolding
+  help        Print this message or the help of the given subcommand(s)
+
+Options:
+  -t, --target <TARGET>
+          Target mode (server or client)
+
+          Possible values:
+          - server-actix:    Actix Web Server
+          - server-axum:     Axum Server
+          - client-reqwest:  Reqwest Client
+          - client-internal: Internal
+          
+          [env: CDD_TARGET=]
+          [default: server-actix]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `from_openapi to_sdk_cli`
+```console
+Generate a CLI SDK
+
+Usage: cdd-rust from_openapi to_sdk_cli [OPTIONS]
+
+Options:
+  -i, --input <INPUT>
+          Path or URL to the OpenAPI specification
+          
+          [env: CDD_INPUT=]
+
+      --input-dir <INPUT_DIR>
+          Directory containing OpenAPI specifications
+          
+          [env: CDD_INPUT_DIR=]
+
+  -o, --output <OUTPUT_DIR>
+          Output file or directory path
+          
+          [env: CDD_OUTPUT=]
+
+      --no-github-actions
+          Do not generate GitHub Actions scaffolding
+          
+          [env: CDD_NO_GITHUB_ACTIONS=]
+
+      --no-installable-package
+          Do not generate installable package scaffolding
+          
+          [env: CDD_NO_INSTALLABLE_PACKAGE=]
+
+      --tests
+          Generate integration tests and mocks
+          
+          [env: CDD_TESTS=]
+
+      --mcp
+          Generate Model Context Protocol (MCP) server and adapter
+          
+          [env: CDD_MCP=]
+
+  -t, --target <TARGET>
+          Target mode (server or client)
+
+          Possible values:
+          - server-actix:    Actix Web Server
+          - server-axum:     Axum Server
+          - client-reqwest:  Reqwest Client
+          - client-internal: Internal
+          
+          [env: CDD_TARGET=]
+          [default: server-actix]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `from_openapi to_sdk`
+```console
+Generate a Client SDK
+
+Usage: cdd-rust from_openapi to_sdk [OPTIONS]
+
+Options:
+  -i, --input <INPUT>
+          Path or URL to the OpenAPI specification
+          
+          [env: CDD_INPUT=]
+
+      --input-dir <INPUT_DIR>
+          Directory containing OpenAPI specifications
+          
+          [env: CDD_INPUT_DIR=]
+
+  -o, --output <OUTPUT_DIR>
+          Output file or directory path
+          
+          [env: CDD_OUTPUT=]
+
+      --no-github-actions
+          Do not generate GitHub Actions scaffolding
+          
+          [env: CDD_NO_GITHUB_ACTIONS=]
+
+      --no-installable-package
+          Do not generate installable package scaffolding
+          
+          [env: CDD_NO_INSTALLABLE_PACKAGE=]
+
+      --tests
+          Generate integration tests and mocks
+          
+          [env: CDD_TESTS=]
+
+      --mcp
+          Generate Model Context Protocol (MCP) server and adapter
+          
+          [env: CDD_MCP=]
+
+  -t, --target <TARGET>
+          Target mode (server or client)
+
+          Possible values:
+          - server-actix:    Actix Web Server
+          - server-axum:     Axum Server
+          - client-reqwest:  Reqwest Client
+          - client-internal: Internal
+          
+          [env: CDD_TARGET=]
+          [default: server-actix]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+
+#### `from_openapi to_server`
+```console
+Generate Server scaffolding
+
+Usage: cdd-rust from_openapi to_server [OPTIONS]
+
+Options:
+  -i, --input <INPUT>
+          Path or URL to the OpenAPI specification
+          
+          [env: CDD_INPUT=]
+
+      --input-dir <INPUT_DIR>
+          Directory containing OpenAPI specifications
+          
+          [env: CDD_INPUT_DIR=]
+
+  -o, --output <OUTPUT_DIR>
+          Output file or directory path
+          
+          [env: CDD_OUTPUT=]
+
+      --no-github-actions
+          Do not generate GitHub Actions scaffolding
+          
+          [env: CDD_NO_GITHUB_ACTIONS=]
+
+      --no-installable-package
+          Do not generate installable package scaffolding
+          
+          [env: CDD_NO_INSTALLABLE_PACKAGE=]
+
+      --tests
+          Generate integration tests and mocks
+          
+          [env: CDD_TESTS=]
+
+      --mcp
+          Generate Model Context Protocol (MCP) server and adapter
+          
+          [env: CDD_MCP=]
+
+      --framework <FRAMEWORK>
+          The target server framework (actix-web or axum). Defaults to actix-web
+
+          Possible values:
+          - actix-web: Actix Web framework
+          - axum:      Axum framework
+          
+          [env: CDD_SERVER_FRAMEWORK=]
+          [default: actix-web]
+
+  -t, --target <TARGET>
+          Target mode (server or client)
+
+          Possible values:
+          - server-actix:    Actix Web Server
+          - server-axum:     Axum Server
+          - client-reqwest:  Reqwest Client
+          - client-internal: Internal
+          
+          [env: CDD_TARGET=]
+          [default: server-actix]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `to_openapi`
+```console
+Generate an OpenAPI specification from source code
+
+Usage: cdd-rust to_openapi [OPTIONS] --input <INPUT>
+
+Options:
+  -i, --input <INPUT>
+          Path to source code directory or file
+          
+          [env: CDD_INPUT=]
+
+  -o, --output <OUTPUT>
+          Output file or directory path
+          
+          [env: CDD_OUTPUT=]
+          [default: spec.json]
+
+  -t, --target <TARGET>
+          Target mode (server or client)
+
+          Possible values:
+          - server-actix:    Actix Web Server
+          - server-axum:     Axum Server
+          - client-reqwest:  Reqwest Client
+          - client-internal: Internal
+          
+          [env: CDD_TARGET=]
+          [default: server-actix]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `serve_json_rpc`
+```console
+Expose CLI interface as a JSON-RPC server
+
+Usage: cdd-rust serve_json_rpc [OPTIONS]
+
+Options:
+  -p, --port <PORT>
+          Port to listen on. The port to listen on
+          
+          [env: CDD_PORT=]
+          [default: 8080]
+
+  -l, --listen <LISTEN>
+          Interface to listen on. The address to listen on
+          
+          [env: CDD_LISTEN=]
+          [default: 127.0.0.1]
+
+  -t, --target <TARGET>
+          Target mode (server or client)
+
+          Possible values:
+          - server-actix:    Actix Web Server
+          - server-axum:     Axum Server
+          - client-reqwest:  Reqwest Client
+          - client-internal: Internal
+          
+          [env: CDD_TARGET=]
+          [default: server-actix]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
+#### `mcp`
+```console
+Run the generator as an MCP server over stdio
+
+Usage: cdd-rust mcp [OPTIONS]
+
+Options:
+  -t, --target <TARGET>
+          Target mode (server or client)
+
+          Possible values:
+          - server-actix:    Actix Web Server
+          - server-axum:     Axum Server
+          - client-reqwest:  Reqwest Client
+          - client-internal: Internal
+          
+          [env: CDD_TARGET=]
+          [default: server-actix]
+
+  -h, --help
+          Print help (see a summary with '-h')
+```
+
 
 ### Detail Features Beyond Common Subset
 

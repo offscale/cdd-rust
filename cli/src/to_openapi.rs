@@ -14,12 +14,10 @@ use walkdir::WalkDir;
 pub struct ToOpenApiArgs {
     /// Path to source code directory or file.
     #[clap(short = 'i', long, env = "CDD_INPUT")]
-    /// The input directory path
     pub input: PathBuf,
 
     /// Output file or directory path.
     #[clap(short = 'o', long, env = "CDD_OUTPUT", default_value = "spec.json")]
-    /// The output directory path
     pub output: PathBuf,
 }
 
@@ -39,7 +37,7 @@ fn serialize_doc(doc: &serde_json::Value, is_json: bool) -> AppResult<String> {
 }
 
 /// Executes the OpenAPI generation from source code.
-pub fn execute(args: &ToOpenApiArgs, _target: &TargetMode) -> AppResult<()> {
+pub fn run_to_openapi(args: &ToOpenApiArgs, _target: &TargetMode) -> AppResult<()> {
     println!("Extracting OpenAPI specification from {:?}", args.input);
 
     if !args.input.exists() {
@@ -114,11 +112,11 @@ mod tests {
             input: std::path::PathBuf::from("/does/not/exist"),
             output: std::path::PathBuf::from("out"),
         };
-        assert!(execute(&args, &TargetMode::ClientInternal).is_err());
+        assert!(run_to_openapi(&args, &TargetMode::ClientInternal).is_err());
     }
 
     #[test]
-    fn test_to_openapi_execute() {
+    fn test_to_openapi_run_to_openapi() {
         let dir = tempdir().expect("Failed to create temporary directory");
         let src_dir = dir.path().join("src");
         fs::create_dir_all(&src_dir).expect("Failed to create");
@@ -143,7 +141,7 @@ mod tests {
             output: dir.path().join("spec.json"),
         };
 
-        let result = execute(&args, &TargetMode::ServerActix);
+        let result = run_to_openapi(&args, &TargetMode::ServerActix);
         assert!(result.is_ok());
     }
 
@@ -153,7 +151,7 @@ mod tests {
             input: PathBuf::from("does_not_exist_dir"),
             output: PathBuf::from("spec.json"),
         };
-        let result = execute(&args, &TargetMode::ServerActix);
+        let result = run_to_openapi(&args, &TargetMode::ServerActix);
         assert!(result.is_err());
     }
 
@@ -181,10 +179,10 @@ mod tests {
             output: dir.path().join("spec.json"),
         };
 
-        let result_client = execute(&args, &TargetMode::ClientReqwest);
+        let result_client = run_to_openapi(&args, &TargetMode::ClientReqwest);
         assert!(result_client.is_ok());
 
-        let result_cli = execute(&args, &TargetMode::ClientInternal);
+        let result_cli = run_to_openapi(&args, &TargetMode::ClientInternal);
         assert!(result_cli.is_ok());
     }
 
@@ -218,9 +216,9 @@ mod tests {
         };
 
         // Execute should succeed but skip the bad files
-        let _ = execute(&args, &TargetMode::ServerActix);
-        let _ = execute(&args, &TargetMode::ClientReqwest);
-        let _ = execute(&args, &TargetMode::ClientInternal);
+        let _ = run_to_openapi(&args, &TargetMode::ServerActix);
+        let _ = run_to_openapi(&args, &TargetMode::ClientReqwest);
+        let _ = run_to_openapi(&args, &TargetMode::ClientInternal);
     }
 
     #[test]
@@ -243,7 +241,7 @@ mod tests {
             output: dir.path().join("spec.json"),
         };
 
-        let result = execute(&args, &TargetMode::ClientInternal);
+        let result = run_to_openapi(&args, &TargetMode::ClientInternal);
         assert!(result.is_err());
     }
 
@@ -266,7 +264,7 @@ mod tests {
             output: output_file.clone(),
         };
 
-        let result = execute(&args, &crate::TargetMode::ServerActix);
+        let result = run_to_openapi(&args, &crate::TargetMode::ServerActix);
         assert!(result.is_ok());
         assert!(std::fs::read_to_string(output_file)
             .expect("Failed to read file to string")
@@ -291,27 +289,27 @@ mod tests {
             output: std::path::PathBuf::from("/nonexistent_dir/output.yaml"),
         };
 
-        let result = execute(&args, &crate::TargetMode::ServerActix);
+        let result = run_to_openapi(&args, &crate::TargetMode::ServerActix);
         assert!(result.is_err());
     }
 }
 
-/// Configuration for `to_openapi` programmatic API
+/// Configuration for `to_openapi` programmatic API.
 #[derive(Debug, Default)]
 pub struct ToOpenApiConfig {
-    /// The input directory path
+    /// The input directory path.
     pub input: PathBuf,
-    /// The output directory path
+    /// The output directory path.
     pub output: PathBuf,
 }
 
 /// Generate an OpenAPI specification from source code.
-pub fn generate_to_openapi(config: &ToOpenApiConfig) -> AppResult<()> {
+pub fn to_openapi(config: &ToOpenApiConfig) -> AppResult<()> {
     let args = ToOpenApiArgs {
         input: config.input.clone(),
         output: config.output.clone(),
     };
-    execute(&args, &crate::TargetMode::ServerActix)
+    run_to_openapi(&args, &crate::TargetMode::ServerActix)
 }
 
 #[cfg(test)]
@@ -330,7 +328,7 @@ mod extra_coverage_tests {
             input: input_file,
             output: output_file,
         };
-        let res = generate_to_openapi(&config);
+        let res = to_openapi(&config);
         println!("RES: {:?}", res);
         assert!(res.is_ok());
     }

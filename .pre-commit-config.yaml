@@ -31,49 +31,49 @@ repos:
 
       - id: cargo-build
         name: cargo build
-        entry: cargo build --workspace --all-targets
+        entry: bash -c 'if [ "$RUN_SLOW_TESTS" = "1" ]; then cargo build --workspace --all-targets; else echo "Skipping cargo-build"; fi'
         language: system
         pass_filenames: false
         types: [rust]
 
       - id: cargo-test
         name: cargo test
-        entry: cargo test --workspace
+        entry: bash -c 'if [ "$RUN_SLOW_TESTS" = "1" ]; then cargo test --workspace; else echo "Skipping cargo-test"; fi'
         language: system
         pass_filenames: false
         types: [rust]
 
       - id: test-swagger-2
         name: Test Swagger 2.0 Petstore SDK
-        entry: python3 scripts/test_sdk.py ../petstore.json ./target/petstore2
+        entry: bash -c 'if [ "$RUN_SLOW_TESTS" = "1" ]; then python3 scripts/test_sdk.py ../petstore.json ./target/petstore2; else echo "Skipping test-swagger-2"; fi'
         language: system
         pass_filenames: false
         types: [rust]
 
       - id: test-openapi-3
         name: Test OpenAPI 3.2.0 Petstore SDK
-        entry: python3 scripts/test_sdk.py ../petstore_oas3.json ./target/petstore3
+        entry: bash -c 'if [ "$RUN_SLOW_TESTS" = "1" ]; then python3 scripts/test_sdk.py ../petstore_oas3.json ./target/petstore3; else echo "Skipping test-openapi-3"; fi'
         language: system
         pass_filenames: false
         types: [rust]
 
       - id: test-server-swagger-2
         name: Test Swagger 2.0 Petstore Server & Client
-        entry: python3 scripts/test_server_and_client.py ../petstore.json ./target/server_petstore2 ./target/client_petstore2
+        entry: bash -c 'if [ "$RUN_SLOW_TESTS" = "1" ]; then python3 scripts/test_server_and_client.py ../petstore.json ./target/server_petstore2 ./target/client_petstore2; else echo "Skipping test-server-swagger-2"; fi'
         language: system
         pass_filenames: false
         types: [rust]
 
       - id: test-server-openapi-3
         name: Test OpenAPI 3.2.0 Petstore Server & Client
-        entry: python3 scripts/test_server_and_client.py ../petstore_oas3.json ./target/server_petstore3 ./target/client_petstore3
+        entry: bash -c 'if [ "$RUN_SLOW_TESTS" = "1" ]; then python3 scripts/test_server_and_client.py ../petstore_oas3.json ./target/server_petstore3 ./target/client_petstore3; else echo "Skipping test-server-openapi-3"; fi'
         language: system
         pass_filenames: false
         types: [rust]
 
       - id: wasm-build
         name: WASM Build Test
-        entry: python3 scripts/build_wasm.py
+        entry: bash -c 'if [ "$RUN_SLOW_TESTS" = "1" ]; then python3 scripts/build_wasm.py; else echo "Skipping wasm-build"; fi'
         language: system
         pass_filenames: false
         types: [rust]

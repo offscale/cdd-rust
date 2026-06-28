@@ -18,7 +18,7 @@ use std::path::PathBuf;
 #[derive(clap::Args, Debug, Clone)]
 pub struct SchemaGenArgs {
     /// Path to the Rust source file containing the model.
-    #[clap(long)]
+    #[clap(short = 'i', long, env = "CDD_INPUT")]
     pub source_path: PathBuf,
 
     /// Name of the Struct or Enum to generate schema for.
@@ -28,7 +28,7 @@ pub struct SchemaGenArgs {
     /// Output path for the schema file.
     /// Supports .json and .yaml/.yml extensions.
     /// If not provided, prints JSON to stdout.
-    #[clap(long)]
+    #[clap(short = 'o', long, env = "CDD_OUTPUT")]
     pub output: Option<PathBuf>,
 
     /// Optional JSON Schema Dialect URI to include in $schema.
@@ -94,7 +94,7 @@ pub struct SchemaGenArgs {
 /// # Arguments
 ///
 /// * `args` - Command arguments.
-pub fn execute(args: &SchemaGenArgs) -> AppResult<()> {
+pub fn run_schema_gen(args: &SchemaGenArgs) -> AppResult<()> {
     if !args.source_path.exists() {
         return Err(AppError::General(format!(
             "Source file not found: {:?}",
@@ -224,7 +224,7 @@ mod tests {
         let out_path = dir.path().join("schema.json");
 
         let rust_code = r#"
-            /// A User struct
+            /// A User struct.
             struct User {
                 id: i32,
                 name: String,
@@ -257,11 +257,11 @@ mod tests {
             self_uri: None,
         };
 
-        execute(&args).expect("Failed to execute command");
+        run_schema_gen(&args).expect("Failed to execute command");
 
         let json_content = fs::read_to_string(&out_path).expect("Failed to read file to string");
         assert!(json_content.contains("\"title\": \"User\""));
-        assert!(json_content.contains("\"description\": \"A User struct\""));
+        assert!(json_content.contains("\"description\": \"A User struct.\""));
         assert!(json_content.contains("\"type\": \"integer\"")); // id
         assert!(json_content.contains("\"type\": \"boolean\"")); // is_active
     }
@@ -304,7 +304,7 @@ mod tests {
             self_uri: None,
         };
 
-        execute(&args).expect("Failed to execute command");
+        run_schema_gen(&args).expect("Failed to execute command");
 
         let yaml_content = fs::read_to_string(&out_path).expect("Failed to read file to string");
         // YAML specific checking
@@ -349,7 +349,7 @@ mod tests {
             self_uri: None,
         };
 
-        execute(&args).expect("Failed to execute command");
+        run_schema_gen(&args).expect("Failed to execute command");
 
         let json_content = fs::read_to_string(&out_path).expect("Failed to read file to string");
         assert!(json_content.contains("\"openapi\": \"3.2.0\""));
@@ -388,7 +388,7 @@ mod tests {
             self_uri: None,
         };
 
-        let result = execute(&args);
+        let result = run_schema_gen(&args);
         assert!(result.is_err());
         match result.expect_err("expected error") {
             AppError::General(msg) => assert!(msg.contains("Model 'NonExistent' not found")),
@@ -425,7 +425,7 @@ mod tests {
             self_uri: None,
         };
 
-        let result = execute(&args);
+        let result = run_schema_gen(&args);
         assert!(result.is_err());
         let msg = format!("{}", result.expect_err("expected error"));
         assert!(msg.contains("info_license_name"));

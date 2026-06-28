@@ -18,6 +18,9 @@ use crate::strategies::BackendStrategy;
 pub struct ClapCliStrategy;
 
 impl BackendStrategy for ClapCliStrategy {
+    fn is_cli(&self) -> bool {
+        true
+    }
     fn handler_imports(&self) -> String {
         scaffolding::handler_imports()
     }

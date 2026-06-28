@@ -13,22 +13,23 @@ pub mod test_gen;
 pub mod to_docs_json;
 pub mod to_openapi;
 
-pub use from_openapi::{generate_from_openapi, FromOpenApiConfig, ServerFramework};
+pub use from_openapi::{from_openapi, FromOpenApiConfig, ServerFramework};
 #[cfg(all(feature = "server", not(target_os = "wasi")))]
 pub use serve_json_rpc::{serve_json_rpc, ServeJsonRpcConfig};
-pub use to_docs_json::{generate_docs_json, ToDocsJsonConfig};
-pub use to_openapi::{generate_to_openapi, ToOpenApiConfig};
+pub use sync::{sync, SyncConfig};
+pub use to_docs_json::{to_docs_json, ToDocsJsonConfig};
+pub use to_openapi::{to_openapi, ToOpenApiConfig};
 
-/// Global Target Mode Configuration
+/// Global Target Mode Configuration.
 #[derive(Clone, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
 pub enum TargetMode {
-    /// Actix Web Server
+    /// Actix Web Server.
     #[default]
     ServerActix,
-    /// Axum Server
+    /// Axum Server.
     ServerAxum,
-    /// Reqwest Client
+    /// Reqwest Client.
     ClientReqwest,
-    /// Internal
+    /// Internal.
     ClientInternal,
 }

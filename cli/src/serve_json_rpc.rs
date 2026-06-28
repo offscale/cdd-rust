@@ -5,9 +5,9 @@ use cdd_core::error::AppResult;
 use clap::Args;
 use serde::{Deserialize, Serialize};
 
-use crate::from_openapi::{generate_from_openapi, FromOpenApiConfig, ServerFramework};
-use crate::to_docs_json::{generate_docs_json, ToDocsJsonConfig};
-use crate::to_openapi::{generate_to_openapi, ToOpenApiConfig};
+use crate::from_openapi::{from_openapi, FromOpenApiConfig, ServerFramework};
+use crate::to_docs_json::{to_docs_json, ToDocsJsonConfig};
+use crate::to_openapi::{to_openapi, ToOpenApiConfig};
 use std::path::PathBuf;
 
 /// Arguments for the JSON-RPC server command.
@@ -15,50 +15,50 @@ use std::path::PathBuf;
 pub struct ServeJsonRpcArgs {
     /// Port to listen on.
     #[clap(short, long, default_value = "8080", env = "CDD_PORT")]
-    /// The port to listen on
+    /// The port to listen on.
     pub port: u16,
 
     /// Interface to listen on.
     #[clap(short, long, default_value = "127.0.0.1", env = "CDD_LISTEN")]
-    /// The address to listen on
+    /// The address to listen on.
     pub listen: String,
 }
 
 /// JSON-RPC Request schema.
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 struct RpcRequest {
-    /// JSON-RPC version
+    /// JSON-RPC version.
     jsonrpc: String,
-    /// Method name
+    /// Method name.
     method: String,
-    /// Parameters
+    /// Parameters.
     #[allow(dead_code)]
     params: Option<serde_json::Value>,
-    /// Request ID
+    /// Request ID.
     id: Option<serde_json::Value>,
 }
 
 /// JSON-RPC Response schema.
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 struct RpcResponse {
-    /// JSON-RPC version
+    /// JSON-RPC version.
     jsonrpc: String,
-    /// Result payload
+    /// Result payload.
     #[serde(skip_serializing_if = "Option::is_none")]
     result: Option<serde_json::Value>,
-    /// Error payload
+    /// Error payload.
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<RpcError>,
-    /// Request ID
+    /// Request ID.
     id: Option<serde_json::Value>,
 }
 
 /// JSON-RPC Error schema.
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 struct RpcError {
-    /// Error code
+    /// Error code.
     code: i32,
-    /// Error message
+    /// Error message.
     message: String,
 }
 
@@ -94,7 +94,7 @@ async fn handle_rpc(req: web::Json<RpcRequest>) -> impl Responder {
                         input: PathBuf::from(input),
                         output: PathBuf::from(output),
                     };
-                    match generate_to_openapi(&config) {
+                    match to_openapi(&config) {
                         Ok(_) => HttpResponse::Ok().json(RpcResponse {
                             jsonrpc: "2.0".to_string(),
                             result: Some(serde_json::json!("Success")),
@@ -156,7 +156,7 @@ async fn handle_rpc(req: web::Json<RpcRequest>) -> impl Responder {
                         no_imports,
                         no_wrapping,
                     };
-                    match generate_docs_json(&config) {
+                    match to_docs_json(&config) {
                         Ok(_) => HttpResponse::Ok().json(RpcResponse {
                             jsonrpc: "2.0".to_string(),
                             result: Some(serde_json::json!("Success")),
@@ -232,7 +232,7 @@ async fn handle_rpc(req: web::Json<RpcRequest>) -> impl Responder {
                     framework: ServerFramework::ActixWeb, // default
                 };
 
-                match generate_from_openapi(&config) {
+                match from_openapi(&config) {
                     Ok(_) => HttpResponse::Ok().json(RpcResponse {
                         jsonrpc: "2.0".to_string(),
                         result: Some(serde_json::json!("Success")),
@@ -274,7 +274,7 @@ async fn handle_rpc(req: web::Json<RpcRequest>) -> impl Responder {
 }
 
 /// Starts the JSON-RPC server based on provided arguments.
-pub fn execute(args: &ServeJsonRpcArgs) -> AppResult<()> {
+pub fn run_serve_json_rpc(args: &ServeJsonRpcArgs) -> AppResult<()> {
     let listen = args.listen.clone();
     let port = args.port;
 
@@ -368,12 +368,12 @@ mod tests {
     }
 }
 
-/// Configuration for `serve_json_rpc` programmatic API
+/// Configuration for `serve_json_rpc` programmatic API.
 #[derive(Debug)]
 pub struct ServeJsonRpcConfig {
-    /// The port to listen on
+    /// The port to listen on.
     pub port: u16,
-    /// The address to listen on
+    /// The address to listen on.
     pub listen: String,
 }
 
@@ -393,7 +393,7 @@ pub fn serve_json_rpc(config: &ServeJsonRpcConfig) -> AppResult<()> {
         port: config.port,
         listen: config.listen.clone(),
     };
-    execute(&args)
+    run_serve_json_rpc(&args)
 }
 
 #[cfg(any(not(feature = "server"), target_os = "wasi"))]

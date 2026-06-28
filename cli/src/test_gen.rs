@@ -16,11 +16,21 @@ use cdd_core::{AppError, AppResult};
 #[derive(clap::Args, Debug, Clone)]
 pub struct TestGenArgs {
     /// Path to the OpenAPI spec.
-    #[clap(long, default_value = "docs/openapi.yaml")]
+    #[clap(
+        short = 'i',
+        long,
+        env = "CDD_INPUT",
+        default_value = "docs/openapi.yaml"
+    )]
     pub openapi_path: PathBuf,
 
     /// Output path for the test file.
-    #[clap(long, default_value = "tests/api_contracts.rs")]
+    #[clap(
+        short = 'o',
+        long,
+        env = "CDD_OUTPUT",
+        default_value = "tests/api_contracts.rs"
+    )]
     pub output_path: PathBuf,
 
     /// The function that initializes the Actix App (e.g. `web::create_app`).
@@ -35,7 +45,7 @@ pub struct TestGenArgs {
 ///
 /// * `args` - Command arguments.
 /// * `strategy` - The backend strategy (e.g. Actix) used to generate code.
-pub fn execute(args: &TestGenArgs, strategy: &impl BackendStrategy) -> AppResult<()> {
+pub fn run_test_gen(args: &TestGenArgs, strategy: &impl BackendStrategy) -> AppResult<()> {
     if !args.openapi_path.exists() {
         return Err(AppError::General(format!(
             "OpenAPI file not found: {:?}",
@@ -101,7 +111,7 @@ paths:
             app_factory: "crate::create_app".to_string(),
         };
 
-        execute(&args, &ActixStrategy).expect("Failed to execute command");
+        run_test_gen(&args, &ActixStrategy).expect("Failed to execute command");
 
         assert!(output_path.exists());
         let contents = fs::read_to_string(output_path).expect("Failed to read file to string");
@@ -121,7 +131,7 @@ paths:
             app_factory: "crate::create_app".to_string(),
         };
 
-        let err = execute(&args, &ActixStrategy).expect_err("expected error");
+        let err = run_test_gen(&args, &ActixStrategy).expect_err("expected error");
         assert!(format!("{}", err).contains("OpenAPI file not found"));
     }
 }

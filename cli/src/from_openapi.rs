@@ -12,10 +12,10 @@ use crate::test_gen::TestGenArgs;
 /// Available server frameworks.
 #[derive(clap::ValueEnum, Clone, Debug, Default, PartialEq, Eq)]
 pub enum ServerFramework {
-    /// Actix Web framework
+    /// Actix Web framework.
     #[default]
     ActixWeb,
-    /// Axum framework
+    /// Axum framework.
     Axum,
 }
 
@@ -30,19 +30,16 @@ pub struct FromOpenApiArgs {
 /// Commands available under the `from_openapi` subcommand.
 #[derive(Subcommand, Debug)]
 pub enum FromOpenApiCommands {
-    /// Generate a CLI SDK
+    /// Generate an offline-first Clap CLI SDK.
     #[clap(name = "to_sdk_cli")]
     SdkCli(GenerateArgs),
-    /// Generate a Client SDK
+    /// Generate a Client SDK.
     #[clap(name = "to_sdk")]
     Sdk(GenerateArgs),
-    /// Generate an MCP Programmatic Tool Adapter SDK
-    #[clap(name = "to_sdk_mcp")]
-    SdkMcp(GenerateArgs),
-    /// Generate Server scaffolding
+    /// Generate Server scaffolding.
     #[clap(name = "to_server")]
     Server {
-        /// The common arguments for generation
+        /// The common arguments for generation.
         #[clap(flatten)]
         args: GenerateArgs,
         /// The target server framework (actix-web or axum). Defaults to actix-web.
@@ -55,39 +52,42 @@ pub enum FromOpenApiCommands {
 #[derive(Args, Debug)]
 pub struct GenerateArgs {
     /// Path or URL to the OpenAPI specification.
-    #[clap(short, long, required_unless_present = "input_dir", env = "CDD_INPUT")]
-    /// The input file path
+    #[clap(
+        short = 'i',
+        long,
+        required_unless_present = "input_dir",
+        env = "CDD_INPUT"
+    )]
     pub input: Option<PathBuf>,
 
     /// Directory containing OpenAPI specifications.
-    #[clap(long, required_unless_present = "input", env = "CDD_INPUT_DIR")]
-    /// The input directory path
+    #[clap(
+        short = 'd',
+        long,
+        required_unless_present = "input",
+        env = "CDD_INPUT_DIR"
+    )]
     pub input_dir: Option<PathBuf>,
 
     /// Output file or directory path.
-    #[clap(short, long = "output", env = "CDD_OUTPUT")]
-    /// The output directory path
+    #[clap(short = 'o', long = "output", env = "CDD_OUTPUT")]
     pub output_dir: Option<PathBuf>,
 
     /// Do not generate GitHub Actions scaffolding.
     #[clap(long, env = "CDD_NO_GITHUB_ACTIONS")]
-    /// Whether to skip github actions generation
     pub no_github_actions: bool,
 
     /// Do not generate installable package scaffolding.
     #[clap(long, env = "CDD_NO_INSTALLABLE_PACKAGE")]
-    /// Whether to skip package generation
     pub no_installable_package: bool,
 
     /// Generate integration tests and mocks.
     #[clap(long, env = "CDD_TESTS")]
-    #[clap(long, env = "CDD_TESTS")]
-    /// Whether to generate tests
     pub tests: bool,
 
     /// Generate Model Context Protocol (MCP) server and adapter.
 
-    #[clap(long, env = "CDD_MCP")]
+    #[clap(short = 'm', long, env = "CDD_MCP")]
     pub mcp: bool,
 }
 
@@ -126,7 +126,7 @@ impl GenerateArgs {
 }
 
 /// Executes the requested OpenAPI generation command.
-pub fn execute(args: &FromOpenApiArgs) -> AppResult<()> {
+pub fn run_from_openapi(args: &FromOpenApiArgs) -> AppResult<()> {
     match &args.command {
         FromOpenApiCommands::SdkCli(gen_args) => {
             println!("Generating SDK CLI...");
@@ -138,10 +138,9 @@ pub fn execute(args: &FromOpenApiArgs) -> AppResult<()> {
         FromOpenApiCommands::Sdk(gen_args) => {
             println!("Generating SDK...");
             run_generation(gen_args, &ReqwestStrategy)?;
-        }
-        FromOpenApiCommands::SdkMcp(gen_args) => {
-            println!("Generating MCP SDK...");
-            run_generation(gen_args, &cdd_core::strategies::McpClientStrategy)?;
+            if gen_args.mcp {
+                run_generation(gen_args, &cdd_core::strategies::McpClientStrategy)?;
+            }
         }
         FromOpenApiCommands::Server {
             args: gen_args,
@@ -155,6 +154,9 @@ pub fn execute(args: &FromOpenApiArgs) -> AppResult<()> {
                 ServerFramework::Axum => {
                     run_generation(gen_args, &cdd_core::strategies::AxumStrategy)?
                 }
+            }
+            if gen_args.mcp {
+                run_generation(gen_args, &cdd_core::strategies::McpServerStrategy)?;
             }
         }
     }
@@ -319,7 +321,7 @@ pub mod scopes {
             route_config_path,
             force: false,
         };
-        crate::scaffold::execute(&scaffold_args, strategy)?;
+        crate::scaffold::run_scaffold(&scaffold_args, strategy)?;
 
         // Gather handler modules for mod.rs
         if handlers_dir.exists() {
@@ -344,6 +346,81 @@ pub mod scopes {
                 .map_err(|e| AppError::General(e.to_string()))?;
         }
 
+        // 4. Generate CLI Main
+        if strategy.is_cli() {
+            let mut main_rs = String::new();
+            main_rs.push_str("#![allow(missing_docs)]\n\n");
+            main_rs.push_str("use clap::{Parser, Subcommand};\n");
+            main_rs.push_str("use reqwest::Client;\n\n");
+            main_rs.push_str("use generated_package::handlers::*;\n\n");
+
+            main_rs.push_str("#[derive(Parser, Debug)]\n");
+            main_rs.push_str("#[clap(author, version, about = \"Generated CLI\")]\n");
+            main_rs.push_str("struct Cli {\n");
+            main_rs.push_str("    #[clap(long, default_value = \"http://localhost:8080\")]\n");
+            main_rs.push_str("    base_url: String,\n");
+            main_rs.push_str("    #[clap(subcommand)]\n");
+            main_rs.push_str("    command: Commands,\n");
+            main_rs.push_str("}\n\n");
+
+            main_rs.push_str("#[derive(Subcommand, Debug)]\n");
+            main_rs.push_str("enum Commands {\n");
+
+            if let Ok(entries) = std::fs::read_dir(&handlers_dir) {
+                let mut variants = Vec::new();
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file()
+                        && path.extension().is_some_and(|ext| ext == "rs")
+                        && path.file_name().is_some_and(|name| name != "mod.rs")
+                    {
+                        let mod_name = path.file_stem().unwrap().to_string_lossy();
+                        let struct_name = mod_name
+                            .split('_')
+                            .filter(|s| !s.is_empty())
+                            .map(|s| {
+                                let mut c = s.chars();
+                                let f = c.next().unwrap();
+                                f.to_uppercase().collect::<String>() + c.as_str()
+                            })
+                            .collect::<String>();
+                        variants.push((mod_name.to_string(), struct_name));
+                    }
+                }
+                variants.sort();
+                for (mod_name, struct_name) in &variants {
+                    main_rs.push_str(&format!(
+                        "    {}(generated_package::handlers::{}::{}Args),\n",
+                        struct_name, mod_name, struct_name
+                    ));
+                }
+                main_rs.push_str("    /// Run as an MCP server over stdio\n");
+                main_rs.push_str("    Mcp,\n");
+                main_rs.push_str("}\n\n");
+
+                main_rs.push_str("#[tokio::main]\n");
+                main_rs.push_str("async fn main() -> Result<(), Box<dyn std::error::Error>> {\n");
+                main_rs.push_str("    let cli = Cli::parse();\n");
+                main_rs.push_str("    let client = Client::new();\n\n");
+                main_rs.push_str("    match cli.command {\n");
+                for (mod_name, struct_name) in &variants {
+                    main_rs.push_str(&format!("        Commands::{}(args) => {{\n", struct_name));
+                    main_rs.push_str(&format!("            let res = generated_package::handlers::{}::{}(args, &client, &cli.base_url).await?;\n", mod_name, mod_name));
+                    main_rs.push_str("            println!(\"{:?}\", res);\n");
+                    main_rs.push_str("        }\n");
+                }
+                main_rs.push_str("        Commands::Mcp => {\n");
+                main_rs.push_str("            println!(\"MCP Server not yet fully implemented for generated CLI\");\n");
+                main_rs.push_str("        }\n");
+                main_rs.push_str("    }\n\n");
+                main_rs.push_str("    Ok(())\n");
+                main_rs.push_str("}\n");
+
+                std::fs::write(src_dir.join("main.rs"), main_rs)
+                    .map_err(|e| AppError::General(e.to_string()))?;
+            }
+        }
+
         // 3. Generate Tests
         if args.tests {
             let tests_dir = out_dir.join("tests");
@@ -358,7 +435,7 @@ pub mod scopes {
                 output_path: tests_dir.join("api_contracts.rs"),
                 app_factory: crate_name,
             };
-            crate::test_gen::execute(&test_gen_args, strategy)?;
+            crate::test_gen::run_test_gen(&test_gen_args, strategy)?;
         }
     }
 
@@ -470,7 +547,7 @@ info:
 paths:
   /test:
     get:
-      operationId: test_op
+      operationId: test__op
       responses:
         '200':
           description: OK
@@ -497,7 +574,7 @@ components:
                 mcp: true,
             }),
         };
-        assert!(execute(&args_mcp).is_ok());
+        assert!(run_from_openapi(&args_mcp).is_ok());
 
         // Test SdkCli
         let args = FromOpenApiArgs {
@@ -511,7 +588,7 @@ components:
                 mcp: false,
             }),
         };
-        assert!(execute(&args).is_ok());
+        assert!(run_from_openapi(&args).is_ok());
 
         // Test Sdk
         let args = FromOpenApiArgs {
@@ -525,21 +602,7 @@ components:
                 mcp: false,
             }),
         };
-        assert!(execute(&args).is_ok());
-
-        // Test SdkMcp
-        let args = FromOpenApiArgs {
-            command: FromOpenApiCommands::SdkMcp(GenerateArgs {
-                input: Some(input_file.clone()),
-                input_dir: None,
-                output_dir: Some(dir.path().join("out_mcp")),
-                no_github_actions: false,
-                no_installable_package: false,
-                tests: false,
-                mcp: false,
-            }),
-        };
-        assert!(execute(&args).is_ok());
+        assert!(run_from_openapi(&args).is_ok());
 
         // Test Server with ActixWeb
         let args = FromOpenApiArgs {
@@ -556,7 +619,7 @@ components:
                 framework: ServerFramework::ActixWeb,
             },
         };
-        assert!(execute(&args).is_ok());
+        assert!(run_from_openapi(&args).is_ok());
 
         // Test Server with Axum
         let args = FromOpenApiArgs {
@@ -573,7 +636,7 @@ components:
                 framework: ServerFramework::Axum,
             },
         };
-        assert!(execute(&args).is_ok());
+        assert!(run_from_openapi(&args).is_ok());
     }
 
     #[test]
@@ -630,7 +693,7 @@ components:
     fn test_generate_from_openapi_to_sdk_cli_mcp() {
         let dir = tempdir().expect("Failed to create temporary directory");
         let input_file = dir.path().join("spec.yaml");
-        let openapi_content = "openapi: 3.0.0\ninfo:\n  title: Test API\n  version: 1.0.0\npaths:\n  /test:\n    get:\n      operationId: test_op\n      responses:\n        \"200\":\n          description: OK";
+        let openapi_content = "openapi: 3.0.0\ninfo:\n  title: Test API\n  version: 1.0.0\npaths:\n  /test:\n    get:\n      operationId: test__op\n      responses:\n        \"200\":\n          description: OK";
         std::fs::write(&input_file, openapi_content).expect("Failed to write to file");
         let config = FromOpenApiConfig {
             subcommand: "to_sdk_cli".to_string(),
@@ -639,7 +702,7 @@ components:
             mcp: true,
             ..Default::default()
         };
-        let result = generate_from_openapi(&config);
+        let result = from_openapi(&config);
         assert!(result.is_ok());
     }
 
@@ -649,38 +712,38 @@ components:
             subcommand: "unknown_cmd".to_string(),
             ..Default::default()
         };
-        let result = generate_from_openapi(&config);
+        let result = from_openapi(&config);
         assert!(result.is_err());
     }
 }
 
-/// Configuration for `from_openapi` programmatic API
+/// Configuration for `from_openapi` programmatic API.
 #[derive(Debug, Default)]
 pub struct FromOpenApiConfig {
-    /// The parsed subcommand
+    /// The parsed subcommand.
     pub subcommand: String,
-    /// The input file path
+    /// The input file path.
     pub input: Option<PathBuf>,
-    /// The input directory path
+    /// The input directory path.
     pub input_dir: Option<PathBuf>,
-    /// The output directory path
+    /// The output directory path.
     pub output_dir: Option<PathBuf>,
-    /// Whether to skip github actions generation
+    /// Whether to skip github actions generation.
     pub no_github_actions: bool,
-    /// Whether to skip package generation
+    /// Whether to skip package generation.
     pub no_installable_package: bool,
 
-    /// Whether to generate tests
+    /// Whether to generate tests.
     pub tests: bool,
 
     /// Generate Model Context Protocol (MCP) server and adapter.
     pub mcp: bool,
-    /// The server framework to use
+    /// The server framework to use.
     pub framework: ServerFramework,
 }
 
 /// Generate code from an OpenAPI specification.
-pub fn generate_from_openapi(config: &FromOpenApiConfig) -> AppResult<()> {
+pub fn from_openapi(config: &FromOpenApiConfig) -> AppResult<()> {
     let gen_args = GenerateArgs {
         input: config.input.clone(),
         input_dir: config.input_dir.clone(),
@@ -700,14 +763,29 @@ pub fn generate_from_openapi(config: &FromOpenApiConfig) -> AppResult<()> {
                 res
             }
         }
-        "to_sdk" => run_generation(&gen_args, &ReqwestStrategy),
-        "to_sdk_mcp" => run_generation(&gen_args, &cdd_core::strategies::McpClientStrategy),
-        "to_server" => match config.framework {
-            ServerFramework::ActixWeb => {
-                run_generation(&gen_args, &cdd_core::strategies::ActixStrategy)
+        "to_sdk" => {
+            let res = run_generation(&gen_args, &ReqwestStrategy);
+            if gen_args.mcp && res.is_ok() {
+                run_generation(&gen_args, &cdd_core::strategies::McpClientStrategy)
+            } else {
+                res
             }
-            ServerFramework::Axum => run_generation(&gen_args, &cdd_core::strategies::AxumStrategy),
-        },
+        }
+        "to_server" => {
+            let res = match config.framework {
+                ServerFramework::ActixWeb => {
+                    run_generation(&gen_args, &cdd_core::strategies::ActixStrategy)
+                }
+                ServerFramework::Axum => {
+                    run_generation(&gen_args, &cdd_core::strategies::AxumStrategy)
+                }
+            };
+            if gen_args.mcp && res.is_ok() {
+                run_generation(&gen_args, &cdd_core::strategies::McpServerStrategy)
+            } else {
+                res
+            }
+        }
         _ => Err(AppError::General(format!(
             "Unknown subcommand: {}",
             config.subcommand

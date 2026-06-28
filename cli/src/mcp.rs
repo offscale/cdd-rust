@@ -9,7 +9,7 @@ pub struct McpArgs {}
 
 /// Start the MCP STDIO server.
 #[cfg(not(tarpaulin_include))]
-pub fn serve_mcp(_args: &McpArgs) -> AppResult<()> {
+pub fn run_mcp_server(_args: &McpArgs) -> AppResult<()> {
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut handle = stdout.lock();
@@ -216,7 +216,7 @@ pub fn serve_mcp_inner(stdin: &mut dyn BufRead, stdout: &mut dyn Write) -> AppRe
 
                                 if let (Some(i), Some(o), Some(f)) = (input, output, framework) {
                                     use crate::from_openapi::{
-                                        generate_from_openapi, FromOpenApiConfig, ServerFramework,
+                                        from_openapi, FromOpenApiConfig, ServerFramework,
                                     };
                                     use std::path::PathBuf;
 
@@ -250,7 +250,7 @@ pub fn serve_mcp_inner(stdin: &mut dyn BufRead, stdout: &mut dyn Write) -> AppRe
 
                                     if i == "success.yaml" {
                                         content_text = "Generation successful.".to_string();
-                                    } else if let Err(e) = generate_from_openapi(&config) {
+                                    } else if let Err(e) = from_openapi(&config) {
                                         content_text = format!("Generation failed: {}", e);
                                     } else {
                                         #[cfg(not(tarpaulin_include))]
@@ -266,9 +266,7 @@ pub fn serve_mcp_inner(stdin: &mut dyn BufRead, stdout: &mut dyn Write) -> AppRe
                                 let output = args.get("output").and_then(|v| v.as_str());
 
                                 if let Some(i) = input {
-                                    use crate::to_docs_json::{
-                                        generate_docs_json, ToDocsJsonConfig,
-                                    };
+                                    use crate::to_docs_json::{to_docs_json, ToDocsJsonConfig};
 
                                     let config = ToDocsJsonConfig {
                                         input: i.to_string(),
@@ -279,7 +277,7 @@ pub fn serve_mcp_inner(stdin: &mut dyn BufRead, stdout: &mut dyn Write) -> AppRe
 
                                     if i == "success.yaml" {
                                         content_text = "Schema successful.".to_string();
-                                    } else if let Err(e) = generate_docs_json(&config) {
+                                    } else if let Err(e) = to_docs_json(&config) {
                                         content_text = format!("Schema failed: {}", e);
                                     } else {
                                         #[cfg(not(tarpaulin_include))]
@@ -299,9 +297,9 @@ pub fn serve_mcp_inner(stdin: &mut dyn BufRead, stdout: &mut dyn Write) -> AppRe
                                     use crate::sync::{SyncArgs, SyncTruth};
                                     use std::path::PathBuf;
                                     let sync_args = SyncArgs {
-                                        truth: SyncTruth::Database,
-                                        schema_path: PathBuf::from(db),
-                                        model_dir: PathBuf::from(out),
+                                        truth: SyncTruth::Db,
+                                        input: PathBuf::from(db),
+                                        output: PathBuf::from(out),
                                         no_gen: false,
                                         force_type: vec![],
                                     };
@@ -309,7 +307,8 @@ pub fn serve_mcp_inner(stdin: &mut dyn BufRead, stdout: &mut dyn Write) -> AppRe
                                     let mapper = crate::generator::DieselMapper;
                                     if db == "success.sqlite" {
                                         content_text = "Sync successful.".to_string();
-                                    } else if let Err(e) = crate::sync::execute(&sync_args, &mapper)
+                                    } else if let Err(e) =
+                                        crate::sync::run_sync(&sync_args, &mapper)
                                     {
                                         content_text = format!("Sync failed: {}", e);
                                     } else {
@@ -347,25 +346,25 @@ pub fn serve_mcp_inner(stdin: &mut dyn BufRead, stdout: &mut dyn Write) -> AppRe
                                     } else {
                                         let res = match target_mode {
                                             crate::TargetMode::ServerActix => {
-                                                crate::test_gen::execute(
+                                                crate::test_gen::run_test_gen(
                                                     &test_args,
                                                     &cdd_core::strategies::ActixStrategy,
                                                 )
                                             }
                                             crate::TargetMode::ServerAxum => {
-                                                crate::test_gen::execute(
+                                                crate::test_gen::run_test_gen(
                                                     &test_args,
                                                     &cdd_core::strategies::AxumStrategy,
                                                 )
                                             }
                                             crate::TargetMode::ClientReqwest => {
-                                                crate::test_gen::execute(
+                                                crate::test_gen::run_test_gen(
                                                     &test_args,
                                                     &cdd_core::strategies::ReqwestStrategy,
                                                 )
                                             }
                                             crate::TargetMode::ClientInternal => {
-                                                crate::test_gen::execute(
+                                                crate::test_gen::run_test_gen(
                                                     &test_args,
                                                     &cdd_core::strategies::ClapCliStrategy,
                                                 )
@@ -411,25 +410,25 @@ pub fn serve_mcp_inner(stdin: &mut dyn BufRead, stdout: &mut dyn Write) -> AppRe
                                     } else {
                                         let res = match target_mode {
                                             crate::TargetMode::ServerActix => {
-                                                crate::scaffold::execute(
+                                                crate::scaffold::run_scaffold(
                                                     &scaffold_args,
                                                     &cdd_core::strategies::ActixStrategy,
                                                 )
                                             }
                                             crate::TargetMode::ServerAxum => {
-                                                crate::scaffold::execute(
+                                                crate::scaffold::run_scaffold(
                                                     &scaffold_args,
                                                     &cdd_core::strategies::AxumStrategy,
                                                 )
                                             }
                                             crate::TargetMode::ClientReqwest => {
-                                                crate::scaffold::execute(
+                                                crate::scaffold::run_scaffold(
                                                     &scaffold_args,
                                                     &cdd_core::strategies::ReqwestStrategy,
                                                 )
                                             }
                                             crate::TargetMode::ClientInternal => {
-                                                crate::scaffold::execute(
+                                                crate::scaffold::run_scaffold(
                                                     &scaffold_args,
                                                     &cdd_core::strategies::ClapCliStrategy,
                                                 )

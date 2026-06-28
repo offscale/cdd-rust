@@ -20,6 +20,12 @@ jobs:
     name: Build, Test & Checks
     runs-on: ubuntu-latest
 
+    services:
+      petstore:
+        image: swaggerapi/petstore
+        ports:
+          - 8080:8080
+
     steps:
       - uses: actions/checkout@v7
 
@@ -114,6 +120,12 @@ jobs:
     needs: build_and_test
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+
+    services:
+      petstore:
+        image: swaggerapi/petstore
+        ports:
+          - 8080:8080
     steps:
       - uses: actions/checkout@v7
       - name: Install Rust
@@ -142,6 +154,12 @@ jobs:
     needs: [build-native, build-wasm]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+
+    services:
+      petstore:
+        image: swaggerapi/petstore
+        ports:
+          - 8080:8080
     steps:
       - uses: actions/checkout@v7
 
