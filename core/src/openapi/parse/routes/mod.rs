@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Routes Module
 //!
@@ -44,7 +43,7 @@ pub fn parse_openapi_routes_with_registry(
     parse_openapi_routes_from_value(&mut json_val, registry, retrieval_uri)
 }
 
-fn parse_openapi_routes_from_value(
+pub(crate) fn parse_openapi_routes_from_value(
     json_val: &mut serde_json::Value,
     registry: Option<&DocumentRegistry>,
     retrieval_uri: Option<&str>,
@@ -98,10 +97,7 @@ fn parse_openapi_routes_from_value(
         .unwrap_or(&empty_paths);
     if let (Some(self_uri), Some(comps)) = (openapi.self_uri.as_deref(), owned_components.as_mut())
     {
-        comps.extra.insert(
-            "__self".to_string(),
-            serde_json::Value::String(self_uri.to_string()),
-        );
+        comps.self_uri = Some(self_uri.to_string());
     }
     let components = owned_components.as_ref();
     let global_security = openapi.security.as_ref();
@@ -432,29 +428,14 @@ fn path_item_supports_method(path_item: &ShimPathItem, method: &str) -> bool {
     }
 }
 
-fn normalize_media_type(media_type: &str) -> String {
-    media_type
-        .split(';')
-        .next()
-        .unwrap_or(media_type)
-        .trim()
-        .to_ascii_lowercase()
-}
-
 fn is_sequential_media_type(media_type: &str) -> bool {
-    let normalized = normalize_media_type(media_type);
-    matches!(
-        normalized.as_str(),
-        "application/jsonl"
-            | "application/x-ndjson"
-            | "application/json-seq"
-            | "application/geo+json-seq"
-            | "text/event-stream"
-            | "multipart/mixed"
-            | "multipart/byteranges"
-    ) || normalized.ends_with("+jsonl")
-        || normalized.ends_with("+ndjson")
-        || normalized.ends_with("+json-seq")
+    let mt = crate::openapi::parse::models::MediaType::parse(media_type);
+    mt.is_sequential_json()
+        || mt.is_event_stream()
+        || matches!(
+            mt.essence().as_str(),
+            "multipart/mixed" | "multipart/byteranges"
+        )
 }
 
 fn normalize_link_objects(value: &mut serde_json::Value) {
@@ -631,45 +612,20 @@ impl ComponentRefResolver {
 
         self.resolve_media_type_map(content_val)?;
 
-        let (schema_val, content_clone) = {
-            let serde_json::Value::Object(content_map) = content_val else {
-                return Err(AppError::General(format!(
-                    "Header '{}' content must be a map of media types",
-                    header_name
-                )));
-            };
-
-            if content_map.len() != 1 {
-                return Err(AppError::General(format!(
-                    "Header '{}' content must define exactly one media type",
-                    header_name
-                )));
-            }
-
-            let schema_val = content_map
-                .values()
-                .next()
-                .and_then(|media_val| {
-                    if let serde_json::Value::Object(media_obj) = media_val {
-                        media_obj.get("schema").cloned()
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or_else(|| json!({ "type": "string" }));
-
-            (schema_val, content_map.clone())
+        let serde_json::Value::Object(content_map) = content_val else {
+            return Err(AppError::General(format!(
+                "Header '{}' content must be a map of media types",
+                header_name
+            )));
         };
 
-        if !obj.contains_key(CDD_HEADER_CONTENT_KEY) {
-            obj.insert(
-                CDD_HEADER_CONTENT_KEY.to_string(),
-                serde_json::Value::Object(content_clone),
-            );
+        if content_map.len() != 1 {
+            return Err(AppError::General(format!(
+                "Header '{}' content must define exactly one media type",
+                header_name
+            )));
         }
 
-        obj.insert("schema".to_string(), schema_val);
-        obj.remove("content");
         Ok(())
     }
 
@@ -865,8 +821,6 @@ fn normalize_link_map(value: &mut serde_json::Value) {
     }
 }
 
-const CDD_HEADER_CONTENT_KEY: &str = "x-cdd-content";
-
 /// Resolves the base URL path from `servers` (OAS 3) or `basePath` (Swagger 2).
 ///
 /// For servers:
@@ -968,7 +922,15 @@ pub(crate) fn resolve_path_item_ref(
     base_uri: Option<&Url>,
 ) -> AppResult<ShimPathItem> {
     let mut visited = HashSet::new();
-    resolve_path_item_ref_inner(ref_str, components, paths, registry, base_uri, &mut visited)
+    let (item, _, _) = resolve_path_item_ref_with_context_inner(
+        ref_str,
+        components,
+        paths,
+        registry,
+        base_uri,
+        &mut visited,
+    )?;
+    Ok(item)
 }
 
 pub(crate) fn resolve_path_item_ref_with_context(
@@ -989,125 +951,6 @@ pub(crate) fn resolve_path_item_ref_with_context(
     )
 }
 
-fn resolve_path_item_ref_inner(
-    ref_str: &str,
-    components: Option<&ShimComponents>,
-    paths: &BTreeMap<String, ShimPathItem>,
-    registry: Option<&DocumentRegistry>,
-    base_uri: Option<&Url>,
-    visited: &mut HashSet<String>,
-) -> AppResult<ShimPathItem> {
-    let mut normalized = ref_str.to_string();
-    if let Some(comps) = components {
-        if let Some(self_uri) = comps.extra.get("__self").and_then(|v| v.as_str()) {
-            if let Some(local) = normalize_ref_to_local(ref_str, Some(self_uri)) {
-                normalized = local;
-            }
-        }
-    }
-
-    if !visited.insert(normalized.to_string()) {
-        return Err(AppError::General(format!(
-            "PathItem reference cycle detected at {}",
-            normalized
-        )));
-    }
-
-    if !normalized.starts_with("#/") {
-        if let Some(registry) = registry {
-            if let Some(item) = registry.resolve_path_item_ref(&normalized, base_uri) {
-                return Ok(item);
-            }
-        }
-    }
-
-    if let Some(pointer) = normalized.strip_prefix("#/") {
-        let segments: Vec<&str> = pointer.split('/').collect();
-        if segments.first() == Some(&"components") && segments.get(1) == Some(&"pathItems") {
-            let name_seg = segments
-                .get(2)
-                .ok_or_else(|| AppError::General("PathItem reference missing name".into()))?;
-            if segments.len() > 3 {
-                return Err(AppError::General(format!(
-                    "Unsupported PathItem reference depth: {}",
-                    ref_str
-                )));
-            }
-            let name = crate::openapi::parse::ref_utils::decode_pointer_segment(name_seg);
-            if let Some(comps) = components {
-                if let Some(map) = &comps.path_items {
-                    if let Some(ref_or) = map.get(&name) {
-                        match ref_or {
-                            RefOr::T(pi) => return Ok(pi.clone()),
-                            RefOr::Ref(r) => {
-                                return resolve_path_item_ref_inner(
-                                    &r.ref_location,
-                                    components,
-                                    paths,
-                                    registry,
-                                    base_uri,
-                                    visited,
-                                );
-                            }
-                        }
-                    }
-                }
-                if let Some(path_items_val) = comps.extra.get("pathItems") {
-                    if let Some(item_val) = path_items_val.get(&name) {
-                        let parsed = serde_json::from_value::<ShimPathItem>(item_val.clone())
-                            .map_err(|e| {
-                                AppError::General(format!(
-                                    "Failed to parse PathItem '{}': {}",
-                                    name, e
-                                ))
-                            })?;
-                        if let Some(next_ref) = parsed.ref_path.as_deref() {
-                            return resolve_path_item_ref_inner(
-                                next_ref, components, paths, registry, base_uri, visited,
-                            );
-                        }
-                        return Ok(parsed);
-                    }
-                }
-            }
-            return Err(AppError::General(format!(
-                "PathItem reference not found: {}",
-                ref_str
-            )));
-        }
-
-        if segments.first() == Some(&"paths") {
-            let name_seg = segments
-                .get(1)
-                .ok_or_else(|| AppError::General("Path reference missing name".into()))?;
-            if segments.len() > 2 {
-                return Err(AppError::General(format!(
-                    "Unsupported Path reference depth: {}",
-                    ref_str
-                )));
-            }
-            let path_key = crate::openapi::parse::ref_utils::decode_pointer_segment(name_seg);
-            if let Some(pi) = paths.get(&path_key) {
-                if let Some(next_ref) = pi.ref_path.as_deref() {
-                    return resolve_path_item_ref_inner(
-                        next_ref, components, paths, registry, base_uri, visited,
-                    );
-                }
-                return Ok(pi.clone());
-            }
-            return Err(AppError::General(format!(
-                "Path reference not found: {}",
-                ref_str
-            )));
-        }
-    }
-
-    Err(AppError::General(format!(
-        "Unsupported PathItem reference: {}",
-        ref_str
-    )))
-}
-
 fn resolve_path_item_ref_with_context_inner(
     ref_str: &str,
     components: Option<&ShimComponents>,
@@ -1118,7 +961,7 @@ fn resolve_path_item_ref_with_context_inner(
 ) -> AppResult<(ShimPathItem, Option<ShimComponents>, Option<Url>)> {
     let mut normalized = ref_str.to_string();
     if let Some(comps) = components {
-        if let Some(self_uri) = comps.extra.get("__self").and_then(|v| v.as_str()) {
+        if let Some(self_uri) = comps.self_uri.as_deref() {
             if let Some(local) = normalize_ref_to_local(ref_str, Some(self_uri)) {
                 normalized = local;
             }
@@ -2368,6 +2211,7 @@ webhooks:
         let mut components = ShimComponents {
             security_schemes: None,
             path_items: None,
+            self_uri: None,
             extra: BTreeMap::new(),
         };
         components.extra.insert(

@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Schema Parsing
 //!
@@ -39,7 +38,7 @@ use crate::openapi::parse::validation::validate_component_keys;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use utoipa::openapi::schema::{AdditionalProperties, Schema, SchemaType, Type};
-use utoipa::openapi::{Components, Deprecated, OpenApi, RefOr};
+use utoipa::openapi::{Components, Deprecated, RefOr};
 
 /// Parses a raw OpenAPI YAML string and extracts definitions.
 ///
@@ -69,10 +68,10 @@ pub fn parse_openapi_spec_with_registry(
         return parse_schema_root_document(&json_val);
     }
 
-    // 2. Pre-parse to get standard fields like $self (Shim)
+    // 2. Pre-parse via unified ShimOpenApi (lossless OAS 2.0 / 3.0 / 3.1 / 3.2 root)
     crate::openapi::parse::routes::coerce_version_strings(&mut json_val);
-    crate::openapi::parse::normalization::normalize_nullable_schemas(&mut json_val);
-    crate::openapi::parse::normalization::normalize_boolean_schemas(&mut json_val);
+    normalize_nullable_schemas(&mut json_val);
+    normalize_boolean_schemas(&mut json_val);
 
     let shim: ShimOpenApi = serde_json::from_value(json_val.clone())
         .map_err(|e| AppError::General(format!("Failed to parse OpenAPI Shim: {}", e)))?;
@@ -80,41 +79,26 @@ pub fn parse_openapi_spec_with_registry(
         validate_component_keys(components)?;
     }
 
-    // 3. Parse using full AST (Utoipa) for schema traversal.
-    // Compatibility Hack: Utoipa 5.x tightly validates the "openapi" version string.
-    // If it is "3.2.0", Utoipa will panic or error.
-    // We parse it into generic Value, downgrade version string to "3.1.0" for AST parsing,
-    // then pass it to Utoipa.
-    normalize_nullable_schemas(&mut json_val);
-    normalize_boolean_schemas(&mut json_val);
+    // Extract schemas from OAS 3.x `components.schemas` or OAS 2.0 `definitions`
+    let mut raw_schemas = shim
+        .components
+        .as_ref()
+        .and_then(|c| c.extra.get("schemas"))
+        .and_then(|s| s.as_object())
+        .cloned()
+        .or_else(|| {
+            json_val
+                .get("definitions")
+                .and_then(|d| d.as_object())
+                .cloned()
+        });
 
-    // Convert Swagger 2.0 definitions to OAS 3.0 components/schemas for AST parsing
-    if json_val.get("definitions").is_some() && json_val.get("components").is_none() {
-        if let Some(definitions) = json_val.get_mut("definitions").map(|v| v.take()) {
-            if let Some(obj) = json_val.as_object_mut() {
-                obj.insert(
-                    "components".to_string(),
-                    serde_json::json!({ "schemas": definitions }),
-                );
-            }
-        }
-    }
-
-    if let Some(schema_map) = json_val
-        .get_mut("components")
-        .and_then(|c| c.get_mut("schemas"))
-        .and_then(|s| s.as_object_mut())
-    {
+    if let Some(ref mut schema_map) = raw_schemas {
         for schema in schema_map.values_mut() {
             normalize_const_schemas(schema);
         }
     }
 
-    let raw_schemas = json_val
-        .get("components")
-        .and_then(|c| c.get("schemas"))
-        .and_then(|s| s.as_object())
-        .cloned();
     let (schema_docs, field_docs) = collect_schema_external_docs(raw_schemas.as_ref());
     let discriminator_defaults = collect_discriminator_defaults(raw_schemas.as_ref());
     let has_dynamic_ref = raw_schemas
@@ -122,41 +106,18 @@ pub fn parse_openapi_spec_with_registry(
         .map(|schemas| schemas.values().any(contains_dynamic_ref))
         .unwrap_or(false);
 
-    if let Some(ver) = json_val.get_mut("openapi") {
-        if let Some(raw) = ver.as_str() {
-            if raw.starts_with("3.") && !raw.starts_with("3.1") {
-                *ver = serde_json::json!("3.1.0");
-            }
-        }
-    } else if json_val.get("swagger").is_some() {
-        if let Some(obj) = json_val.as_object_mut() {
-            obj.insert("openapi".to_string(), serde_json::json!("3.1.0"));
-        }
-    }
-
     let inline_source = json_val.clone();
 
-    // Strip paths, webhooks and root parameters/responses to avoid Utoipa crash on OAS 2.0 properties
-    if let Some(obj) = json_val.as_object_mut() {
-        obj.insert("paths".to_string(), serde_json::json!({}));
-        obj.remove("webhooks");
-        obj.remove("parameters");
-        obj.remove("responses");
-        if let Some(components) = obj.get_mut("components").and_then(|c| c.as_object_mut()) {
-            let keys: Vec<String> = components.keys().cloned().collect();
-            for key in keys {
-                if key != "schemas" {
-                    components.remove(&key);
-                }
-            }
+    let mut parsed_components = Components::new();
+    if let Some(ref schema_map) = raw_schemas {
+        for (name, val) in schema_map {
+            let schema_ref: RefOr<Schema> = serde_json::from_value(val.clone()).map_err(|e| {
+                AppError::General(format!("Failed to parse schema '{}': {}", name, e))
+            })?;
+            parsed_components.schemas.insert(name.clone(), schema_ref);
         }
     }
-
-    let openapi: OpenApi = serde_json::from_value(json_val)
-        .map_err(|e| AppError::General(format!("Failed to parse OpenAPI AST: {}", e)))?;
-
-    let default_components = utoipa::openapi::Components::new();
-    let components = openapi.components.as_ref().unwrap_or(&default_components);
+    let components = &parsed_components;
 
     // 4. Initialize Resolution Context with Base URI ($self) from original Shim
     // If $self defined in Shim, use it as Base URI.
@@ -616,33 +577,7 @@ fn schema_name_from_id(raw: &str) -> String {
 }
 
 fn sanitize_schema_name(raw: &str) -> String {
-    let mut out = String::new();
-    let mut capitalize_next = true;
-    for ch in raw.chars() {
-        if ch.is_ascii_alphanumeric() {
-            if capitalize_next {
-                out.push(ch.to_ascii_uppercase());
-            } else {
-                out.push(ch);
-            }
-            capitalize_next = false;
-        } else {
-            capitalize_next = true;
-        }
-    }
-
-    if out.is_empty() {
-        "RootSchema".to_string()
-    } else if out
-        .chars()
-        .next()
-        .map(|c| c.is_ascii_digit())
-        .unwrap_or(false)
-    {
-        format!("Schema{}", out)
-    } else {
-        out
-    }
+    crate::openapi::parse::models::RustIdent::sanitize_pascal(raw, "RootSchema").into_inner()
 }
 
 /// Collects ExternalDocs metadata from raw component schema JSON.
@@ -853,83 +788,7 @@ fn extract_const_enum_variants(raw_schema: &Value) -> Option<Vec<ParsedVariant>>
 }
 
 fn sanitize_enum_variant(value: &str) -> String {
-    let mut out = String::new();
-    let mut capitalize = true;
-
-    for ch in value.chars() {
-        if ch.is_ascii_alphanumeric() {
-            if capitalize {
-                out.push(ch.to_ascii_uppercase());
-                capitalize = false;
-            } else {
-                out.push(ch);
-            }
-        } else {
-            capitalize = true;
-        }
-    }
-
-    if out.is_empty() {
-        out.push_str("Value");
-    }
-
-    if out
-        .chars()
-        .next()
-        .map(|c| c.is_ascii_digit())
-        .unwrap_or(false)
-    {
-        out = format!("Value{}", out);
-    }
-
-    if is_rust_keyword(&out) {
-        out.push_str("Value");
-    }
-
-    out
-}
-
-fn is_rust_keyword(ident: &str) -> bool {
-    matches!(
-        ident,
-        "as" | "break"
-            | "const"
-            | "continue"
-            | "crate"
-            | "else"
-            | "enum"
-            | "extern"
-            | "false"
-            | "fn"
-            | "for"
-            | "if"
-            | "impl"
-            | "in"
-            | "let"
-            | "loop"
-            | "match"
-            | "mod"
-            | "move"
-            | "mut"
-            | "pub"
-            | "ref"
-            | "return"
-            | "self"
-            | "Self"
-            | "static"
-            | "struct"
-            | "super"
-            | "trait"
-            | "true"
-            | "type"
-            | "unsafe"
-            | "use"
-            | "where"
-            | "while"
-            | "async"
-            | "await"
-            | "dyn"
-    )
+    crate::openapi::parse::models::RustIdent::sanitize_pascal(value, "Value").into_inner()
 }
 
 #[cfg(test)]

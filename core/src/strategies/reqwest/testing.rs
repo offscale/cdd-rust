@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Test Generation for Reqwest Client
 //!
@@ -270,4 +269,123 @@ pub fn generate_custom_test(
     code.push_str("}\n");
 
     code
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::openapi::parse::models::{BodyFormat, ParamSource, RouteKind, RouteParam};
+    use ra_ap_edition::Edition;
+    use ra_ap_syntax::SourceFile;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn test_reqwest_testing_and_custom_test_ast() {
+        let body = RequestBodyDefinition {
+            ty: "Pet".to_string(),
+            description: None,
+            media_type: "application/json".to_string(),
+            format: BodyFormat::Json,
+            required: true,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: None,
+            example: None,
+        };
+        let setup = test_body_setup_code(&body);
+        let full = format!(
+            "{}\n{}\n{}\n{}{}{}{}\n}}",
+            test_imports(),
+            test_validation_helper(),
+            test_fn_signature("req_op"),
+            test_app_init("app"),
+            test_request_builder("POST", "/pets", &setup),
+            test_api_call(),
+            test_assertion()
+        );
+        let parse = std::mem::ManuallyDrop::new(SourceFile::parse(&full, Edition::Edition2021));
+        assert!(
+            parse.errors().is_empty(),
+            "AST errors: {:?}",
+            parse.errors()
+        );
+
+        let route = crate::openapi::parse::ParsedRoute {
+            path: "/pets/{id}".into(),
+            summary: None,
+            description: None,
+            path_summary: None,
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+            operation_summary: None,
+            operation_description: None,
+            base_path: None,
+            path_servers: None,
+            servers_override: None,
+            method: "POST".into(),
+            handler_name: "find_pets_by_status".into(),
+            operation_id: None,
+            params: vec![
+                RouteParam {
+                    name: "id".to_string(),
+                    source: ParamSource::Path,
+                    ty: "i64".to_string(),
+                    description: None,
+                    example: None,
+                    style: None,
+                    explode: false,
+                    allow_empty_value: false,
+                    allow_reserved: false,
+                    content_media_type: None,
+                    raw_schema: None,
+                    deprecated: false,
+                    extensions: BTreeMap::new(),
+                },
+                RouteParam {
+                    name: "status".to_string(),
+                    source: ParamSource::Query,
+                    ty: "String".to_string(),
+                    description: None,
+                    example: None,
+                    style: None,
+                    explode: false,
+                    allow_empty_value: false,
+                    allow_reserved: false,
+                    content_media_type: None,
+                    raw_schema: None,
+                    deprecated: false,
+                    extensions: BTreeMap::new(),
+                },
+            ],
+            path_params: vec![],
+            request_body: Some(body),
+            security: vec![],
+            security_defined: false,
+            response_type: Some("Vec<Pet>".to_string()),
+            response_status: Some("200".to_string()),
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
+            response_headers: vec![],
+            response_links: None,
+            kind: RouteKind::Path,
+            tags: vec!["pet".to_string()],
+            callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
+        };
+
+        let custom = generate_custom_test(&route, "pet_sdk");
+        let parse_custom =
+            std::mem::ManuallyDrop::new(SourceFile::parse(&custom, Edition::Edition2021));
+        assert!(
+            parse_custom.errors().is_empty(),
+            "AST errors: {:?}",
+            parse_custom.errors()
+        );
+    }
 }

@@ -1,49 +1,52 @@
 #![warn(missing_docs)]
 #![deny(missing_docs)]
+
 //! # CDD Web Library
 //!
-//! Contains route handlers, database logic, and schema definitions.
+//! Contains HTTP route handlers, database access objects, authentication, validation,
+//! and schema definitions for the CDD reference web server.
 #![cfg(not(target_os = "wasi"))]
 
 use actix_web::{get, web, HttpResponse, Responder};
 
-/// Re-export diesel so generated models can access `crate::diesel`.
-/// Documented
+/// Re-export `diesel` so generated models can reference `crate::diesel`.
 pub use diesel;
 
-/// Auto-generated database schema.
-/// Documented
+/// Auto-generated database schema definitions.
 pub mod schema;
 
-/// Data Access Objects
+/// Data Access Objects (DAOs) and connection pool management.
 pub mod dao;
-/// Central error enum
+/// Centralized server error enum and HTTP response error mapping.
 pub mod error;
-/// Documented
+/// HTTP route handlers for Pet, Store, and User endpoints.
 pub mod handlers;
-/// Identity Provider
+/// Integrated Identity Provider (IdP) authentication endpoints.
 pub mod idp;
-/// Data models generated from schema.
-/// Documented
+/// Domain and database models.
 pub mod models;
-/// Documented
+/// Authentication and authorization middleware and security extractors.
 pub mod security;
-/// Fake data generator and seeder
+/// Fake data generator and database seeder.
 pub mod seeder;
-/// Request Validation
+/// Request validation middleware.
 pub mod validation;
-/// Webhooks
+/// Administrative webhook dispatch endpoints.
 pub mod webhooks;
 
-/// A simple health check handler.
+/// Health check endpoint (`GET /health`).
+///
+/// # Returns
+/// * `200 OK` with `"OK"` body when the service is healthy.
 #[get("/health")]
-/// Documented
 pub async fn health_check() -> impl Responder {
     HttpResponse::Ok().body("OK")
 }
 
-/// Service configurator.
-/// Documented
+/// Configures all Pet, Store, and User routes on the provided Actix `ServiceConfig`.
+///
+/// # Arguments
+/// * `cfg` - Mutable reference to the Actix Web service configuration.
 pub fn config(cfg: &mut web::ServiceConfig) {
     cfg.service(web::resource("/pet").route(web::post().to(handlers::pet::add_pet)));
     cfg.service(web::resource("/pet").route(web::put().to(handlers::pet::update_pet)));
@@ -76,7 +79,7 @@ pub fn config(cfg: &mut web::ServiceConfig) {
     cfg.service(web::resource("/user").route(web::post().to(handlers::user::create_user)));
     cfg.service(
         web::resource("/user/createWithArray")
-            .route(web::post().to(handlers::user::create_users_with_list_input)),
+            .route(web::post().to(handlers::user::create_users_with_array_input)),
     );
     cfg.service(
         web::resource("/user/createWithList")
@@ -93,10 +96,6 @@ pub fn config(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::resource("/user/{username}").route(web::delete().to(handlers::user::delete_user)),
     );
-    cfg.service(
-        web::resource("/user/createWithArray")
-            .route(web::post().to(handlers::user::create_users_with_array_input)),
-    );
 }
 
 #[cfg(test)]
@@ -106,11 +105,15 @@ mod tests {
 
     #[actix_web::test]
     async fn test_config() {
-        let app = test::init_service(App::new().configure(config).app_data(web::Data::new(
-            crate::handlers::pet::PetStore {
-                pets: std::sync::Mutex::new(std::collections::HashMap::new()),
-            },
-        )))
+        let app = test::init_service(
+            App::new()
+                .configure(config)
+                .app_data(web::Data::new(crate::handlers::pet::PetStore::default()))
+                .app_data(web::Data::new(crate::handlers::store::OrderStore::default()))
+                .app_data(web::Data::new(crate::dao::factory::AppDaos::new(
+                    crate::dao::factory::DaoConfig::Stub,
+                ))),
+        )
         .await;
         let req = test::TestRequest::get()
             .uri("/store/inventory")
@@ -125,5 +128,7 @@ mod tests {
         let req = test::TestRequest::get().uri("/health").to_request();
         let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());
+        let body = test::read_body(resp).await;
+        assert_eq!(body.as_ref(), b"OK");
     }
 }

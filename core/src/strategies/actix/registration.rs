@@ -99,5 +99,15 @@ mod tests {
         };
         let stmt = route_registration_statement(&route, "h");
         assert!(stmt.contains("Method::from_bytes(b\"CUSTOM\")"));
+
+        for m in [
+            "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "TRACE", "OPTIONS", "QUERY",
+        ] {
+            let mut r = route.clone();
+            r.method = m.to_string();
+            r.base_path = Some("/api".to_string());
+            let s = route_registration_statement(&r, "h");
+            assert!(s.contains("/api/p"));
+        }
     }
 }

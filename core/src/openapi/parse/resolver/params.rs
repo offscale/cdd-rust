@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Parameter Resolution
 //!
@@ -384,9 +383,7 @@ fn resolve_parameter_ref(
     registry: Option<&DocumentRegistry>,
     base_uri: Option<&Url>,
 ) -> Option<ResolvedParameter> {
-    if let Some((comps, self_uri)) =
-        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))
-    {
+    if let Some((comps, self_uri)) = components.map(|c| (c, c.self_uri.as_deref())) {
         if let Some(ref_name) = extract_component_name(&r.ref_location, self_uri, "parameters") {
             if let Some(param_json) = comps.extra.get("parameters").and_then(|p| p.get(&ref_name)) {
                 if let Ok(param) = serde_json::from_value::<ShimParameter>(param_json.clone()) {
@@ -909,8 +906,7 @@ fn resolve_schema_example_ref(
     ref_str: &str,
     components: Option<&ShimComponents>,
 ) -> Option<JsonValue> {
-    let (comps, self_uri) =
-        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))?;
+    let (comps, self_uri) = components.map(|c| (c, c.self_uri.as_deref()))?;
     let name = extract_component_name(ref_str, self_uri, "schemas")?;
     let schema_json = comps.extra.get("schemas").and_then(|s| s.get(&name))?;
     extract_schema_example_from_value(schema_json)
@@ -959,9 +955,7 @@ fn resolve_media_type_ref(
         return None;
     }
 
-    if let Some((comps, self_uri)) =
-        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))
-    {
+    if let Some((comps, self_uri)) = components.map(|c| (c, c.self_uri.as_deref())) {
         if let Some(name) = extract_component_name(ref_str, self_uri, "mediaTypes") {
             if let Some(media_types) = comps.extra.get("mediaTypes").and_then(|v| v.as_object()) {
                 if let Some(resolved) = media_types.get(&name) {
@@ -1038,8 +1032,7 @@ fn resolve_example_ref(
     components: Option<&ShimComponents>,
     visiting: &mut std::collections::HashSet<String>,
 ) -> Option<ExampleValue> {
-    let (comps, self_uri) =
-        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))?;
+    let (comps, self_uri) = components.map(|c| (c, c.self_uri.as_deref()))?;
     let name = extract_component_name(ref_str, self_uri, "examples")?;
     if !visiting.insert(name.clone()) {
         return None;
@@ -1715,6 +1708,7 @@ mod tests {
         let mut components = ShimComponents {
             security_schemes: None,
             path_items: None,
+            self_uri: None,
             extra: BTreeMap::new(),
         };
         components.extra.insert(
@@ -2213,7 +2207,6 @@ mod tests {
     #[test]
     fn test_resolve_parameter_ref_with_self() {
         let components_json = serde_json::json!({
-            "__self": "https://example.com/openapi.yaml",
             "parameters": {
                 "limitParam": {
                     "name": "limit",
@@ -2223,8 +2216,9 @@ mod tests {
             }
         });
 
-        let components: ShimComponents =
+        let mut components: ShimComponents =
             serde_json::from_value(components_json).expect("Failed to parse from value");
+        components.self_uri = Some("https://example.com/openapi.yaml".to_string());
 
         let op_params = vec![RefOr::Ref(utoipa::openapi::Ref::new(
             "https://example.com/openapi.yaml#/components/parameters/limitParam",
@@ -2240,7 +2234,6 @@ mod tests {
     #[test]
     fn test_parameter_ref_description_override() {
         let components_json = serde_json::json!({
-            "__self": "https://example.com/openapi.yaml",
             "parameters": {
                 "limitParam": {
                     "name": "limit",
@@ -2251,8 +2244,9 @@ mod tests {
             }
         });
 
-        let components: ShimComponents =
+        let mut components: ShimComponents =
             serde_json::from_value(components_json).expect("Failed to parse from value");
+        components.self_uri = Some("https://example.com/openapi.yaml".to_string());
         let mut ref_param = utoipa::openapi::Ref::new(
             "https://example.com/openapi.yaml#/components/parameters/limitParam",
         );
@@ -2450,15 +2444,15 @@ mod tests {
     #[test]
     fn test_parameter_examples_resolve_component_ref() {
         let components_json = serde_json::json!({
-            "__self": "https://example.com/openapi.yaml",
             "examples": {
                 "Greeting": {
                     "value": "hi"
                 }
             }
         });
-        let components: ShimComponents =
+        let mut components: ShimComponents =
             serde_json::from_value(components_json).expect("Failed to parse from value");
+        components.self_uri = Some("https://example.com/openapi.yaml".to_string());
 
         let mut examples = BTreeMap::new();
         examples.insert(
@@ -2500,7 +2494,6 @@ mod tests {
     #[test]
     fn test_parameter_examples_ref_overrides_metadata() {
         let components_json = serde_json::json!({
-            "__self": "https://example.com/openapi.yaml",
             "examples": {
                 "Greeting": {
                     "summary": "Original summary",
@@ -2509,8 +2502,9 @@ mod tests {
                 }
             }
         });
-        let components: ShimComponents =
+        let mut components: ShimComponents =
             serde_json::from_value(components_json).expect("Failed to parse from value");
+        components.self_uri = Some("https://example.com/openapi.yaml".to_string());
 
         let mut examples = BTreeMap::new();
         examples.insert(
@@ -2955,12 +2949,9 @@ mod tests {
         let mut components = ShimComponents {
             security_schemes: None,
             path_items: None,
+            self_uri: Some("https://example.com/openapi.yaml".to_string()),
             extra: BTreeMap::new(),
         };
-        components.extra.insert(
-            "__self".to_string(),
-            json!("https://example.com/openapi.yaml"),
-        );
         components.extra.insert(
             "schemas".to_string(),
             json!({
@@ -3073,12 +3064,9 @@ mod tests {
         let mut components = ShimComponents {
             security_schemes: None,
             path_items: None,
+            self_uri: Some("https://example.com/openapi.yaml".to_string()),
             extra: BTreeMap::new(),
         };
-        components.extra.insert(
-            "__self".to_string(),
-            serde_json::json!("https://example.com/openapi.yaml"),
-        );
         components.extra.insert(
             "mediaTypes".to_string(),
             serde_json::json!({

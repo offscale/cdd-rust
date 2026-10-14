@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Response Resolution
 //!
@@ -333,7 +332,7 @@ fn filter_header_extensions(
     obj: &serde_json::Map<String, JsonValue>,
 ) -> BTreeMap<String, JsonValue> {
     obj.iter()
-        .filter(|(key, _)| key.starts_with("x-") && *key != "x-cdd-content")
+        .filter(|(key, _)| key.starts_with("x-"))
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect()
 }
@@ -414,10 +413,7 @@ fn extract_headers_from_raw(
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let has_content = obj
-            .get("content")
-            .or_else(|| obj.get("x-cdd-content"))
-            .is_some();
+        let has_content = obj.get("content").is_some();
         let style = parse_header_style(name, obj.get("style").and_then(|v| v.as_str()))?;
         let explode = obj.get("explode").and_then(|v| v.as_bool());
         if has_content && (style.is_some() || explode.is_some()) {
@@ -427,8 +423,7 @@ fn extract_headers_from_raw(
             )));
         }
 
-        let ty = if let Some(content_val) = obj.get("content").or_else(|| obj.get("x-cdd-content"))
-        {
+        let ty = if let Some(content_val) = obj.get("content") {
             let (ty, media_type, media_example) =
                 extract_header_content_info(name, content_val, components, registry, base_uri)?;
             content_media_type = Some(media_type);
@@ -660,9 +655,7 @@ fn resolve_header_from_components(
     registry: Option<&DocumentRegistry>,
     base_uri: Option<&Url>,
 ) -> Option<JsonValue> {
-    if let Some((comps, self_uri)) =
-        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))
-    {
+    if let Some((comps, self_uri)) = components.map(|c| (c, c.self_uri.as_deref())) {
         if let Some(name) = extract_component_name(ref_str, self_uri, "headers") {
             if let Some(header) = comps
                 .extra
@@ -727,9 +720,7 @@ fn resolve_media_type_ref(
         return None;
     }
 
-    if let Some((comps, self_uri)) =
-        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))
-    {
+    if let Some((comps, self_uri)) = components.map(|c| (c, c.self_uri.as_deref())) {
         if let Some(name) = extract_component_name(ref_str, self_uri, "mediaTypes") {
             if let Some(media_types) = comps.extra.get("mediaTypes").and_then(|v| v.as_object()) {
                 if let Some(resolved) = media_types.get(&name) {
@@ -837,7 +828,7 @@ fn infer_body_type_from_media_type(media_type: &str) -> Option<String> {
         return Some("serde_json::Value".to_string());
     }
 
-    if media.starts_with("text/") || is_xml_media_type(&media) {
+    if is_text_media_type(&media) {
         return Some("String".to_string());
     }
 
@@ -854,37 +845,19 @@ fn infer_body_type_from_media_type(media_type: &str) -> Option<String> {
 }
 
 fn normalize_media_type(media_type: &str) -> String {
-    media_type
-        .split(';')
-        .next()
-        .unwrap_or(media_type)
-        .trim()
-        .to_ascii_lowercase()
+    crate::openapi::parse::models::MediaType::normalize(media_type)
 }
 
 fn is_json_media_type(media_type: &str) -> bool {
-    let normalized = normalize_media_type(media_type);
-    normalized == "application/json"
-        || normalized.ends_with("+json")
-        || normalized == "application/*+json"
-        || is_sequential_json_media_type(&normalized)
+    crate::openapi::parse::models::MediaType::parse(media_type).is_json()
 }
 
 fn is_text_media_type(media_type: &str) -> bool {
-    let normalized = normalize_media_type(media_type);
-    normalized.starts_with("text/") || is_xml_media_type(&normalized)
+    crate::openapi::parse::models::MediaType::parse(media_type).is_text()
 }
 
 fn is_sequential_json_media_type(media_type: &str) -> bool {
-    matches!(
-        media_type,
-        "application/jsonl"
-            | "application/x-ndjson"
-            | "application/json-seq"
-            | "application/geo+json-seq"
-    ) || media_type.ends_with("+jsonl")
-        || media_type.ends_with("+ndjson")
-        || media_type.ends_with("+json-seq")
+    crate::openapi::parse::models::MediaType::parse(media_type).is_sequential_json()
 }
 
 fn is_sequential_media_type(media_type: &str) -> bool {
@@ -898,19 +871,13 @@ fn is_sequential_media_type(media_type: &str) -> bool {
     )
 }
 
-fn is_xml_media_type(media_type: &str) -> bool {
-    media_type == "application/xml" || media_type == "text/xml" || media_type.ends_with("+xml")
-}
-
 fn resolve_response_from_components(
     r: &utoipa::openapi::Ref,
     components: Option<&ShimComponents>,
     registry: Option<&DocumentRegistry>,
     base_uri: Option<&Url>,
 ) -> Option<ResolvedResponse> {
-    if let Some((comps, self_uri)) =
-        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))
-    {
+    if let Some((comps, self_uri)) = components.map(|c| (c, c.self_uri.as_deref())) {
         if let Some(ref_name) = extract_component_name(&r.ref_location, self_uri, "responses") {
             if let Some(resp_json) = comps.extra.get("responses").and_then(|r| r.get(&ref_name)) {
                 if let Ok(resp) =
@@ -951,9 +918,7 @@ fn resolve_link_from_ref(
     registry: Option<&DocumentRegistry>,
     base_uri: Option<&Url>,
 ) -> Option<utoipa::openapi::link::Link> {
-    if let Some((comps, self_uri)) =
-        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))
-    {
+    if let Some((comps, self_uri)) = components.map(|c| (c, c.self_uri.as_deref())) {
         if let Some(ref_name) = extract_component_name(&r.ref_location, self_uri, "links") {
             if let Some(link_json) = comps.extra.get("links").and_then(|l| l.get(&ref_name)) {
                 return link_from_component_json(link_json, &r.description);
@@ -1058,9 +1023,7 @@ fn resolve_link_raw_from_components(
     registry: Option<&DocumentRegistry>,
     base_uri: Option<&Url>,
 ) -> Option<JsonValue> {
-    if let Some((comps, self_uri)) =
-        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))
-    {
+    if let Some((comps, self_uri)) = components.map(|c| (c, c.self_uri.as_deref())) {
         if let Some(name) = extract_component_name(ref_str, self_uri, "links") {
             if let Some(link) = comps.extra.get("links").and_then(|l| l.get(&name)) {
                 return Some(link.clone());
@@ -1874,6 +1837,7 @@ mod tests {
         let mut components = ShimComponents {
             security_schemes: None,
             path_items: None,
+            self_uri: None,
             extra: BTreeMap::new(),
         };
         components.extra.insert(
@@ -1933,6 +1897,7 @@ mod tests {
         let mut components = ShimComponents {
             security_schemes: None,
             path_items: None,
+            self_uri: None,
             extra: BTreeMap::new(),
         };
         components.extra.insert(
@@ -2209,6 +2174,7 @@ mod tests {
         let mut components = ShimComponents {
             security_schemes: None,
             path_items: None,
+            self_uri: None,
             extra: BTreeMap::new(),
         };
         components.extra.insert(
@@ -2310,12 +2276,9 @@ mod tests {
         let mut components = ShimComponents {
             security_schemes: None,
             path_items: None,
+            self_uri: Some("https://example.com/openapi.yaml".to_string()),
             extra: BTreeMap::new(),
         };
-        components.extra.insert(
-            "__self".to_string(),
-            json!("https://example.com/openapi.yaml"),
-        );
         components.extra.insert(
             "responses".to_string(),
             json!({
@@ -2381,6 +2344,7 @@ mod tests {
         let mut components = ShimComponents {
             security_schemes: None,
             path_items: None,
+            self_uri: None,
             extra: BTreeMap::new(),
         };
         components.extra.insert(

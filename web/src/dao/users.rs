@@ -1,4 +1,6 @@
-//! User DAO implementations.
+#![deny(missing_docs)]
+
+//! User DAO implementations (`UserDao`, `StubUserDao`, `ConcreteUserDao`).
 
 use crate::error::ServerError;
 use crate::models::users::{CreateUsers, UpdateUsers, Users};
@@ -9,31 +11,76 @@ use uuid::Uuid;
 #[cfg(not(target_os = "wasi"))]
 use diesel::r2d2::{ConnectionManager, Pool};
 
-/// Abstract interface for User Data Access Object.
+/// Abstract interface for User data access operations.
 #[async_trait]
 pub trait UserDao: Send + Sync {
-    /// Retrieve a user by UUID.
+    /// Retrieves a user by primary key UUID.
+    ///
+    /// # Arguments
+    /// * `id` - User UUID.
+    ///
+    /// # Returns
+    /// * `Option<Users>` record if found.
+    ///
+    /// # Errors
+    /// * Returns [`ServerError`] on database failure or if not implemented.
     async fn get_user(&self, id: Uuid) -> Result<Option<Users>, ServerError>;
 
-    /// Retrieve a user by email/username.
+    /// Retrieves a user by email or username.
+    ///
+    /// # Arguments
+    /// * `username` - User email/username string.
+    ///
+    /// # Returns
+    /// * `Option<Users>` record if found.
+    ///
+    /// # Errors
+    /// * Returns [`ServerError`] on database failure or if not implemented.
     async fn get_user_by_name(&self, username: &str) -> Result<Option<Users>, ServerError>;
 
-    /// Create a new user.
+    /// Inserts a new user into the database.
+    ///
+    /// # Arguments
+    /// * `user` - [`CreateUsers`] insertion payload.
+    ///
+    /// # Returns
+    /// * Newly created [`Users`] record.
+    ///
+    /// # Errors
+    /// * Returns [`ServerError`] on constraint violation, connection failure, or stub mode.
     async fn create_user(&self, user: CreateUsers) -> Result<Users, ServerError>;
 
-    /// Update an existing user.
+    /// Updates an existing user record by UUID.
+    ///
+    /// # Arguments
+    /// * `id` - User UUID.
+    /// * `user` - [`UpdateUsers`] changeset payload.
+    ///
+    /// # Returns
+    /// * Updated [`Users`] record.
+    ///
+    /// # Errors
+    /// * Returns [`ServerError`] on database failure or if not implemented.
     async fn update_user(&self, id: Uuid, user: UpdateUsers) -> Result<Users, ServerError>;
 
-    /// Delete a user.
+    /// Deletes a user record by UUID.
+    ///
+    /// # Arguments
+    /// * `id` - User UUID.
+    ///
+    /// # Returns
+    /// * `()` on success.
+    ///
+    /// # Errors
+    /// * Returns [`ServerError`] on database failure or if not implemented.
     async fn delete_user(&self, id: Uuid) -> Result<(), ServerError>;
 }
 
-/// Stub implementation of UserDao returning `NotImplementedError` or defaults.
+/// Stub implementation of [`UserDao`] returning [`ServerError::NotImplemented`].
 #[derive(Default)]
 pub struct StubUserDao;
 
 #[async_trait]
-#[cfg(not(tarpaulin_include))]
 impl UserDao for StubUserDao {
     async fn get_user(&self, _id: Uuid) -> Result<Option<Users>, ServerError> {
         Err(ServerError::NotImplemented)
@@ -56,26 +103,29 @@ impl UserDao for StubUserDao {
     }
 }
 
-/// Concrete, DB-backed implementation of UserDao.
+/// Concrete implementation of [`UserDao`] using a Diesel PostgreSQL R2D2 connection pool.
 #[cfg(not(target_os = "wasi"))]
-#[cfg(not(tarpaulin_include))]
 pub struct ConcreteUserDao {
-    /// The database connection pool.
-    pool: Pool<ConnectionManager<diesel::PgConnection>>,
+    /// R2D2 PostgreSQL connection pool.
+    pool: Pool<ConnectionManager<PgConnection>>,
 }
 
 #[cfg(not(target_os = "wasi"))]
-#[cfg(not(tarpaulin_include))]
 impl ConcreteUserDao {
-    /// Creates a new `ConcreteUserDao` from an existing connection pool.
-    pub fn new(pool: Pool<ConnectionManager<diesel::PgConnection>>) -> Self {
+    /// Creates a new [`ConcreteUserDao`] backed by the given connection pool.
+    ///
+    /// # Arguments
+    /// * `pool` - R2D2 PostgreSQL connection pool.
+    ///
+    /// # Returns
+    /// * Initialized [`ConcreteUserDao`].
+    pub fn new(pool: Pool<ConnectionManager<PgConnection>>) -> Self {
         Self { pool }
     }
 }
 
 #[cfg(not(target_os = "wasi"))]
 #[async_trait]
-#[cfg(not(tarpaulin_include))]
 impl UserDao for ConcreteUserDao {
     async fn get_user(&self, target_id: Uuid) -> Result<Option<Users>, ServerError> {
         use crate::schema::users::dsl::*;
@@ -85,7 +135,6 @@ impl UserDao for ConcreteUserDao {
             .map_err(|e| ServerError::SyncError(e.to_string()))?;
 
         let user = users.find(target_id).first::<Users>(&mut conn).optional()?;
-
         Ok(user)
     }
 
@@ -100,7 +149,6 @@ impl UserDao for ConcreteUserDao {
             .filter(email.eq(username))
             .first::<Users>(&mut conn)
             .optional()?;
-
         Ok(user)
     }
 
@@ -114,7 +162,6 @@ impl UserDao for ConcreteUserDao {
         let inserted = diesel::insert_into(users)
             .values(&user)
             .get_result::<Users>(&mut conn)?;
-
         Ok(inserted)
     }
 
@@ -128,7 +175,6 @@ impl UserDao for ConcreteUserDao {
         let updated = diesel::update(users.find(target_id))
             .set(&user)
             .get_result::<Users>(&mut conn)?;
-
         Ok(updated)
     }
 
@@ -140,7 +186,6 @@ impl UserDao for ConcreteUserDao {
             .map_err(|e| ServerError::SyncError(e.to_string()))?;
 
         diesel::delete(users.find(target_id)).execute(&mut conn)?;
-
         Ok(())
     }
 }
@@ -148,13 +193,85 @@ impl UserDao for ConcreteUserDao {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
 
     #[actix_web::test]
     async fn test_stub_user_dao() {
         let dao = StubUserDao;
         let id = Uuid::new_v4();
-        let res = dao.get_user(id).await;
-        assert!(matches!(res, Err(ServerError::NotImplemented)));
+        let now = chrono::Utc::now().naive_utc();
+        assert!(matches!(
+            dao.get_user(id).await,
+            Err(ServerError::NotImplemented)
+        ));
+        assert!(matches!(
+            dao.get_user_by_name("alice").await,
+            Err(ServerError::NotImplemented)
+        ));
+        assert!(matches!(
+            dao.create_user(CreateUsers {
+                id,
+                email: "a@b.c".to_string(),
+                password_hash: "h".to_string(),
+                created_at: now,
+                updated_at: now,
+            })
+            .await,
+            Err(ServerError::NotImplemented)
+        ));
+        assert!(matches!(
+            dao.update_user(
+                id,
+                UpdateUsers {
+                    email: None,
+                    password_hash: None,
+                    created_at: None,
+                    updated_at: None,
+                }
+            )
+            .await,
+            Err(ServerError::NotImplemented)
+        ));
+        assert!(matches!(
+            dao.delete_user(id).await,
+            Err(ServerError::NotImplemented)
+        ));
+    }
+
+    #[actix_web::test]
+    async fn test_concrete_user_dao_pool_errors() {
+        let manager = ConnectionManager::<PgConnection>::new("postgres://127.0.0.1:1/cdd");
+        let pool = Pool::builder()
+            .max_size(1)
+            .connection_timeout(std::time::Duration::from_millis(20))
+            .build_unchecked(manager);
+        let dao = ConcreteUserDao::new(pool);
+        let id = Uuid::new_v4();
+        let now = chrono::Utc::now().naive_utc();
+
+        assert!(dao.get_user(id).await.is_err());
+        assert!(dao.get_user_by_name("alice").await.is_err());
+        assert!(dao
+            .create_user(CreateUsers {
+                id,
+                email: "a@b.c".to_string(),
+                password_hash: "h".to_string(),
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .is_err());
+        assert!(dao
+            .update_user(
+                id,
+                UpdateUsers {
+                    email: None,
+                    password_hash: None,
+                    created_at: None,
+                    updated_at: None,
+                }
+            )
+            .await
+            .is_err());
+        assert!(dao.delete_user(id).await.is_err());
     }
 }

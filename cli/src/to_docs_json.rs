@@ -1,388 +1,430 @@
-//! Documentation JSON generation module.
+#![deny(missing_docs)]
 
+//! Documentation JSON generation module.
+//!
+//! Generates sample code snippets for OpenAPI operations by delegating directly
+//! to the `cdd_core::strategies` and `cdd_core::functions::emit` implementations
+//! so documentation examples stay in sync with generated code.
+
+use crate::from_openapi::read_spec_source;
 use cdd_core::error::{AppError, AppResult};
+use cdd_core::functions::emit::update_handler_module;
 use cdd_core::openapi::parse::document::parse_openapi_document;
-use cdd_core::openapi::parse::models::RouteKind;
+use cdd_core::openapi::parse::models::{ParsedRoute, RouteKind};
+use cdd_core::strategies::{ActixStrategy, AxumStrategy, BackendStrategy, ReqwestStrategy};
 use clap::Args;
 use serde::Serialize;
+use serde_json::Value;
+use std::collections::BTreeMap;
 use std::fs;
+use std::path::Path;
 
-/// Arguments for generating JSON documentation snippets from an OpenAPI spec.
-#[derive(Args, Debug)]
+/// Arguments for the `to_docs_json` subcommand.
+#[derive(Args, Debug, Clone)]
 pub struct ToDocsJsonArgs {
     /// Path or URL to the OpenAPI specification.
     #[clap(short = 'i', long, env = "CDD_INPUT")]
     pub input: String,
 
-    /// If provided, omit the imports field in the code object.
-    #[clap(long, env = "CDD_NO_IMPORTS")]
+    /// Omit import statements from generated code snippets.
+    #[clap(long, default_value_t = false, env = "CDD_NO_IMPORTS")]
     pub no_imports: bool,
 
-    /// If provided, omit the wrapper_start and wrapper_end fields in the code object.
-    #[clap(long, env = "CDD_NO_WRAPPING")]
+    /// Omit wrapping boilerplate (`fn main` / function signature) from generated code snippets.
+    #[clap(long, default_value_t = false, env = "CDD_NO_WRAPPING")]
     pub no_wrapping: bool,
 
-    /// Output file or directory path.
+    /// Optional output file path (writes to stdout if omitted).
     #[clap(short = 'o', long, env = "CDD_OUTPUT")]
     pub output: Option<String>,
 }
 
-/// The root JSON object representing documentation snippets.
+/// Output structure containing endpoints and operations for documentation generation.
 #[derive(Serialize, Debug)]
-struct DocsJsonOutput {
-    /// The language of the code snippets.
-    language: String,
-    /// The list of operations.
-    operations: Vec<DocsOperation>,
+pub struct DocsJsonOutput {
+    /// Map of paths to HTTP methods and operation snippets.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub endpoints: BTreeMap<String, BTreeMap<String, OperationSnippets>>,
+    /// Map of webhook names to HTTP methods and operation snippets.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub webhooks: BTreeMap<String, BTreeMap<String, OperationSnippets>>,
 }
 
-/// A specific API operation.
+/// Code snippets for a single operation across supported frameworks.
 #[derive(Serialize, Debug)]
-struct DocsOperation {
-    /// HTTP method.
-    method: String,
-    /// Route path.
-    path: String,
-    /// Optional OpenAPI Operation ID.
-    #[serde(rename = "operationId", skip_serializing_if = "Option::is_none")]
-    operation_id: Option<String>,
-    /// The code snippet for the operation.
-    code: DocsCode,
+pub struct OperationSnippets {
+    ///Reqwest client snippet.
+    pub default: CodeComponents,
+    /// Actix-web server handler snippet.
+    pub actix: CodeComponents,
+    /// Axum server handler snippet.
+    pub axum: CodeComponents,
 }
 
-/// The code snippet object for an operation.
+/// Individual components of a code snippet.
 #[derive(Serialize, Debug)]
-struct DocsCode {
-    /// Optional imports.
+pub struct CodeComponents {
+    /// Import statements (`None` when `--no-imports` is set).
     #[serde(skip_serializing_if = "Option::is_none")]
-    imports: Option<String>,
-    /// Optional wrapper start code.
+    pub imports: Option<String>,
+    /// Wrapping boilerplate (`None` when `--no-wrapping` is set).
     #[serde(skip_serializing_if = "Option::is_none")]
-    wrapper_start: Option<String>,
-    /// The main snippet code.
-    snippet: String,
-    /// Optional wrapper end code.
+    pub wrapper_start: Option<String>,
+    /// Core logic / invocation snippet.
+    pub code: String,
+    /// Closing boilerplate (`None` when `--no-wrapping` is set).
     #[serde(skip_serializing_if = "Option::is_none")]
-    wrapper_end: Option<String>,
+    pub wrapper_end: Option<String>,
 }
 
-/// Reads the input specification from a file or URL.
-#[cfg(not(tarpaulin_include))]
-#[cfg(all(feature = "client", not(target_os = "wasi")))]
-fn read_input(input: &str) -> AppResult<String> {
-    if input.starts_with("http://") || input.starts_with("https://") {
-        let response = ureq::get(input)
-            .call()
-            .map_err(|e| AppError::General(format!("Failed to fetch URL: {}", e)))?;
-        response
-            .into_body()
-            .read_to_string()
-            .map_err(|e| AppError::General(format!("Failed to read HTTP body: {}", e)))
-    } else {
-        std::fs::read_to_string(input)
-            .map_err(|e| AppError::General(format!("Failed to read file: {}", e)))
-    }
-}
-
-/// Reads the input specification from a file only (when client feature is absent).
-#[cfg(not(tarpaulin_include))]
-#[cfg(any(not(feature = "client"), target_os = "wasi"))]
-fn read_input(input: &str) -> AppResult<String> {
-    if input.starts_with("http://") || input.starts_with("https://") {
-        Err(AppError::General(
-            "Client feature is not compiled or not supported on this platform, cannot fetch HTTP URLs".to_string(),
-        ))
-    } else {
-        std::fs::read_to_string(input)
-            .map_err(|e| AppError::General(format!("Failed to read file: {}", e)))
-    }
-}
-
-/// Executes the documentation JSON generation pipeline.
+/// Run the `to_docs_json` command and output the JSON representation.
+///
+/// # Arguments
+/// * `args` - CLI arguments for `to_docs_json`.
+///
+/// # Returns
+/// `Ok(())` on success.
+///
+/// # Errors
+/// Returns [`AppError`] if reading the specification or writing the output fails.
 pub fn run_to_docs_json(args: &ToDocsJsonArgs) -> AppResult<()> {
-    let yaml_content = read_input(&args.input)?;
-
-    let output = generate_docs_json_impl(&yaml_content, args)?;
-
-    let json = serde_json::to_string_pretty(&output)
-        .map_err(|e| AppError::General(format!("JSON Serialization error: {}", e)))?;
-
-    if let Some(ref output_path) = args.output {
-        fs::write(output_path, json)
-            .map_err(|e| AppError::General(format!("Failed to write to file: {}", e)))?;
+    let json_str = generate_docs_json_str(args)?;
+    if let Some(ref out_path) = args.output {
+        fs::write(out_path, json_str)
+            .map_err(|e| AppError::General(format!("Failed to write to {}: {}", out_path, e)))?;
     } else {
-        println!("{}", json);
+        println!("{}", json_str);
     }
-
     Ok(())
 }
 
-/// Generates the internal `DocsJsonOutput` structures from a parsed OpenAPI spec.
-fn generate_docs_json_impl(
-    yaml_content: &str,
-    args: &ToDocsJsonArgs,
-) -> AppResult<Vec<DocsJsonOutput>> {
-    let parsed = parse_openapi_document(yaml_content)?;
+/// Splits a generated handler module produced by `update_handler_module` into
+/// `(imports, wrapper_start, body_code, wrapper_end)` while honoring `no_imports` and `no_wrapping`.
+fn build_strategy_snippet(
+    route: &ParsedRoute,
+    strategy: &impl BackendStrategy,
+    default_wrapper_start: &str,
+    no_imports: bool,
+    no_wrapping: bool,
+) -> AppResult<CodeComponents> {
+    let raw_imports = strategy.handler_imports().trim().to_string();
+    let full_module = update_handler_module("", std::slice::from_ref(route), strategy)?;
 
-    let mut operations = Vec::new();
-    let base_url = parsed
-        .info
-        .servers
-        .first()
-        .map(|s| s.url.clone())
-        .unwrap_or_else(|| "https://api.example.com".to_string());
+    // Strip the test module if one was appended by `update_handler_module`
+    let without_tests = full_module
+        .split("#[cfg(test)]")
+        .next()
+        .unwrap_or(&full_module)
+        .trim();
 
-    for route in parsed.routes {
-        if route.kind == RouteKind::Webhook {
-            continue;
-        }
+    // Strip imports prefix
+    let handler_part = without_tests
+        .strip_prefix(&raw_imports)
+        .unwrap_or(without_tests)
+        .trim();
 
-        let imports = if !args.no_imports {
-            Some("use api_client::ApiClient;\nuse tokio;".to_string())
-        } else {
+    // Split function signature line (`pub async fn ... {`) from inner body and closing `}`
+    let (sig_wrapper, inner_body, closing) = if let Some(open_brace) = handler_part.find('{') {
+        let before_brace = handler_part[..=open_brace].trim().to_string();
+        let after_brace = &handler_part[open_brace + 1..];
+        let body_trimmed = after_brace
+            .trim_end()
+            .strip_suffix('}')
+            .unwrap_or(after_brace)
+            .trim()
+            .to_string();
+        (before_brace, body_trimmed, "}".to_string())
+    } else {
+        (
+            default_wrapper_start.to_string(),
+            handler_part.to_string(),
+            "}".to_string(),
+        )
+    };
+
+    let wrapper_start_str = if default_wrapper_start.is_empty() {
+        sig_wrapper
+    } else {
+        format!(
+            "{}
+{}",
+            default_wrapper_start, sig_wrapper
+        )
+    };
+
+    Ok(CodeComponents {
+        imports: if no_imports { None } else { Some(raw_imports) },
+        wrapper_start: if no_wrapping {
             None
-        };
-
-        let (wrapper_start, wrapper_end) = if !args.no_wrapping {
-            (
-                Some(
-                    "#[tokio::main]\nasync fn main() -> Result<(), Box<dyn std::error::Error>> {\n"
-                        .to_string(),
-                ),
-                Some("\n    Ok(())\n}".to_string()),
-            )
         } else {
-            (None, None)
-        };
+            Some(wrapper_start_str)
+        },
+        code: inner_body,
+        wrapper_end: if no_wrapping { None } else { Some(closing) },
+    })
+}
 
-        let fn_name = route.handler_name.clone();
+/// Generates the JSON documentation string from the OpenAPI specification.
+///
+/// # Arguments
+/// * `args` - Arguments specifying the input OpenAPI spec and formatting flags.
+///
+/// # Returns
+/// A pretty-printed JSON array containing the [`DocsJsonOutput`].
+///
+/// # Errors
+/// Returns [`AppError`] if the specification cannot be read or parsed.
+pub fn generate_docs_json_str(args: &ToDocsJsonArgs) -> AppResult<String> {
+    let spec_content = read_spec_source(Path::new(&args.input))?;
+    let doc = parse_openapi_document(&spec_content)?;
 
-        let snippet = format!(
-            "    let client = ApiClient::new(\"{}\");\n    let response = client.{}().await?;\n    println!(\"{{:#?}}\", response);",
-            base_url, fn_name
-        );
-
-        let code = DocsCode {
-            imports,
-            wrapper_start,
-            snippet,
-            wrapper_end,
-        };
-
-        operations.push(DocsOperation {
-            method: route.method.to_uppercase(),
-            path: route.path.clone(),
-            operation_id: route.operation_id.clone(),
-            code,
-        });
+    let mut base_url = "https://api.example.com".to_string();
+    if let Some(first_server) = doc.info.servers.first() {
+        base_url = first_server.url.trim_end_matches('/').to_string();
     }
 
-    Ok(vec![DocsJsonOutput {
-        language: "rust".to_string(),
-        operations,
-    }])
+    let mut endpoints: BTreeMap<String, BTreeMap<String, OperationSnippets>> = BTreeMap::new();
+    let mut webhooks: BTreeMap<String, BTreeMap<String, OperationSnippets>> = BTreeMap::new();
+
+    for route in &doc.routes {
+        let method_key = route.method.to_lowercase();
+
+        let mut enriched_route = route.clone();
+        if enriched_route.base_path.is_none() {
+            enriched_route.base_path = Some(base_url.clone());
+        }
+
+        let default_code = build_strategy_snippet(
+            &enriched_route,
+            &ReqwestStrategy,
+            "#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {",
+            args.no_imports,
+            args.no_wrapping,
+        )?;
+        let actix_code = build_strategy_snippet(
+            &enriched_route,
+            &ActixStrategy,
+            "",
+            args.no_imports,
+            args.no_wrapping,
+        )?;
+        let axum_code = build_strategy_snippet(
+            &enriched_route,
+            &AxumStrategy,
+            "",
+            args.no_imports,
+            args.no_wrapping,
+        )?;
+
+        let snippets = OperationSnippets {
+            default: default_code,
+            actix: actix_code,
+            axum: axum_code,
+        };
+
+        match route.kind {
+            RouteKind::Path => {
+                endpoints
+                    .entry(route.path.clone())
+                    .or_default()
+                    .insert(method_key, snippets);
+            }
+            RouteKind::Webhook => {
+                webhooks
+                    .entry(route.path.clone())
+                    .or_default()
+                    .insert(method_key, snippets);
+            }
+        }
+    }
+
+    let output = DocsJsonOutput {
+        endpoints,
+        webhooks,
+    };
+
+    let wrapper: Vec<Value> = vec![serde_json::to_value(&output)?];
+    Ok(serde_json::to_string_pretty(&wrapper)?)
+}
+
+/// Configuration for `to_docs_json` programmatic API.
+#[derive(Debug, Default, Clone)]
+pub struct ToDocsJsonConfig {
+    /// Input OpenAPI file path or URL.
+    pub input: String,
+    /// Omit imports.
+    pub no_imports: bool,
+    /// Omit wrapping code.
+    pub no_wrapping: bool,
+    /// Optional output path.
+    pub output: Option<String>,
+}
+
+/// Generate documentation JSON from an OpenAPI specification.
+///
+/// # Arguments
+/// * `config` - Programmatic configuration for `to_docs_json`.
+///
+/// # Returns
+/// `Ok(())` on success.
+///
+/// # Errors
+/// Returns [`AppError`] if generation fails.
+pub fn to_docs_json(config: &ToDocsJsonConfig) -> AppResult<()> {
+    let args = ToDocsJsonArgs {
+        input: config.input.clone(),
+        no_imports: config.no_imports,
+        no_wrapping: config.no_wrapping,
+        output: config.output.clone(),
+    };
+    run_to_docs_json(&args)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[test]
-    fn test_generate_docs_json_default() {
+    fn test_generate_docs_json_str() {
         let yaml = r#"
-openapi: 3.0.0
+openapi: 3.1.0
 info:
-  title: Test API
+  title: Test Docs
   version: 1.0.0
 servers:
-  - url: http://localhost:8080
+  - url: https://test.api.com/v1
 paths:
-  /pets:
-    get:
-      operationId: getPets
+  /pets/{id}:
+    post:
+      operationId: update_pet
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: filter
+          in: query
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: OK
+webhooks:
+  newPet:
+    post:
+      operationId: new_pet_webhook
+      requestBody:
+        content:
+          text/plain:
+            schema:
+              type: string
       responses:
         '200':
           description: OK
 "#;
+        let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
+        write!(temp_file, "{}", yaml).expect("Failed to write to temp file");
 
         let args = ToDocsJsonArgs {
-            input: "dummy".into(),
+            input: temp_file.path().to_string_lossy().to_string(),
             no_imports: false,
             no_wrapping: false,
             output: None,
         };
 
-        let output = generate_docs_json_impl(yaml, &args).expect("Failed to generate docs json");
-        assert_eq!(output.len(), 1);
-        let rust_docs = &output[0];
-        assert_eq!(rust_docs.language, "rust");
-        assert_eq!(rust_docs.operations.len(), 1);
+        let result = generate_docs_json_str(&args).expect("Failed to generate docs JSON");
+        assert!(result.contains(r#""/pets/{id}""#));
+        assert!(result.contains(r#""newPet""#));
+        assert!(result.contains("reqwest::Client"));
+        assert!(result.contains("actix_web"));
+        assert!(result.contains("axum"));
 
-        let op = &rust_docs.operations[0];
-        assert_eq!(op.method, "GET");
-        assert_eq!(op.path, "/pets");
-        assert_eq!(op.operation_id.as_deref(), Some("getPets"));
-        assert!(op.code.imports.is_some());
-        assert!(op.code.wrapper_start.is_some());
-        assert!(op.code.wrapper_end.is_some());
-        assert!(op
-            .code
-            .snippet
-            .contains("ApiClient::new(\"http://localhost:8080\")"));
-        assert!(op.code.snippet.contains("client.get_pets().await?"));
-    }
-
-    #[test]
-    fn test_generate_docs_json_toggles() {
-        let yaml = r#"
-openapi: 3.0.0
-info:
-  title: Test API
-  version: 1.0.0
-paths:
-  /pets:
-    get:
-      operationId: getPets
-      responses:
-        '200':
-          description: OK
-"#;
-
-        let args = ToDocsJsonArgs {
-            input: "dummy".into(),
+        let args_stripped = ToDocsJsonArgs {
+            input: temp_file.path().to_string_lossy().to_string(),
             no_imports: true,
             no_wrapping: true,
             output: None,
         };
 
-        let output = generate_docs_json_impl(yaml, &args).expect("Failed to generate docs json");
-        let op = &output[0].operations[0];
-
-        assert!(op.code.imports.is_none());
-        assert!(op.code.wrapper_start.is_none());
-        assert!(op.code.wrapper_end.is_none());
-        assert!(op
-            .code
-            .snippet
-            .contains("ApiClient::new(\"https://api.example.com\")"));
+        let result_stripped =
+            generate_docs_json_str(&args_stripped).expect("Failed to generate stripped docs JSON");
+        assert!(!result_stripped.contains(r#""imports""#));
+        assert!(!result_stripped.contains(r#""wrapper_start""#));
     }
 
     #[test]
-    fn test_generate_docs_json_with_webhook() {
+    fn test_run_to_docs_json_stdout_and_file() {
         let yaml = r#"
-openapi: 3.1.0
-info:
-  title: Test API
-  version: 1.0.0
-webhooks:
-  newPet:
-    post:
-      responses:
-        '200':
-          description: OK
-"#;
-        let args = ToDocsJsonArgs {
-            input: "dummy".into(),
-            no_imports: false,
-            no_wrapping: false,
-            output: None,
-        };
-
-        let output = generate_docs_json_impl(yaml, &args).expect("Failed to generate docs json");
-        // The webhook should be skipped, so operations should be empty
-        assert_eq!(output.len(), 1);
-        assert_eq!(output[0].operations.len(), 0);
-    }
-
-    #[test]
-    fn test_execute_with_file() {
-        use std::io::Write;
-        let mut file = tempfile::NamedTempFile::new().expect("Failed to create new instance");
-        writeln!(file, "openapi: 3.0.0\ninfo:\n  title: Test API\n  version: 1.0.0\npaths:\n  /pets:\n    get:\n      responses:\n        '200':\n          description: OK").expect("Failed to write line");
-
-        let args = ToDocsJsonArgs {
-            input: file
-                .path()
-                .to_str()
-                .expect("Failed to convert to string")
-                .to_string(),
-            no_imports: false,
-            no_wrapping: false,
-            output: None,
-        };
-        let result = run_to_docs_json(&args);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_execute_with_url_error() {
-        let args = ToDocsJsonArgs {
-            input: "http://localhost:9999/nonexistent".to_string(),
-            no_imports: false,
-            no_wrapping: false,
-            output: None,
-        };
-        let result = run_to_docs_json(&args);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_execute_with_file_error() {
-        let args = ToDocsJsonArgs {
-            input: "nonexistent_file.yaml".to_string(),
-            no_imports: false,
-            no_wrapping: false,
-            output: None,
-        };
-        let result = run_to_docs_json(&args);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_execute_with_invalid_output_path() {
-        use tempfile::tempdir;
-        let dir = tempdir().expect("Failed to create temporary directory");
-        let file = dir.path().join("test.yaml");
-        let openapi_yaml = r#"
 openapi: 3.0.0
 info:
-  title: Sample API
+  title: Simple
   version: 1.0.0
-paths: {}
+paths:
+  /ping:
+    get:
+      responses:
+        '200':
+          description: pong
 "#;
-        std::fs::write(&file, openapi_yaml).expect("Failed to write to file");
+        let mut temp_in = NamedTempFile::new().expect("Failed to create temp file");
+        write!(temp_in, "{}", yaml).expect("Failed to write to temp file");
+        let temp_out = NamedTempFile::new().expect("Failed to create temp file");
 
-        let args = ToDocsJsonArgs {
-            input: file.to_string_lossy().to_string(),
+        let config_file = ToDocsJsonConfig {
+            input: temp_in.path().to_string_lossy().to_string(),
             no_imports: false,
             no_wrapping: false,
-            output: Some("/nonexistent_dir/output.json".to_string()),
+            output: Some(temp_out.path().to_string_lossy().to_string()),
         };
-        let result = run_to_docs_json(&args);
-        assert!(result.is_err());
+        assert!(to_docs_json(&config_file).is_ok());
+        let written = fs::read_to_string(temp_out.path()).expect("Failed to read output");
+        assert!(written.contains(r#""/ping""#));
+
+        let config_stdout = ToDocsJsonConfig {
+            input: temp_in.path().to_string_lossy().to_string(),
+            no_imports: true,
+            no_wrapping: true,
+            output: None,
+        };
+        assert!(to_docs_json(&config_stdout).is_ok());
     }
-}
 
-/// Configuration for `to_docs_json` programmatic API.
-#[derive(Debug, Default)]
-pub struct ToDocsJsonConfig {
-    /// The input file path.
-    pub input: String,
-    /// The output file path.
-    pub output: Option<String>,
-    /// Whether to exclude imports.
-    pub no_imports: bool,
-    /// Whether to disable wrapping.
-    pub no_wrapping: bool,
-}
+    #[test]
+    fn test_run_to_docs_json_errors() {
+        let bad_in = ToDocsJsonArgs {
+            input: "/nonexistent_file.yaml".to_string(),
+            no_imports: false,
+            no_wrapping: false,
+            output: None,
+        };
+        assert!(run_to_docs_json(&bad_in).is_err());
 
-/// Generate JSON documentation with code snippets for an OpenAPI specification.
-pub fn to_docs_json(config: &ToDocsJsonConfig) -> AppResult<()> {
-    let args = ToDocsJsonArgs {
-        input: config.input.clone(),
-        output: config.output.clone(),
-        no_imports: config.no_imports,
-        no_wrapping: config.no_wrapping,
-    };
-    run_to_docs_json(&args)
+        let yaml = "openapi: 3.0.0
+info:
+  title: T
+  version: 1.0
+paths: {}
+";
+        let mut temp_in = NamedTempFile::new().expect("Failed to create temp file");
+        write!(temp_in, "{}", yaml).expect("Failed to write to temp file");
+
+        let bad_out = ToDocsJsonArgs {
+            input: temp_in.path().to_string_lossy().to_string(),
+            no_imports: false,
+            no_wrapping: false,
+            output: Some("/nonexistent_dir_xyz/output.json".to_string()),
+        };
+        assert!(run_to_docs_json(&bad_out).is_err());
+    }
 }

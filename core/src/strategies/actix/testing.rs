@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Test Generation
 //!
@@ -1557,6 +1556,8 @@ async fn validate_response(resp: actix_web::dev::ServiceResponse, method: &str, 
 
 /// Generates a unit test for a specific handler function to be placed alongside it.
 pub fn handler_unit_test(route: &crate::openapi::parse::ParsedRoute) -> String {
+    use crate::openapi::parse::ParamSource;
+
     let method = match route.method.as_str() {
         "GET" => "get",
         "POST" => "post",
@@ -1572,26 +1573,49 @@ pub fn handler_unit_test(route: &crate::openapi::parse::ParsedRoute) -> String {
     while let Some(start) = path.find('{') {
         if let Some(end) = path[start..].find('}') {
             let actual_end = start + end;
-            path.replace_range(start..actual_end + 1, "0"); // Dummy ID 0
+            let param_name = &path[start + 1..actual_end];
+            let sample = route
+                .params
+                .iter()
+                .chain(route.path_params.iter())
+                .find(|p| p.source == ParamSource::Path && p.name == param_name)
+                .map(|p| crate::openapi::parse::models::RustType::parse(&p.ty).sample_url_segment())
+                .unwrap_or("0");
+            path.replace_range(start..actual_end + 1, sample);
         } else {
             break;
         }
     }
 
+    let expected_code = route
+        .response_status
+        .as_deref()
+        .and_then(|s| {
+            s.parse::<crate::openapi::parse::models::StatusCodeSpec>()
+                .ok()
+        })
+        .map(|spec| spec.representative_code())
+        .unwrap_or(200);
+
     format!(
         r#"    #[actix_web::test]
     async fn test_{handler_name}_unit() {{
-        use actix_web::{{test, App, web}};
+        use actix_web::{{test, App, web, http::StatusCode}};
         let app = test::init_service(
-            App::new().route("{path}", web::{method}().to(super::{handler_name}))
+            App::new().route("{route_path}", web::{method}().to(super::{handler_name}))
         ).await;
         let req = test::TestRequest::{method}().uri("{path}").to_request();
         let resp = test::call_service(&app, req).await;
-        assert!(resp.status().is_success() || resp.status().is_client_error() || resp.status().is_server_error());
+        assert_eq!(
+            resp.status(),
+            StatusCode::from_u16({expected_code}).expect("valid status")
+        );
     }}"#,
         handler_name = route.handler_name,
+        route_path = route.path,
         path = path,
         method = method,
+        expected_code = expected_code,
     )
 }
 
@@ -1680,6 +1704,48 @@ mod tests {
         assert!(generated.contains("test_my_handler_unit"));
         assert!(generated.contains("web::post().to(super::my_handler)"));
         assert!(generated.contains(".uri(\"/users/0\")"));
+        assert!(generated.contains("StatusCode::from_u16(200)"));
+
+        let mut uuid_route = route.clone();
+        uuid_route.path = "/users/{id}/flags/{active}".into();
+        uuid_route.response_status = Some("204".into());
+        uuid_route.params = vec![
+            crate::openapi::parse::RouteParam {
+                name: "id".into(),
+                description: None,
+                source: crate::openapi::parse::ParamSource::Path,
+                ty: "Uuid".into(),
+                content_media_type: None,
+                style: None,
+                explode: false,
+                deprecated: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                example: None,
+                raw_schema: None,
+                extensions: std::collections::BTreeMap::new(),
+            },
+            crate::openapi::parse::RouteParam {
+                name: "active".into(),
+                description: None,
+                source: crate::openapi::parse::ParamSource::Path,
+                ty: "bool".into(),
+                content_media_type: None,
+                style: None,
+                explode: false,
+                deprecated: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                example: None,
+                raw_schema: None,
+                extensions: std::collections::BTreeMap::new(),
+            },
+        ];
+        let gen_uuid = handler_unit_test(&uuid_route);
+        assert!(
+            gen_uuid.contains(".uri(\"/users/00000000-0000-0000-0000-000000000000/flags/true\")")
+        );
+        assert!(gen_uuid.contains("StatusCode::from_u16(204)"));
     }
     #[test]
     fn test_request_builder_variants() {

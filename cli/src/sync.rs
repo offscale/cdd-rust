@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Sync Command
 //!
@@ -143,7 +142,7 @@ fn process_models_for_openapi(
 
         // Only process Rust files, skip mod.rs (orphans usually valid)
         if path.extension().is_some_and(|ext| ext == "rs")
-            && path.file_name().expect("Failed to file name") != "mod.rs"
+            && path.file_name().is_some_and(|name| name != "mod.rs")
         {
             process_file(path, type_overrides)?;
         }
@@ -225,6 +224,48 @@ fn process_file(path: &Path, type_overrides: &HashMap<String, String>) -> AppRes
     }
 
     Ok(())
+}
+
+/// Configuration for `sync` programmatic API.
+#[derive(Debug, Default)]
+pub struct SyncConfig {
+    /// The source of truth for the synchronization.
+    pub truth: String,
+    /// Path to the Diesel schema file.
+    pub input: std::path::PathBuf,
+    /// Output directory for generated models.
+    pub output: std::path::PathBuf,
+    /// Skip the dsync generation step.
+    pub no_gen: bool,
+    /// Enforce specific types for fields matching a name.
+    pub force_type: Vec<(String, String)>,
+}
+
+/// Synchronize an OpenAPI specification with source code.
+pub fn sync(
+    config: &SyncConfig,
+    mapper: &impl crate::generator::ModelMapper,
+) -> cdd_core::AppResult<()> {
+    let truth = match config.truth.to_lowercase().as_str() {
+        "db" => SyncTruth::Db,
+        "api" => SyncTruth::Api,
+        "code" => SyncTruth::Code,
+        _ => {
+            return Err(cdd_core::AppError::General(format!(
+                "Invalid sync truth: {}",
+                config.truth
+            )))
+        }
+    };
+
+    let args = SyncArgs {
+        truth,
+        input: config.input.clone(),
+        output: config.output.clone(),
+        no_gen: config.no_gen,
+        force_type: config.force_type.clone(),
+    };
+    run_sync(&args, mapper)
 }
 
 #[cfg(test)]
@@ -372,46 +413,4 @@ pub struct Post {
         let invalid = parse_key_val("invalid");
         assert!(invalid.is_err());
     }
-}
-
-/// Configuration for `sync` programmatic API.
-#[derive(Debug, Default)]
-pub struct SyncConfig {
-    /// The source of truth for the synchronization.
-    pub truth: String,
-    /// Path to the Diesel schema file.
-    pub input: std::path::PathBuf,
-    /// Output directory for generated models.
-    pub output: std::path::PathBuf,
-    /// Skip the dsync generation step.
-    pub no_gen: bool,
-    /// Enforce specific types for fields matching a name.
-    pub force_type: Vec<(String, String)>,
-}
-
-/// Synchronize an OpenAPI specification with source code.
-pub fn sync(
-    config: &SyncConfig,
-    mapper: &impl crate::generator::ModelMapper,
-) -> cdd_core::AppResult<()> {
-    let truth = match config.truth.to_lowercase().as_str() {
-        "db" => SyncTruth::Db,
-        "api" => SyncTruth::Api,
-        "code" => SyncTruth::Code,
-        _ => {
-            return Err(cdd_core::AppError::General(format!(
-                "Invalid sync truth: {}",
-                config.truth
-            )))
-        }
-    };
-
-    let args = SyncArgs {
-        truth,
-        input: config.input.clone(),
-        output: config.output.clone(),
-        no_gen: config.no_gen,
-        force_type: config.force_type.clone(),
-    };
-    run_sync(&args, mapper)
 }

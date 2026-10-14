@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # OpenAPI Validation
 //!
@@ -1810,8 +1809,7 @@ fn resolve_header_raw_from_components(
     components: Option<&ShimComponents>,
     visited: &mut HashSet<String>,
 ) -> Option<serde_json::Value> {
-    let (comps, self_uri) =
-        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))?;
+    let (comps, self_uri) = components.map(|c| (c, c.self_uri.as_deref()))?;
     let name = extract_component_name(ref_str, self_uri, "headers")?;
     if !visited.insert(name.clone()) {
         return None;
@@ -1829,8 +1827,7 @@ fn resolve_request_body_from_components(
     components: Option<&ShimComponents>,
     visited: &mut HashSet<String>,
 ) -> Option<ShimRequestBody> {
-    let (comps, self_uri) =
-        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))?;
+    let (comps, self_uri) = components.map(|c| (c, c.self_uri.as_deref()))?;
     let name = extract_component_name(ref_str, self_uri, "requestBodies")?;
     if !visited.insert(name.clone()) {
         return None;
@@ -2140,8 +2137,7 @@ fn resolve_response_from_components(
     components: Option<&ShimComponents>,
     visited: &mut HashSet<String>,
 ) -> Option<utoipa::openapi::Response> {
-    let (comps, self_uri) =
-        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))?;
+    let (comps, self_uri) = components.map(|c| (c, c.self_uri.as_deref()))?;
     let name = extract_component_name(ref_str, self_uri, "responses")?;
     if !visited.insert(name.clone()) {
         return None;
@@ -2162,8 +2158,7 @@ fn resolve_response_raw_from_components(
     components: Option<&ShimComponents>,
     visited: &mut HashSet<String>,
 ) -> Option<serde_json::Value> {
-    let (comps, self_uri) =
-        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))?;
+    let (comps, self_uri) = components.map(|c| (c, c.self_uri.as_deref()))?;
     let name = extract_component_name(ref_str, self_uri, "responses")?;
     if !visited.insert(name.clone()) {
         return None;
@@ -2180,8 +2175,7 @@ fn resolve_link_raw_from_components(
     ref_str: &str,
     components: Option<&ShimComponents>,
 ) -> Option<serde_json::Value> {
-    let (comps, self_uri) =
-        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))?;
+    let (comps, self_uri) = components.map(|c| (c, c.self_uri.as_deref()))?;
     let name = extract_component_name(ref_str, self_uri, "links")?;
     comps
         .extra
@@ -2539,8 +2533,7 @@ fn resolve_parameter_ref_for_validation(
     r: &utoipa::openapi::Ref,
     components: Option<&ShimComponents>,
 ) -> Option<ShimParameter> {
-    let (comps, self_uri) =
-        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))?;
+    let (comps, self_uri) = components.map(|c| (c, c.self_uri.as_deref()))?;
     let ref_name = extract_component_name(&r.ref_location, self_uri, "parameters")?;
     comps
         .extra

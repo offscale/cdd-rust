@@ -58,18 +58,3 @@ pub use routes::emit::register_routes;
 pub use strategies::{ActixStrategy, AxumStrategy, BackendStrategy};
 pub use tests::emit::generate_contract_tests_file;
 pub use type_mapping::{JsonSchema, JsonType, RustToJsonMapper, TypeMapper};
-
-/// A placeholder function to verify workspace setup.
-pub fn is_operational() -> bool {
-    true
-}
-
-#[cfg(test)]
-mod tests_local {
-    use super::*;
-
-    #[test]
-    fn test_is_operational() {
-        assert!(is_operational());
-    }
-}

@@ -1,3 +1,5 @@
+#![deny(missing_docs)]
+
 //! Fake Data Seeder & Dependency Graph Generator.
 //!
 //! This module is responsible for generating localized, fake data for the CDD Server.

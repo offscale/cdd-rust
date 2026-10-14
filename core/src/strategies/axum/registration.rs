@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Route Registration
 //!
@@ -106,5 +105,23 @@ mod tests {
             statement,
             ".route(\"/users/:id\", axum::routing::get(handlers::get_user))"
         );
+
+        for (m, expected) in [
+            ("POST", "post"),
+            ("PUT", "put"),
+            ("DELETE", "delete"),
+            ("PATCH", "patch"),
+            ("HEAD", "head"),
+            ("OPTIONS", "options"),
+            ("TRACE", "trace"),
+            ("CUSTOM", "any"),
+        ] {
+            let mut r = route.clone();
+            r.method = m.to_string();
+            r.base_path = Some("/v1".to_string());
+            let stmt = route_registration_statement(&r, "h");
+            assert!(stmt.contains(&format!("axum::routing::{}(h)", expected)));
+            assert!(stmt.contains("/v1/users/:id"));
+        }
     }
 }

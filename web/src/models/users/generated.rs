@@ -1,4 +1,5 @@
 /* @generated and managed by dsync */
+#![allow(clippy::redundant_field_names)]
 
 #[allow(unused)]
 use crate::diesel::*;

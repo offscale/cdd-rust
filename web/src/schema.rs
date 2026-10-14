@@ -1,4 +1,4 @@
-#![cfg(not(tarpaulin_include))]
+#![deny(missing_docs)]
 // @generated automatically by Diesel CLI.
 // Manual doc comments added for compliance.
 

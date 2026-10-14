@@ -1,27 +1,32 @@
-//! Strict Validation Middleware.
+#![deny(missing_docs)]
+
+//! Strict Request Validation Middleware.
 //!
-//! Intercepts incoming requests and validates them against constraints.
+//! Intercepts incoming HTTP requests and validates structural constraints
+//! (such as `Content-Type: application/json` header requirements on write operations
+//! when a non-empty JSON payload is expected).
 
 use actix_web::{
+    body::EitherBody,
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
+    http::Method,
     Error, HttpResponse,
 };
 use futures_util::future::LocalBoxFuture;
 use std::future::{ready, Ready};
+use std::rc::Rc;
 
-/// Strict validation middleware constructor.
-pub struct StrictValidation {
-    /// Whether strict validation is enabled.
-    pub enabled: bool,
-}
+/// Middleware factory for strict request validation.
+#[derive(Clone, Debug, Default)]
+pub struct StrictValidation;
 
 impl<S, B> Transform<S, ServiceRequest> for StrictValidation
 where
     S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
     S::Future: 'static,
-    B: actix_web::body::MessageBody + 'static,
+    B: 'static,
 {
-    type Response = ServiceResponse<actix_web::body::BoxBody>;
+    type Response = ServiceResponse<EitherBody<B>>;
     type Error = Error;
     type InitError = ();
     type Transform = StrictValidationMiddleware<S>;
@@ -29,43 +34,51 @@ where
 
     fn new_transform(&self, service: S) -> Self::Future {
         ready(Ok(StrictValidationMiddleware {
-            service,
-            enabled: self.enabled,
+            service: Rc::new(service),
         }))
     }
 }
 
-/// The actual middleware service.
+/// Middleware service created by [`StrictValidation`].
 pub struct StrictValidationMiddleware<S> {
-    service: S,
-    enabled: bool,
+    /// Wrapped inner Actix service.
+    service: Rc<S>,
 }
 
 impl<S, B> Service<ServiceRequest> for StrictValidationMiddleware<S>
 where
     S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
     S::Future: 'static,
-    B: actix_web::body::MessageBody + 'static,
+    B: 'static,
 {
-    type Response = ServiceResponse<actix_web::body::BoxBody>;
+    type Response = ServiceResponse<EitherBody<B>>;
     type Error = Error;
     type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     forward_ready!(service);
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
-        if self.enabled && req.headers().contains_key("x-simulate-validation-error") {
-            let res = HttpResponse::BadRequest()
-                .body("Field 'email' must match format 'email'")
-                .map_into_boxed_body();
-            let srv_res = req.into_response(res);
-            return Box::pin(ready(Ok(srv_res)));
-        }
+        let srv = self.service.clone();
 
-        let fut = self.service.call(req);
         Box::pin(async move {
-            let res = fut.await?;
-            Ok(res.map_into_boxed_body())
+            let is_write = matches!(*req.method(), Method::POST | Method::PUT | Method::PATCH);
+            if is_write {
+                if let Some(ct) = req.headers().get(actix_web::http::header::CONTENT_TYPE) {
+                    if let Ok(ct_str) = ct.to_str() {
+                        if ct_str.starts_with("text/plain") {
+                            let resp = HttpResponse::UnsupportedMediaType()
+                                .json(serde_json::json!({
+                                    "error": "Unsupported Media Type: text/plain is not accepted for write operations"
+                                }))
+                                .map_into_right_body();
+                            return Ok(req.into_response(resp));
+                        }
+                    }
+                }
+            }
+
+            let res = srv.call(req).await?;
+            Ok(res.map_into_left_body())
         })
     }
 }
@@ -73,43 +86,40 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actix_web::{test, web, App};
+    use actix_web::{test, web, App, HttpResponse};
 
     #[actix_web::test]
-    async fn test_validation_middleware_enabled() {
+    async fn test_validation_middleware_allows_valid_and_rejects_invalid_content_type() {
         let app = test::init_service(
             App::new()
-                .wrap(StrictValidation { enabled: true })
-                .route("/", web::get().to(|| async { HttpResponse::Ok().finish() })),
-        )
-        .await;
-
-        let req = test::TestRequest::get()
-            .uri("/")
-            .insert_header(("x-simulate-validation-error", "1"))
-            .to_request();
-
-        let resp = test::call_service(&app, req).await;
-        assert_eq!(resp.status(), actix_web::http::StatusCode::BAD_REQUEST);
-    }
-}
-
-#[cfg(test)]
-mod additional_validation_tests {
-    use super::*;
-
-    #[actix_web::test]
-    async fn test_validation_middleware_passthrough() {
-        use actix_web::{test, web, App, HttpResponse};
-        let app = test::init_service(
-            App::new()
-                .wrap(StrictValidation { enabled: false })
-                .route("/", web::get().to(|| async { HttpResponse::Ok().finish() })),
+                .wrap(StrictValidation)
+                .route("/", web::get().to(|| async { HttpResponse::Ok().finish() }))
+                .route(
+                    "/",
+                    web::post().to(|| async { HttpResponse::Ok().finish() }),
+                ),
         )
         .await;
 
         let req = test::TestRequest::get().uri("/").to_request();
         let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());
+
+        let req = test::TestRequest::post()
+            .uri("/")
+            .insert_header(("Content-Type", "application/json"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
+        let req = test::TestRequest::post()
+            .uri("/")
+            .insert_header(("Content-Type", "text/plain"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(
+            resp.status(),
+            actix_web::http::StatusCode::UNSUPPORTED_MEDIA_TYPE
+        );
     }
 }

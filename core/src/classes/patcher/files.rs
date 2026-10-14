@@ -1,4 +1,7 @@
-#![cfg(not(tarpaulin_include))]
+#![deny(missing_docs)]
+
+//! File-level AST patching utilities (such as import injection).
+
 use crate::error::AppResult;
 use ra_ap_edition::Edition;
 use ra_ap_syntax::ast::HasModuleItem;

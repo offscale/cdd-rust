@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Scaffolding for Reqwest Client
 //!
@@ -197,4 +196,197 @@ pub fn handler_signature(route: &crate::openapi::parse::ParsedRoute, args: &[Str
         "pub async fn {}({}) -> {} {{\n{}\n}}\n",
         func_name, args_str, return_type, body
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::openapi::parse::models::{
+        BodyFormat, ParamSource, RequestBodyDefinition, ResponseHeader, RouteKind, RouteParam,
+        SecurityRequirement, SecurityRequirementGroup, SecuritySchemeInfo, SecuritySchemeKind,
+    };
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn test_reqwest_scaffolding_all_branches() {
+        assert!(handler_imports().contains("use reqwest::Client;"));
+
+        let mut route = crate::openapi::parse::ParsedRoute {
+            path: "/users/{id}".to_string(),
+            summary: None,
+            description: None,
+            path_summary: None,
+            path_description: None,
+            operation_summary: None,
+            operation_description: None,
+            path_extensions: BTreeMap::new(),
+            base_path: Some("/v1".to_string()),
+            path_servers: None,
+            servers_override: None,
+            method: "POST".to_string(),
+            handler_name: "update_user".to_string(),
+            operation_id: None,
+            params: vec![
+                RouteParam {
+                    name: "X-Custom".to_string(),
+                    description: None,
+                    source: ParamSource::Header,
+                    ty: "String".to_string(),
+                    content_media_type: None,
+                    style: None,
+                    explode: false,
+                    allow_reserved: false,
+                    deprecated: false,
+                    allow_empty_value: false,
+                    example: None,
+                    raw_schema: None,
+                    extensions: BTreeMap::new(),
+                },
+                RouteParam {
+                    name: "session".to_string(),
+                    description: None,
+                    source: ParamSource::Cookie,
+                    ty: "String".to_string(),
+                    content_media_type: None,
+                    style: None,
+                    explode: false,
+                    allow_reserved: false,
+                    deprecated: false,
+                    allow_empty_value: false,
+                    example: None,
+                    raw_schema: None,
+                    extensions: BTreeMap::new(),
+                },
+            ],
+            path_params: vec![],
+            request_body: Some(RequestBodyDefinition {
+                ty: "User".to_string(),
+                description: None,
+                media_type: "application/x-www-form-urlencoded".to_string(),
+                format: BodyFormat::Form,
+                required: true,
+                encoding: None,
+                prefix_encoding: None,
+                item_encoding: None,
+                example: None,
+            }),
+            raw_request_body: None,
+            security: vec![
+                SecurityRequirementGroup { schemes: vec![] },
+                SecurityRequirementGroup {
+                    schemes: vec![
+                        SecurityRequirement {
+                            scheme_name: "api_key_hdr".to_string(),
+                            scopes: vec![],
+                            scheme: Some(SecuritySchemeInfo {
+                                kind: SecuritySchemeKind::ApiKey {
+                                    name: "X-API-Key".to_string(),
+                                    in_loc: ParamSource::Header,
+                                },
+                                description: None,
+                                deprecated: false,
+                            }),
+                        },
+                        SecurityRequirement {
+                            scheme_name: "api_key_q".to_string(),
+                            scopes: vec![],
+                            scheme: Some(SecuritySchemeInfo {
+                                kind: SecuritySchemeKind::ApiKey {
+                                    name: "api_key".to_string(),
+                                    in_loc: ParamSource::Query,
+                                },
+                                description: None,
+                                deprecated: false,
+                            }),
+                        },
+                        SecurityRequirement {
+                            scheme_name: "bearer".to_string(),
+                            scopes: vec![],
+                            scheme: Some(SecuritySchemeInfo {
+                                kind: SecuritySchemeKind::Http {
+                                    scheme: "bearer".to_string(),
+                                    bearer_format: None,
+                                },
+                                description: None,
+                                deprecated: false,
+                            }),
+                        },
+                        SecurityRequirement {
+                            scheme_name: "untyped".to_string(),
+                            scopes: vec![],
+                            scheme: None,
+                        },
+                    ],
+                },
+            ],
+            security_defined: true,
+            kind: RouteKind::Path,
+            tags: vec![],
+            response_type: Some("User".to_string()),
+            response_status: Some("200".to_string()),
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
+            response_headers: vec![],
+            raw_responses: None,
+            response_links: None,
+            callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
+            extensions: BTreeMap::new(),
+        };
+
+        let sig = handler_signature(
+            &route,
+            &[
+                "id: i64".to_string(),
+                "query: Value".to_string(),
+                "body: User".to_string(),
+            ],
+        );
+        assert!(sig.contains("/v1/users/{}"));
+        assert!(sig.contains("serde_qs::Config::new()"));
+        assert!(sig.contains("req.header(\"X-Custom\""));
+        assert!(sig.contains("req.header(\"Cookie\""));
+        assert!(sig.contains("req.header(\"X-API-Key\", token)"));
+        assert!(sig.contains("req.query(&[(\"api_key\", token)])"));
+        assert!(sig.contains("req.bearer_auth(token)"));
+        assert!(sig.contains("req.form(&body)"));
+        assert!(sig.contains("resp.json::<User>().await"));
+
+        // Multipart + optional body + response headers + no query
+        if let Some(ref mut rb) = route.request_body {
+            rb.format = BodyFormat::Multipart;
+        }
+        route.response_headers = vec![ResponseHeader {
+            name: "X-Rate".to_string(),
+            description: None,
+            required: false,
+            deprecated: false,
+            style: None,
+            explode: None,
+            ty: "String".to_string(),
+            content_media_type: None,
+            example: None,
+            extensions: BTreeMap::new(),
+        }];
+        let sig_mp = handler_signature(
+            &route,
+            &["id: i64".to_string(), "body: Option<Form>".to_string()],
+        );
+        assert!(sig_mp.contains("req.multipart(&b)"));
+        assert!(sig_mp.contains("Result<reqwest::Response, reqwest::Error>"));
+
+        // No response type and no response headers
+        route.response_headers.clear();
+        route.response_type = None;
+        if let Some(ref mut rb) = route.request_body {
+            rb.format = BodyFormat::Json;
+        }
+        let sig_plain =
+            handler_signature(&route, &["id: i64".to_string(), "body: Value".to_string()]);
+        assert!(sig_plain.contains("req.json(&body)"));
+        assert!(sig_plain.contains("Ok(resp)"));
+    }
 }

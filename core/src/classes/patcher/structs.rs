@@ -1,4 +1,7 @@
-#![cfg(not(tarpaulin_include))]
+#![deny(missing_docs)]
+
+//! Struct-level AST patching utilities (fields, types, derives, and attributes).
+
 use crate::classes::patcher::common::{check_needs_comma, detect_indent, find_struct};
 use crate::error::{AppError, AppResult};
 use ra_ap_edition::Edition;

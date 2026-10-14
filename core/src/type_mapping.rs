@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Type Mapping
 //!
@@ -278,14 +277,11 @@ fn binary_schema() -> JsonSchema {
     }
 }
 
-/// Heuristic to confirm if a type node dealing with integers is actually u8.
-/// Used inside Vec processing because the recursive map returns generic "Integer".
+/// Checks via [`crate::openapi::parse::models::RustType`] whether `ty` represents `Vec<u8>`.
 fn is_u8_heuristic(ty: &ast::Type) -> bool {
-    // This is a rough check by looking at the text.
-    // map_ast_type is recursive, so when we are inside Vec<T>, 'ty' is 'Vec<u8>'.
-    // We want to check T.
     let text = ty.to_string();
-    text.contains("u8")
+    crate::openapi::parse::models::RustType::parse(&text)
+        == crate::openapi::parse::models::RustType::Bytes
 }
 
 #[cfg(test)]
@@ -403,5 +399,26 @@ mod tests {
         let res = mapper.map("&[u8]").expect("Failed to map");
         assert_eq!(res.type_, JsonType::String);
         assert_eq!(res.content_encoding.as_deref(), Some("base64"));
+
+        let res_slice_u8 = mapper.map("[u8]").expect("Failed to map [u8]");
+        assert_eq!(res_slice_u8.type_, JsonType::String);
+
+        let res_slice_i32 = mapper.map("[i32]").expect("Failed to map [i32]");
+        assert_eq!(format!("{}", res_slice_i32.type_), "array<integer>");
+
+        let res_date = mapper.map("NaiveDate").expect("NaiveDate");
+        assert_eq!(res_date.format.as_deref(), Some("date"));
+        let res_dt = mapper.map("NaiveDateTime").expect("NaiveDateTime");
+        assert_eq!(res_dt.format.as_deref(), Some("date-time"));
+        let res_custom = mapper.map("MyCustomModel").expect("MyCustomModel");
+        assert_eq!(format!("{}", res_custom.type_), "$ref:MyCustomModel");
+        assert_eq!(format!("{}", JsonType::String), "string");
+        assert_eq!(format!("{}", JsonType::Number), "number");
+        assert_eq!(format!("{}", JsonType::Boolean), "boolean");
+
+        assert!(mapper.map("").is_err());
+        assert!(mapper.map("Option").is_err());
+        assert!(mapper.map("Option<'a>").is_err());
+        assert!(mapper.map("(i32, String)").is_err());
     }
 }

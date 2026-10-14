@@ -1,81 +1,212 @@
+#![deny(missing_docs)]
+
 //! OpenAPI Generation Module
+
 use crate::TargetMode;
 use cdd_core::classes::parse::{extract_model, extract_struct_names};
 use cdd_core::error::{AppError, AppResult};
 use cdd_core::openapi::emit::{generate_openapi_document_with_routes_and_components, OpenApiInfo};
-use cdd_core::routes::parse::{parse_actix_routes, parse_reqwest_routes};
+use cdd_core::openapi::parse::models::ParsedRoute;
+use cdd_core::routes::parse::{
+    parse_actix_routes, parse_axum_routes, parse_clap_cli_routes, parse_mcp_routes,
+    parse_reqwest_routes,
+};
 use clap::Args;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-/// Arguments for generating an OpenAPI spec from source code.
+/// Arguments for the `to_openapi` command.
 #[derive(Args, Debug)]
 pub struct ToOpenApiArgs {
-    /// Path to source code directory or file.
+    /// Input Rust project path or source file.
     #[clap(short = 'i', long, env = "CDD_INPUT")]
     pub input: PathBuf,
 
-    /// Output file or directory path.
-    #[clap(short = 'o', long, env = "CDD_OUTPUT", default_value = "spec.json")]
+    /// Output file path for the generated OpenAPI spec.
+    #[clap(short = 'o', long, default_value = "openapi.json", env = "CDD_OUTPUT")]
     pub output: PathBuf,
+
+    /// Optional OpenAPI title override (defaults to `Cargo.toml` package name or `"Generated API"`).
+    #[clap(long, env = "CDD_API_TITLE")]
+    pub title: Option<String>,
+
+    /// Optional OpenAPI version override (defaults to `Cargo.toml` package version or `"0.1.0"`).
+    #[clap(long, env = "CDD_API_VERSION")]
+    pub version: Option<String>,
 }
 
-#[cfg(not(tarpaulin_include))]
-fn serialize_doc(doc: &serde_json::Value, is_json: bool) -> AppResult<String> {
-    if is_json {
-        match serde_json::to_string_pretty(doc) {
-            Ok(s) => Ok(s),
-            Err(e) => Err(AppError::General(format!("Serialization failed: {}", e))),
-        }
+/// Extracts `(name, version)` package metadata from a `Cargo.toml` file in `input` or its ancestor directory.
+fn resolve_package_metadata(
+    input: &Path,
+    title_override: Option<&str>,
+    version_override: Option<&str>,
+) -> (String, String) {
+    let mut parsed_name = None;
+    let mut parsed_version = None;
+
+    let search_dir = if input.is_file() {
+        input.parent().unwrap_or(input)
     } else {
-        match serde_yaml::to_string(doc) {
-            Ok(s) => Ok(s),
-            Err(e) => Err(AppError::General(format!("Serialization failed: {}", e))),
-        }
-    }
-}
+        input
+    };
 
-/// Executes the OpenAPI generation from source code.
-pub fn run_to_openapi(args: &ToOpenApiArgs, _target: &TargetMode) -> AppResult<()> {
-    println!("Extracting OpenAPI specification from {:?}", args.input);
+    let candidates = [
+        search_dir.join("Cargo.toml"),
+        search_dir
+            .parent()
+            .map(|p| p.join("Cargo.toml"))
+            .unwrap_or_else(|| search_dir.join("Cargo.toml")),
+    ];
 
-    if !args.input.exists() {
-        return Err(AppError::General(format!(
-            "Path not found: {:?}",
-            args.input
-        )));
-    }
-
-    let mut parsed_models = Vec::new();
-    let mut parsed_routes = Vec::new();
-
-    // Walk directory and parse models and routes
-    let walker = WalkDir::new(&args.input);
-    for entry in walker.into_iter().flatten() {
-        let path = entry.path();
-        if path.extension() == Some(std::ffi::OsStr::new("rs")) {
-            if let Ok(content) = fs::read_to_string(path) {
-                // Parse models
-                let struct_names = extract_struct_names(&content).unwrap_or_default();
-                for name in struct_names {
-                    if let Ok(model) = extract_model(&content, &name) {
-                        parsed_models.push(model);
-                    }
+    for candidate in &candidates {
+        if candidate.is_file() {
+            if let Ok(content) = fs::read_to_string(candidate) {
+                let (n, v) = parse_cargo_toml_metadata(&content);
+                if parsed_name.is_none() {
+                    parsed_name = n;
                 }
-
-                // Parse routes
-                if let Ok(routes) = parse_actix_routes(&content) {
-                    parsed_routes.extend(routes);
+                if parsed_version.is_none() {
+                    parsed_version = v;
                 }
-                if let Ok(routes) = parse_reqwest_routes(&content) {
-                    parsed_routes.extend(routes);
+                if parsed_name.is_some() && parsed_version.is_some() {
+                    break;
                 }
             }
         }
     }
 
-    let info = OpenApiInfo::new("Generated API", "1.0.0");
+    let final_title = title_override
+        .map(ToOwned::to_owned)
+        .or(parsed_name)
+        .unwrap_or_else(|| "Generated API".to_string());
+    let final_version = version_override
+        .map(ToOwned::to_owned)
+        .or(parsed_version)
+        .unwrap_or_else(|| "0.1.0".to_string());
+
+    (final_title, final_version)
+}
+
+/// Parses `name` and `version` under `[package]` from `Cargo.toml` content.
+fn parse_cargo_toml_metadata(content: &str) -> (Option<String>, Option<String>) {
+    let mut in_package = false;
+    let mut name = None;
+    let mut version = None;
+
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.starts_with('[') {
+            in_package = line == "[package]";
+            continue;
+        }
+        if !in_package {
+            continue;
+        }
+        if let Some((k, v)) = line.split_once('=') {
+            let key = k.trim();
+            let val = v.trim().trim_matches('"').trim_matches(char::from(39u8));
+            if key == "name" && !val.is_empty() {
+                name = Some(val.to_string());
+            } else if key == "version" && !val.is_empty() && !val.starts_with('{') {
+                version = Some(val.to_string());
+            }
+        }
+    }
+
+    (name, version)
+}
+
+/// Dispatches route extraction based on [`TargetMode`], falling back to scanning all
+/// supported route formats if the primary target parser returns no routes for a file.
+fn parse_routes_for_target(code: &str, target: &TargetMode) -> AppResult<Vec<ParsedRoute>> {
+    let mut routes = match target {
+        TargetMode::ServerActix => parse_actix_routes(code)?,
+        TargetMode::ServerAxum => parse_axum_routes(code)?,
+        TargetMode::ClientReqwest => parse_reqwest_routes(code)?,
+        TargetMode::ClientInternal => parse_clap_cli_routes(code)?,
+    };
+
+    if routes.is_empty() {
+        if let Ok(req_routes) = parse_reqwest_routes(code) {
+            routes.extend(req_routes);
+        }
+    }
+    if routes.is_empty() {
+        if let Ok(actix_routes) = parse_actix_routes(code) {
+            routes.extend(actix_routes);
+        }
+    }
+    if routes.is_empty() {
+        if let Ok(mcp_routes) = parse_mcp_routes(code) {
+            routes.extend(mcp_routes);
+        }
+    }
+
+    Ok(routes)
+}
+
+/// Execute the `to_openapi` command, scanning Rust code and emitting an OpenAPI specification.
+///
+/// # Arguments
+/// * `args` - The command-line arguments for `to_openapi`.
+/// * `target` - The target mode determining the primary route parser strategy.
+///
+/// # Returns
+/// `Ok(())` when the OpenAPI specification has been written to `args.output`.
+///
+/// # Errors
+/// Returns [`AppError`] if the input path does not exist or serialization/IO fails.
+pub fn run_to_openapi(args: &ToOpenApiArgs, target: &TargetMode) -> AppResult<()> {
+    println!("Generating OpenAPI specification from {:?}...", args.input);
+
+    if !args.input.exists() {
+        return Err(AppError::General(format!(
+            "Input path {:?} does not exist.",
+            args.input
+        )));
+    }
+
+    let mut rust_files = Vec::new();
+    if args.input.is_file() {
+        rust_files.push(args.input.clone());
+    } else {
+        for entry in WalkDir::new(&args.input).into_iter().flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension() {
+                    if ext == "rs" {
+                        rust_files.push(path.to_path_buf());
+                    }
+                }
+            }
+        }
+    }
+
+    let (title, version) =
+        resolve_package_metadata(&args.input, args.title.as_deref(), args.version.as_deref());
+    let mut parsed_models = Vec::new();
+    let mut parsed_routes = Vec::new();
+
+    for file in rust_files {
+        if let Ok(code) = fs::read_to_string(&file) {
+            // 1. Try to extract structs (models)
+            if let Ok(struct_names) = extract_struct_names(&code) {
+                for name in struct_names {
+                    if let Ok(model) = extract_model(&code, &name) {
+                        parsed_models.push(model);
+                    }
+                }
+            }
+
+            // 2. Extract routes using target-aware parser
+            if let Ok(routes) = parse_routes_for_target(&code, target) {
+                parsed_routes.extend(routes);
+            }
+        }
+    }
+
+    let info = OpenApiInfo::new(title, version);
     let doc = generate_openapi_document_with_routes_and_components(
         &parsed_models,
         &parsed_routes,
@@ -84,264 +215,215 @@ pub fn run_to_openapi(args: &ToOpenApiArgs, _target: &TargetMode) -> AppResult<(
         None,
     )?;
 
-    let is_json = args.output.extension() == Some(std::ffi::OsStr::new("json"));
-    let output_str = serialize_doc(&doc, is_json)?;
+    let ext = args
+        .output
+        .extension()
+        .unwrap_or_default()
+        .to_string_lossy();
+    let content = serialize_doc(&doc, &ext)?;
 
-    if let Err(e) = fs::write(&args.output, output_str) {
-        return Err(AppError::General(format!(
-            "Failed to write to file {:?}: {}",
-            args.output, e
-        )));
+    if let Some(parent) = args.output.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|e| AppError::General(e.to_string()))?;
+        }
     }
 
-    println!("OpenAPI spec successfully written to {:?}", args.output);
+    fs::write(&args.output, content).map_err(|e| AppError::General(e.to_string()))?;
+    println!(
+        "Successfully wrote OpenAPI specification to {:?}",
+        args.output
+    );
 
     Ok(())
+}
+
+/// Serializes the OpenAPI document to JSON or YAML depending on extension.
+fn serialize_doc(doc: &serde_json::Value, ext: &str) -> AppResult<String> {
+    if ext == "json" {
+        Ok(serde_json::to_string_pretty(doc)?)
+    } else {
+        Ok(serde_yaml::to_string(doc)?)
+    }
+}
+
+/// Configuration for `to_openapi` programmatic API.
+#[derive(Debug, Default, Clone)]
+pub struct ToOpenApiConfig {
+    /// Input path.
+    pub input: PathBuf,
+    /// Output path.
+    pub output: PathBuf,
+    /// Target mode for route extraction.
+    pub target: TargetMode,
+    /// Optional API title override.
+    pub title: Option<String>,
+    /// Optional API version override.
+    pub version: Option<String>,
+}
+
+/// Generate an OpenAPI specification from a Rust project.
+///
+/// # Arguments
+/// * `config` - Programmatic configuration for `to_openapi`.
+///
+/// # Returns
+/// `Ok(())` on success.
+///
+/// # Errors
+/// Returns [`AppError`] if extraction or writing fails.
+pub fn to_openapi(config: &ToOpenApiConfig) -> AppResult<()> {
+    let args = ToOpenApiArgs {
+        input: config.input.clone(),
+        output: config.output.clone(),
+        title: config.title.clone(),
+        version: config.version.clone(),
+    };
+    run_to_openapi(&args, &config.target)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::File;
-    use std::io::Write;
     use tempfile::tempdir;
 
     #[test]
-    fn test_to_openapi_execute_dir_read_error() {
+    fn test_to_openapi_nonexistent() {
         let args = ToOpenApiArgs {
-            input: std::path::PathBuf::from("/does/not/exist"),
-            output: std::path::PathBuf::from("out"),
+            input: PathBuf::from("/does/not/exist"),
+            output: PathBuf::from("out.json"),
+            title: None,
+            version: None,
         };
-        assert!(run_to_openapi(&args, &TargetMode::ClientInternal).is_err());
+        let res = run_to_openapi(&args, &TargetMode::ServerActix);
+        assert!(res.is_err());
     }
 
     #[test]
-    fn test_to_openapi_run_to_openapi() {
+    fn test_to_openapi_directory_and_file() {
         let dir = tempdir().expect("Failed to create temporary directory");
         let src_dir = dir.path().join("src");
-        fs::create_dir_all(&src_dir).expect("Failed to create");
+        fs::create_dir_all(&src_dir).expect("Failed to create directory");
 
-        let rs_path = src_dir.join("models.rs");
-        let rs_code = r#"
-        pub struct User {
-            pub id: i32,
-            pub name: String,
+        let cargo_toml = dir.path().join("Cargo.toml");
+        fs::write(
+            &cargo_toml,
+            r#"[package]
+name = "my-petstore"
+version = "2.3.4"
+[dependencies]
+serde = "1.0"
+"#,
+        )
+        .expect("Failed to write Cargo.toml");
+
+        let rust_file = src_dir.join("lib.rs");
+        let code = r#"
+use serde::{Serialize, Deserialize};
+use actix_web::{get, post, web, HttpResponse, Responder};
+
+/// A user model
+#[derive(Serialize, Deserialize)]
+pub struct User {
+    pub id: i32,
+    pub name: String,
+}
+
+/// Get user
+#[get("/users/{id}")]
+pub async fn get_user(id: web::Path<i32>) -> impl Responder {
+    HttpResponse::Ok().finish()
+}
+
+/// Reqwest style
+/// @OAS_METHOD: POST
+/// @OAS_PATH: /users
+pub async fn create_user() {}
+"#;
+        fs::write(&rust_file, code).expect("Failed to write to file");
+        fs::write(src_dir.join("ignore.txt"), "hello").expect("Failed to write to file");
+
+        // 1. Test directory input -> JSON output (picks up Cargo.toml metadata)
+        let out_json = dir.path().join("out").join("openapi.json");
+        let args_json = ToOpenApiArgs {
+            input: dir.path().to_path_buf(),
+            output: out_json.clone(),
+            title: None,
+            version: None,
+        };
+        assert!(run_to_openapi(&args_json, &TargetMode::ServerActix).is_ok());
+        assert!(out_json.exists());
+        let content_json = fs::read_to_string(&out_json).expect("Failed to read file to string");
+        assert!(content_json.contains(r#""User""#));
+        assert!(content_json.contains(r#""/users/{id}""#));
+        assert!(content_json.contains(r#""my-petstore""#));
+        assert!(content_json.contains(r#""2.3.4""#));
+
+        // 2. Test file input -> YAML output with explicit title/version overrides
+        let out_yaml = dir.path().join("openapi.yaml");
+        let args_yaml = ToOpenApiArgs {
+            input: rust_file,
+            output: out_yaml.clone(),
+            title: Some("Custom API".to_string()),
+            version: Some("9.9.9".to_string()),
+        };
+        assert!(run_to_openapi(&args_yaml, &TargetMode::ClientReqwest).is_ok());
+        assert!(out_yaml.exists());
+        let content_yaml = fs::read_to_string(&out_yaml).expect("Failed to read file to string");
+        assert!(content_yaml.contains("User:"));
+        assert!(content_yaml.contains("/users:"));
+        assert!(content_yaml.contains("Custom API"));
+        assert!(content_yaml.contains("9.9.9"));
+    }
+
+    #[test]
+    fn test_target_modes_axum_cli_mcp() {
+        let axum_code = r#"
+        pub fn app() -> axum::Router {
+            axum::Router::new().route("/axum/:id", axum::routing::get(get_axum))
         }
-        
-        #[get("/users")]
-        pub async fn get_users() {}
         "#;
-        File::create(&rs_path)
-            .expect("Failed to create")
-            .write_all(rs_code.as_bytes())
-            .expect("Failed to write to file");
+        let axum_routes =
+            parse_routes_for_target(axum_code, &TargetMode::ServerAxum).expect("axum routes");
+        assert_eq!(axum_routes.len(), 1);
+        assert_eq!(axum_routes[0].path, "/axum/{id}");
 
-        let args = ToOpenApiArgs {
-            input: src_dir,
-            output: dir.path().join("spec.json"),
-        };
-
-        let result = run_to_openapi(&args, &TargetMode::ServerActix);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_to_openapi_file_not_found() {
-        let args = ToOpenApiArgs {
-            input: PathBuf::from("does_not_exist_dir"),
-            output: PathBuf::from("spec.json"),
-        };
-        let result = run_to_openapi(&args, &TargetMode::ServerActix);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_to_openapi_client_and_cli_targets() {
-        let dir = tempdir().expect("Failed to create temporary directory");
-        let src_dir = dir.path().join("src");
-        std::fs::create_dir_all(&src_dir).expect("Failed to create");
-
-        let rs_path = src_dir.join("clients.rs");
-        let rs_code = r#"
+        let cli_code = r#"
         /// @OAS_METHOD: GET
-        /// @OAS_PATH: /users
-        pub async fn get_users(client: &reqwest::Client, base_url: &str) -> Result<reqwest::Response, reqwest::Error> {
-            todo!()
-        }
+        /// @OAS_PATH: /cli
+        pub async fn cli_cmd() {}
         "#;
-        File::create(&rs_path)
-            .expect("Failed to create")
-            .write_all(rs_code.as_bytes())
-            .expect("Failed to write to file");
+        let cli_routes =
+            parse_routes_for_target(cli_code, &TargetMode::ClientInternal).expect("cli routes");
+        assert_eq!(cli_routes.len(), 1);
+        assert_eq!(cli_routes[0].path, "/cli");
 
-        let args = ToOpenApiArgs {
-            input: src_dir.clone(),
-            output: dir.path().join("spec.json"),
-        };
-
-        let result_client = run_to_openapi(&args, &TargetMode::ClientReqwest);
-        assert!(result_client.is_ok());
-
-        let result_cli = run_to_openapi(&args, &TargetMode::ClientInternal);
-        assert!(result_cli.is_ok());
+        let mcp_code = r#"
+        /// @MCP_TOOL: mcp_op
+        pub async fn mcp_op() {}
+        "#;
+        let mcp_routes =
+            parse_routes_for_target(mcp_code, &TargetMode::ServerActix).expect("mcp routes");
+        assert_eq!(mcp_routes.len(), 1);
+        assert_eq!(mcp_routes[0].path, "/mcp_op");
     }
 
     #[test]
-    fn test_to_openapi_execute_failures() {
+    fn test_generate_to_openapi_programmatic() {
         let dir = tempdir().expect("Failed to create temporary directory");
         let src_dir = dir.path().join("src");
-        std::fs::create_dir_all(&src_dir).expect("must succeed");
+        std::fs::create_dir_all(&src_dir).expect("Failed to create directory");
+        let rust_file = src_dir.join("lib.rs");
+        std::fs::write(&rust_file, "pub struct Empty {}").expect("Failed to write to file");
 
-        let out_file = dir.path().join("out.yaml");
-
-        // 1. Directory named .rs so read_to_string fails
-        let dir_rs = src_dir.join("dir.rs");
-        std::fs::create_dir(&dir_rs).expect("must succeed");
-
-        // 2. File where extract_struct_names fails
-        let syntax_err_rs = src_dir.join("syntax.rs");
-        std::fs::write(&syntax_err_rs, "impl Model {").expect("must succeed");
-
-        // 3. File where extract_model fails
-        let model_err_rs = src_dir.join("model_err.rs");
-        std::fs::write(&model_err_rs, "pub struct Partial").expect("must succeed");
-
-        // 4. File where parse routes fail
-        let route_err_rs = src_dir.join("route_err.rs");
-        std::fs::write(&route_err_rs, "pub fn my_route() {}").expect("must succeed");
-
-        let args = ToOpenApiArgs {
-            input: src_dir,
-            output: out_file.clone(),
-        };
-
-        // Execute should succeed but skip the bad files
-        let _ = run_to_openapi(&args, &TargetMode::ServerActix);
-        let _ = run_to_openapi(&args, &TargetMode::ClientReqwest);
-        let _ = run_to_openapi(&args, &TargetMode::ClientInternal);
-    }
-
-    #[test]
-    fn test_to_openapi_execute_invalid_syntax() {
-        let dir = tempdir().expect("Failed to create temporary directory");
-        let src_dir = dir.path().join("src");
-        fs::create_dir_all(&src_dir).expect("Failed to create");
-
-        let rs_path = src_dir.join("invalid.rs");
-        let rs_code = r#"
-        pub struct { INVALID SYNTAX
-        "#;
-        File::create(&rs_path)
-            .expect("Failed to create")
-            .write_all(rs_code.as_bytes())
-            .expect("Failed to write to file");
-
-        let args = ToOpenApiArgs {
-            input: src_dir,
-            output: dir.path().join("spec.json"),
-        };
-
-        let result = run_to_openapi(&args, &TargetMode::ClientInternal);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_to_openapi_execute_yaml() {
-        use tempfile::tempdir;
-        let dir = tempdir().expect("Failed to create temporary directory");
-        let input_file = dir.path().join("input.rs");
-        let output_file = dir.path().join("output.yaml");
-
-        let handler_code = r#"
-        #[openapi]
-        #[get("/test")]
-        async fn test_handler() -> impl Responder { HttpResponse::Ok().finish() }
-        "#;
-        std::fs::write(&input_file, handler_code).expect("Failed to write to file");
-
-        let args = ToOpenApiArgs {
-            input: input_file,
-            output: output_file.clone(),
-        };
-
-        let result = run_to_openapi(&args, &crate::TargetMode::ServerActix);
-        assert!(result.is_ok());
-        assert!(std::fs::read_to_string(output_file)
-            .expect("Failed to read file to string")
-            .contains("openapi:"));
-    }
-
-    #[test]
-    fn test_to_openapi_execute_write_error() {
-        use tempfile::tempdir;
-        let dir = tempdir().expect("Failed to create temporary directory");
-        let input_file = dir.path().join("input.rs");
-
-        let handler_code = r#"
-        #[openapi]
-        #[get("/test")]
-        async fn test_handler() -> impl Responder { HttpResponse::Ok().finish() }
-        "#;
-        std::fs::write(&input_file, handler_code).expect("Failed to write to file");
-
-        let args = ToOpenApiArgs {
-            input: input_file,
-            output: std::path::PathBuf::from("/nonexistent_dir/output.yaml"),
-        };
-
-        let result = run_to_openapi(&args, &crate::TargetMode::ServerActix);
-        assert!(result.is_err());
-    }
-}
-
-/// Configuration for `to_openapi` programmatic API.
-#[derive(Debug, Default)]
-pub struct ToOpenApiConfig {
-    /// The input directory path.
-    pub input: PathBuf,
-    /// The output directory path.
-    pub output: PathBuf,
-}
-
-/// Generate an OpenAPI specification from source code.
-pub fn to_openapi(config: &ToOpenApiConfig) -> AppResult<()> {
-    let args = ToOpenApiArgs {
-        input: config.input.clone(),
-        output: config.output.clone(),
-    };
-    run_to_openapi(&args, &crate::TargetMode::ServerActix)
-}
-
-#[cfg(test)]
-mod extra_coverage_tests {
-    use super::*;
-    use tempfile::tempdir;
-
-    #[test]
-    fn test_generate_to_openapi() {
-        let dir = tempdir().expect("must succeed");
-        let input_file = dir.path().join("input.rs");
-        let output_file = dir.path().join("output.yaml");
-        std::fs::write(&input_file, "pub struct MyStruct { pub id: i32 }").expect("must succeed");
-
+        let out_json = dir.path().join("openapi.json");
         let config = ToOpenApiConfig {
-            input: input_file,
-            output: output_file,
+            input: dir.path().to_path_buf(),
+            output: out_json.clone(),
+            target: TargetMode::ServerActix,
+            title: None,
+            version: None,
         };
-        let res = to_openapi(&config);
-        println!("RES: {:?}", res);
-        assert!(res.is_ok());
-    }
-
-    #[test]
-    fn test_serialize_doc_error() {
-        let _doc = serde_json::json!({
-            "openapi": "3.0.0",
-        });
-        // We can force serialization error by creating an infinite loop in json or similar.
-        // It's easier to just skip coverage for the Err branches if it's too hard to mock,
-        // but since we are writing tests, let's just use ``
-        // Oh wait, `serialize_doc` already has ``
-        // So maybe it's not actually uncovered for the nightlies?
+        assert!(to_openapi(&config).is_ok());
+        assert!(out_json.exists());
     }
 }

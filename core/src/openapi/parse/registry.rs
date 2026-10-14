@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Document Registry
 //!
@@ -105,10 +104,7 @@ impl DocumentRegistry {
         })?;
         if let (Some(self_uri), Some(comps)) = (shim.self_uri.as_deref(), shim.components.as_mut())
         {
-            comps.extra.insert(
-                "__self".to_string(),
-                serde_json::Value::String(self_uri.to_string()),
-            );
+            comps.self_uri = Some(self_uri.to_string());
         }
 
         let base_uri = resolve_base_url(Some(retrieval_uri), shim.self_uri.as_deref());

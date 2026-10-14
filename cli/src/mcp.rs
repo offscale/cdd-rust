@@ -1,599 +1,785 @@
-//! MCP Server Implementation
-use cdd_core::error::AppResult;
+#![deny(missing_docs)]
+
+//! MCP Server Implementation & Unified Tool Dispatch
+//!
+//! Provides the Model Context Protocol (MCP) STDIO server using the strongly typed
+//! models in `cdd_core::mcp::models` as well as a unified tool registry and execution
+//! dispatcher shared with `serve_json_rpc`.
+
+use crate::from_openapi::{
+    from_openapi, FromOpenApiConfig, FromOpenApiSubcommand, ServerFramework,
+};
+use crate::sync::{sync, SyncConfig};
+use crate::to_docs_json::{generate_docs_json_str, to_docs_json, ToDocsJsonArgs, ToDocsJsonConfig};
+use crate::to_openapi::{to_openapi, ToOpenApiConfig};
+use crate::TargetMode;
+use cdd_core::error::{AppError, AppResult};
+use cdd_core::mcp::models::{
+    CallToolRequestParams, CallToolResult, CallToolResultContent, EmptyResult, Implementation,
+    InitializeResult, JsonRpcError, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse,
+    ListToolsResult, RequestId, ServerCapabilities, ServerToolsCapability, TextContent, Tool,
+    ToolInputSchema,
+};
 use clap::Args;
+use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
+use std::path::PathBuf;
+use std::str::FromStr;
 
 /// Arguments for the MCP server command.
 #[derive(Args, Debug, Clone)]
 pub struct McpArgs {}
 
-/// Start the MCP STDIO server.
-#[cfg(not(tarpaulin_include))]
-pub fn run_mcp_server(_args: &McpArgs) -> AppResult<()> {
-    let stdin = io::stdin();
-    let stdout = io::stdout();
-    let mut handle = stdout.lock();
-    serve_mcp_inner(&mut stdin.lock(), &mut handle)
+/// Executes the `mcp` command, running an MCP server over STDIO.
+///
+/// # Arguments
+/// * `args` - The command-line arguments for the `mcp` command.
+///
+/// # Returns
+/// `Ok(())` when the STDIO loop terminates cleanly.
+///
+/// # Errors
+/// Returns [`AppError`] if writing to stdout fails.
+pub fn run_mcp(args: &McpArgs) -> AppResult<()> {
+    serve_mcp(args)
 }
 
-/// Inner server loop decoupled from standard I/O for testing.
-pub fn serve_mcp_inner(stdin: &mut dyn BufRead, stdout: &mut dyn Write) -> AppResult<()> {
-    for line_result in stdin.lines() {
-        let line = match line_result {
-            Ok(line) => line,
-            Err(_) => break, // EOF or error
-        };
+/// Alias for [`run_mcp`] used by CLI command dispatch.
+///
+/// # Arguments
+/// * `args` - The command-line arguments for the `mcp` command.
+///
+/// # Returns
+/// `Ok(())` when the STDIO loop terminates cleanly.
+///
+/// # Errors
+/// Returns [`AppError`] if writing to stdout fails.
+pub fn run_mcp_server(args: &McpArgs) -> AppResult<()> {
+    run_mcp(args)
+}
 
-        if line.trim().is_empty() {
+/// Programmatic entry point for the MCP server.
+///
+/// # Arguments
+/// * `_args` - Configuration arguments for the MCP server.
+///
+/// # Returns
+/// `Ok(())` when the STDIO loop terminates cleanly.
+///
+/// # Errors
+/// Returns [`AppError`] if writing to stdout fails.
+pub fn serve_mcp(_args: &McpArgs) -> AppResult<()> {
+    let stdin = io::stdin();
+    let mut stdout = io::stdout();
+    let mut handle = stdin.lock();
+    serve_mcp_inner(&mut handle, &mut stdout)
+}
+
+/// Inner loop for the MCP server, generic over `BufRead` and `Write` for testability.
+///
+/// # Arguments
+/// * `reader` - Input stream carrying newline-delimited JSON-RPC messages.
+/// * `writer` - Output stream for writing JSON-RPC responses.
+///
+/// # Returns
+/// `Ok(())` when EOF is reached or a read error occurs.
+///
+/// # Errors
+/// Returns [`AppError`] if writing or flushing `writer` fails.
+pub fn serve_mcp_inner<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> AppResult<()> {
+    let mut line = String::new();
+
+    loop {
+        line.clear();
+        let bytes_read = match reader.read_line(&mut line) {
+            Ok(b) => b,
+            Err(_) => break,
+        };
+        if bytes_read == 0 {
+            break;
+        }
+
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
             continue;
         }
 
-        // Just parse the message generically to keep the connection alive
-        // and acknowledge initialized.
-        let mut response = serde_json::json!({});
-        if let Ok(req) = serde_json::from_str::<serde_json::Value>(&line) {
-            let id = req.get("id").cloned();
-            let method = req.get("method").and_then(|m| m.as_str());
-
-            if method == Some("initialize") {
-                response = serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {
-                            "tools": {}
-                        },
-                        "serverInfo": {
-                            "name": "cdd-rust",
-                            "version": "0.0.1"
-                        }
-                    }
-                });
-            } else if method == Some("notifications/initialized")
-                || method == Some("notifications/progress")
-                || method == Some("notifications/cancelled")
-            {
-                // Ignore
-                continue;
-            } else if method == Some("ping") {
-                response = serde_json::json!({
-                   "jsonrpc": "2.0",
-                   "id": id,
-                   "result": {}
-                });
-            } else if method == Some("prompts/list") {
-                response = serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "prompts": []
-                    }
-                });
-            } else if method == Some("prompts/get") {
-                response = serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "description": "Prompt not found",
-                        "messages": []
-                    }
-                });
-            } else if method == Some("resources/list") {
-                response = serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "resources": [
-                            {
-                                "uri": "ast://internal/types",
-                                "name": "Internal AST Types",
-                                "mimeType": "application/json",
-                                "description": "Exposes the internal AST structures as MCP resources"
-                            }
-                        ]
-                    }
-                });
-            } else if method == Some("resources/read") {
-                let mut contents = vec![];
-                if let Some(params) = req.get("params") {
-                    if let Some(uri) = params.get("uri").and_then(|u| u.as_str()) {
-                        if uri == "ast://internal/types" {
-                            contents.push(serde_json::json!({
-                                "uri": uri,
-                                "mimeType": "application/json",
-                                "text": "{ \"type\": \"ast_mock\" }"
-                            }));
-                        }
-                    }
-                }
-
-                response = serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "contents": contents
-                    }
-                });
-            } else if method == Some("resources/templates/list") {
-                response = serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "resourceTemplates": []
-                    }
-                });
-            } else if method == Some("resources/subscribe")
-                || method == Some("resources/unsubscribe")
-                || method == Some("logging/setLevel")
-            {
-                response = serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {}
-                });
-            } else if method == Some("completion/complete") {
-                response = serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "completion": {
-                            "values": [],
-                            "hasMore": false,
-                            "total": 0
-                        }
-                    }
-                });
-            } else if method == Some("tools/list") {
-                response = serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "tools": [
-                            {
-                                "name": "cdd_generate",
-                                "description": "Generate code from an OpenAPI specification",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "input": { "type": "string" },
-                                        "output": { "type": "string" },
-                                        "framework": { "type": "string", "enum": ["actix", "axum", "reqwest", "cli"] }
-                                    },
-                                    "required": ["input", "output", "framework"]
-                                }
-                            },
-                            {
-                                "name": "cdd_sync",
-                                "description": "Synchronize DB schema to Rust models and OpenAPI-ready structs",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "db_path": { "type": "string" },
-                                        "out_models_dir": { "type": "string" }
-                                    },
-                                    "required": ["db_path", "out_models_dir"]
-                                }
-                            },
-                            {
-                                "name": "cdd_test_gen",
-                                "description": "Generates integration tests based on OpenAPI contracts",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "input": { "type": "string" },
-                                        "output": { "type": "string" },
-                                        "target": { "type": "string", "enum": ["server-actix", "server-axum", "client-reqwest", "client-internal"] }
-                                    },
-                                    "required": ["input", "output", "target"]
-                                }
-                            },
-                            {
-                                "name": "cdd_scaffold",
-                                "description": "Scaffolds handler functions from OpenAPI Routes",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "input": { "type": "string" },
-                                        "output": { "type": "string" },
-                                        "target": { "type": "string", "enum": ["server-actix", "server-axum", "client-reqwest", "client-internal"] }
-                                    },
-                                    "required": ["input", "output", "target"]
-                                }
-                            }
-                        ]
-                    }
-                });
-            } else if method == Some("tools/call") {
-                let mut content_text = "Call successful.".to_string();
-                if let Some(params) = req.get("params") {
-                    if let Some(name) = params.get("name").and_then(|n| n.as_str()) {
-                        if name == "cdd_generate" {
-                            if let Some(args) = params.get("arguments") {
-                                let input = args.get("input").and_then(|v| v.as_str());
-                                let output = args.get("output").and_then(|v| v.as_str());
-                                let framework = args.get("framework").and_then(|v| v.as_str());
-
-                                if let (Some(i), Some(o), Some(f)) = (input, output, framework) {
-                                    use crate::from_openapi::{
-                                        from_openapi, FromOpenApiConfig, ServerFramework,
-                                    };
-                                    use std::path::PathBuf;
-
-                                    let mut config = FromOpenApiConfig {
-                                        input: Some(PathBuf::from(i)),
-                                        output_dir: Some(PathBuf::from(o)),
-                                        no_installable_package: true,
-                                        no_github_actions: true,
-                                        ..Default::default()
-                                    };
-
-                                    match f {
-                                        "actix" => {
-                                            config.subcommand = "to_server".to_string();
-                                            config.framework = ServerFramework::ActixWeb;
-                                        }
-                                        "axum" => {
-                                            config.subcommand = "to_server".to_string();
-                                            config.framework = ServerFramework::Axum;
-                                        }
-                                        "reqwest" => {
-                                            config.subcommand = "to_sdk".to_string();
-                                        }
-                                        "cli" => {
-                                            config.subcommand = "to_sdk_cli".to_string();
-                                        }
-                                        _ => {
-                                            config.subcommand = "to_server".to_string();
-                                        }
-                                    }
-
-                                    if i == "success.yaml" {
-                                        content_text = "Generation successful.".to_string();
-                                    } else if let Err(e) = from_openapi(&config) {
-                                        content_text = format!("Generation failed: {}", e);
-                                    } else {
-                                        #[cfg(not(tarpaulin_include))]
-                                        {
-                                            content_text = "Generation successful.".to_string();
-                                        }
-                                    }
-                                }
-                            }
-                        } else if name == "cdd_schema" {
-                            if let Some(args) = params.get("arguments") {
-                                let input = args.get("input").and_then(|v| v.as_str());
-                                let output = args.get("output").and_then(|v| v.as_str());
-
-                                if let Some(i) = input {
-                                    use crate::to_docs_json::{to_docs_json, ToDocsJsonConfig};
-
-                                    let config = ToDocsJsonConfig {
-                                        input: i.to_string(),
-                                        output: output.map(|s| s.to_string()),
-                                        no_imports: false,
-                                        no_wrapping: false,
-                                    };
-
-                                    if i == "success.yaml" {
-                                        content_text = "Schema successful.".to_string();
-                                    } else if let Err(e) = to_docs_json(&config) {
-                                        content_text = format!("Schema failed: {}", e);
-                                    } else {
-                                        #[cfg(not(tarpaulin_include))]
-                                        {
-                                            content_text = "Schema successful.".to_string();
-                                        }
-                                    }
-                                }
-                            }
-                        } else if name == "cdd_sync" {
-                            if let Some(args) = params.get("arguments") {
-                                let db_path = args.get("db_path").and_then(|v| v.as_str());
-                                let out_models_dir =
-                                    args.get("out_models_dir").and_then(|v| v.as_str());
-
-                                if let (Some(db), Some(out)) = (db_path, out_models_dir) {
-                                    use crate::sync::{SyncArgs, SyncTruth};
-                                    use std::path::PathBuf;
-                                    let sync_args = SyncArgs {
-                                        truth: SyncTruth::Db,
-                                        input: PathBuf::from(db),
-                                        output: PathBuf::from(out),
-                                        no_gen: false,
-                                        force_type: vec![],
-                                    };
-
-                                    let mapper = crate::generator::DieselMapper;
-                                    if db == "success.sqlite" {
-                                        content_text = "Sync successful.".to_string();
-                                    } else if let Err(e) =
-                                        crate::sync::run_sync(&sync_args, &mapper)
-                                    {
-                                        content_text = format!("Sync failed: {}", e);
-                                    } else {
-                                        #[cfg(not(tarpaulin_include))]
-                                        {
-                                            content_text = "Sync successful.".to_string();
-                                        }
-                                    }
-                                }
-                            }
-                        } else if name == "cdd_test_gen" {
-                            if let Some(args) = params.get("arguments") {
-                                let input = args.get("input").and_then(|v| v.as_str());
-                                let output = args.get("output").and_then(|v| v.as_str());
-                                let target = args.get("target").and_then(|v| v.as_str());
-
-                                if let (Some(i), Some(o), Some(t)) = (input, output, target) {
-                                    use crate::test_gen::TestGenArgs;
-                                    use std::path::PathBuf;
-                                    let test_args = TestGenArgs {
-                                        openapi_path: PathBuf::from(i),
-                                        output_path: PathBuf::from(o),
-                                        app_factory: "crate::app".to_string(), // Dummy value for mcp
-                                    };
-
-                                    let target_mode = match t {
-                                        "server-axum" => crate::TargetMode::ServerAxum,
-                                        "client-reqwest" => crate::TargetMode::ClientReqwest,
-                                        "client-internal" => crate::TargetMode::ClientInternal,
-                                        _ => crate::TargetMode::ServerActix,
-                                    };
-
-                                    if i == "success.yaml" {
-                                        content_text = "TestGen successful.".to_string();
-                                    } else {
-                                        let res = match target_mode {
-                                            crate::TargetMode::ServerActix => {
-                                                crate::test_gen::run_test_gen(
-                                                    &test_args,
-                                                    &cdd_core::strategies::ActixStrategy,
-                                                )
-                                            }
-                                            crate::TargetMode::ServerAxum => {
-                                                crate::test_gen::run_test_gen(
-                                                    &test_args,
-                                                    &cdd_core::strategies::AxumStrategy,
-                                                )
-                                            }
-                                            crate::TargetMode::ClientReqwest => {
-                                                crate::test_gen::run_test_gen(
-                                                    &test_args,
-                                                    &cdd_core::strategies::ReqwestStrategy,
-                                                )
-                                            }
-                                            crate::TargetMode::ClientInternal => {
-                                                crate::test_gen::run_test_gen(
-                                                    &test_args,
-                                                    &cdd_core::strategies::ClapCliStrategy,
-                                                )
-                                            }
-                                        };
-
-                                        if let Err(e) = res {
-                                            content_text = format!("TestGen failed: {}", e);
-                                        } else {
-                                            #[cfg(not(tarpaulin_include))]
-                                            {
-                                                content_text = "TestGen successful.".to_string();
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        } else if name == "cdd_scaffold" {
-                            if let Some(args) = params.get("arguments") {
-                                let input = args.get("input").and_then(|v| v.as_str());
-                                let output = args.get("output").and_then(|v| v.as_str());
-                                let target = args.get("target").and_then(|v| v.as_str());
-
-                                if let (Some(i), Some(o), Some(t)) = (input, output, target) {
-                                    use crate::scaffold::ScaffoldArgs;
-                                    use std::path::PathBuf;
-                                    let scaffold_args = ScaffoldArgs {
-                                        openapi_path: PathBuf::from(i),
-                                        output_dir: PathBuf::from(o),
-                                        route_config_path: None,
-                                        force: false,
-                                    };
-
-                                    let target_mode = match t {
-                                        "server-axum" => crate::TargetMode::ServerAxum,
-                                        "client-reqwest" => crate::TargetMode::ClientReqwest,
-                                        "client-internal" => crate::TargetMode::ClientInternal,
-                                        _ => crate::TargetMode::ServerActix,
-                                    };
-
-                                    if i == "success.yaml" {
-                                        content_text = "Scaffold successful.".to_string();
-                                    } else {
-                                        let res = match target_mode {
-                                            crate::TargetMode::ServerActix => {
-                                                crate::scaffold::run_scaffold(
-                                                    &scaffold_args,
-                                                    &cdd_core::strategies::ActixStrategy,
-                                                )
-                                            }
-                                            crate::TargetMode::ServerAxum => {
-                                                crate::scaffold::run_scaffold(
-                                                    &scaffold_args,
-                                                    &cdd_core::strategies::AxumStrategy,
-                                                )
-                                            }
-                                            crate::TargetMode::ClientReqwest => {
-                                                crate::scaffold::run_scaffold(
-                                                    &scaffold_args,
-                                                    &cdd_core::strategies::ReqwestStrategy,
-                                                )
-                                            }
-                                            crate::TargetMode::ClientInternal => {
-                                                crate::scaffold::run_scaffold(
-                                                    &scaffold_args,
-                                                    &cdd_core::strategies::ClapCliStrategy,
-                                                )
-                                            }
-                                        };
-
-                                        if let Err(e) = res {
-                                            content_text = format!("Scaffold failed: {}", e);
-                                        } else {
-                                            #[cfg(not(tarpaulin_include))]
-                                            {
-                                                content_text = "Scaffold successful.".to_string();
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                response = serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": content_text
-                            }
-                        ]
-                    }
-                });
-            } else if let Some(id_val) = id {
-                // Unknown method with ID -> method not found
-                response = serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": id_val,
-                    "error": {
-                        "code": -32601,
-                        "message": "Method not found"
-                    }
-                });
-            } else {
-                // Unknown notification
-                continue;
-            }
-
-            if let Ok(res_str) = serde_json::to_string(&response) {
-                let _ = writeln!(stdout, "{}", res_str);
-                let _ = stdout.flush();
-            }
+        if let Some(resp_str) = handle_request(trimmed) {
+            writeln!(writer, "{}", resp_str)?;
+            writer.flush()?;
         }
     }
 
     Ok(())
 }
 
+/// Returns the canonical list of strongly typed MCP [`Tool`] definitions supported by `cdd-cli`.
+///
+/// # Returns
+/// A vector of [`Tool`] schemas for `from_openapi`, `to_openapi`, `to_docs_json`, and `sync`.
+pub fn supported_tools() -> Vec<Tool> {
+    vec![
+        Tool {
+            name: "from_openapi".to_string(),
+            description: Some(
+                "Generate Rust code (SDK, CLI, or Server) from an OpenAPI specification"
+                    .to_string(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".to_string(),
+                properties: Some(json!({
+                    "subcommand": {
+                        "type": "string",
+                        "enum": ["to_sdk", "to_sdk_cli", "to_server"],
+                        "description": "Generation target"
+                    },
+                    "input": { "type": "string", "description": "Input OpenAPI spec path or URL" },
+                    "input_dir": { "type": "string", "description": "Input directory containing specs" },
+                    "output": { "type": "string", "description": "Output directory path" },
+                    "framework": { "type": "string", "enum": ["actix-web", "axum"], "description": "Server framework" },
+                    "no_github_actions": { "type": "boolean" },
+                    "no_installable_package": { "type": "boolean" }
+                })),
+                required: None,
+            },
+        },
+        Tool {
+            name: "to_openapi".to_string(),
+            description: Some(
+                "Generate an OpenAPI specification from existing Rust source code".to_string(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".to_string(),
+                properties: Some(json!({
+                    "input": { "type": "string", "description": "Input Rust file or directory" },
+                    "output": { "type": "string", "description": "Output OpenAPI file path" }
+                })),
+                required: Some(vec!["input".to_string()]),
+            },
+        },
+        Tool {
+            name: "to_docs_json".to_string(),
+            description: Some(
+                "Generate documentation JSON snippets from an OpenAPI specification".to_string(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".to_string(),
+                properties: Some(json!({
+                    "input": { "type": "string", "description": "Input OpenAPI file path or URL" },
+                    "output": { "type": "string", "description": "Optional output file path" },
+                    "no_imports": { "type": "boolean" },
+                    "no_wrapping": { "type": "boolean" }
+                })),
+                required: Some(vec!["input".to_string()]),
+            },
+        },
+        Tool {
+            name: "sync".to_string(),
+            description: Some("Synchronize OpenAPI specification and Rust code".to_string()),
+            input_schema: ToolInputSchema {
+                schema_type: "object".to_string(),
+                properties: Some(json!({
+                    "dir": { "type": "string", "description": "Project directory to sync" }
+                })),
+                required: Some(vec!["dir".to_string()]),
+            },
+        },
+    ]
+}
+
+/// Dispatches a CLI tool command by name and JSON arguments, returning a human-readable
+/// or JSON payload string. Shared between MCP `tools/call` and `serve_json_rpc`.
+///
+/// # Arguments
+/// * `tool_name` - Name of the tool (`"from_openapi"`, `"to_openapi"`, `"to_docs_json"`, `"sync"`).
+/// * `args` - JSON object containing the tool parameters.
+/// * `default_subcommand` - Fallback subcommand for `from_openapi` when `subcommand` is omitted.
+///
+/// # Returns
+/// A success message or generated JSON output string.
+///
+/// # Errors
+/// Returns [`AppError`] if required arguments are missing, invalid, or execution fails.
+pub fn dispatch_tool_command(
+    tool_name: &str,
+    args: &Value,
+    default_subcommand: Option<FromOpenApiSubcommand>,
+) -> AppResult<String> {
+    match tool_name {
+        "from_openapi" | "to_sdk" | "to_sdk_cli" | "to_server" => {
+            let subcommand = if let Some(sub_str) = args.get("subcommand").and_then(Value::as_str) {
+                FromOpenApiSubcommand::from_str(sub_str)?
+            } else if matches!(tool_name, "to_sdk" | "to_sdk_cli" | "to_server") {
+                FromOpenApiSubcommand::from_str(tool_name)?
+            } else {
+                default_subcommand.unwrap_or(FromOpenApiSubcommand::ToSdk)
+            };
+
+            let input = args.get("input").and_then(Value::as_str).map(PathBuf::from);
+            let input_dir = args
+                .get("input_dir")
+                .and_then(Value::as_str)
+                .map(PathBuf::from);
+            let output_dir = args
+                .get("output")
+                .or_else(|| args.get("output_dir"))
+                .and_then(Value::as_str)
+                .map(PathBuf::from);
+            let no_github_actions = args
+                .get("no_github_actions")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let no_installable_package = args
+                .get("no_installable_package")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let tests = args.get("tests").and_then(Value::as_bool).unwrap_or(false);
+            let mcp = args.get("mcp").and_then(Value::as_bool).unwrap_or(false);
+            let framework_str = args
+                .get("framework")
+                .and_then(Value::as_str)
+                .unwrap_or("actix-web");
+
+            let framework = match framework_str {
+                "axum" => ServerFramework::Axum,
+                _ => ServerFramework::ActixWeb,
+            };
+
+            let config = FromOpenApiConfig {
+                subcommand,
+                input,
+                input_dir,
+                output_dir,
+                no_github_actions,
+                no_installable_package,
+                tests,
+                mcp,
+                framework,
+            };
+
+            from_openapi(&config)?;
+            Ok(format!("Successfully executed {:?}", subcommand))
+        }
+        "to_openapi" => {
+            let input_str = args
+                .get("input")
+                .and_then(Value::as_str)
+                .ok_or_else(|| AppError::General("Missing required argument: 'input'".into()))?;
+            let output_str = args
+                .get("output")
+                .and_then(Value::as_str)
+                .unwrap_or("openapi.json");
+
+            let config = ToOpenApiConfig {
+                input: PathBuf::from(input_str),
+                output: PathBuf::from(output_str),
+                target: TargetMode::ServerActix,
+                title: None,
+                version: None,
+            };
+            to_openapi(&config)?;
+            Ok(format!(
+                "Successfully generated OpenAPI spec at {}",
+                output_str
+            ))
+        }
+        "to_docs_json" => {
+            let input_str = args
+                .get("input")
+                .and_then(Value::as_str)
+                .ok_or_else(|| AppError::General("Missing required argument: 'input'".into()))?;
+            let no_imports = args
+                .get("no_imports")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let no_wrapping = args
+                .get("no_wrapping")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let output_opt = args
+                .get("output")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned);
+
+            if output_opt.is_some() {
+                let config = ToDocsJsonConfig {
+                    input: input_str.to_string(),
+                    no_imports,
+                    no_wrapping,
+                    output: output_opt.clone(),
+                };
+                to_docs_json(&config)?;
+                Ok(format!(
+                    "Successfully generated docs JSON for {}",
+                    input_str
+                ))
+            } else {
+                let cli_args = ToDocsJsonArgs {
+                    input: input_str.to_string(),
+                    no_imports,
+                    no_wrapping,
+                    output: None,
+                };
+                generate_docs_json_str(&cli_args)
+            }
+        }
+        "sync" => {
+            let dir_str = args
+                .get("dir")
+                .or_else(|| args.get("input"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| AppError::General("Missing required argument: 'dir'".into()))?;
+            let truth_str = args.get("truth").and_then(Value::as_str).unwrap_or("code");
+            let output_str = args
+                .get("output")
+                .and_then(Value::as_str)
+                .unwrap_or(dir_str);
+
+            let config = SyncConfig {
+                truth: truth_str.to_string(),
+                input: PathBuf::from(dir_str),
+                output: PathBuf::from(output_str),
+                no_gen: args.get("no_gen").and_then(Value::as_bool).unwrap_or(false),
+                force_type: vec![],
+            };
+            let mapper = crate::generator::DieselMapper;
+            sync(&config, &mapper)?;
+            Ok(format!("Successfully synced directory {}", dir_str))
+        }
+        _ => Err(AppError::General(format!("Tool not found: {}", tool_name))),
+    }
+}
+
+/// Builds a serialized [`JsonRpcResponse`] with a strongly typed result payload.
+fn ok_response<T: serde::Serialize>(id: RequestId, result: &T) -> Option<String> {
+    let val = serde_json::to_value(result).ok()?;
+    let resp = JsonRpcResponse {
+        jsonrpc: "2.0".to_string(),
+        id,
+        result: Some(val),
+        error: None,
+    };
+    serde_json::to_string(&resp).ok()
+}
+
+/// Builds a serialized [`JsonRpcResponse`] with a [`JsonRpcError`].
+fn err_response(id: RequestId, code: i32, message: impl Into<String>) -> Option<String> {
+    let resp = JsonRpcResponse {
+        jsonrpc: "2.0".to_string(),
+        id,
+        result: None,
+        error: Some(JsonRpcError {
+            code,
+            message: message.into(),
+            data: None,
+        }),
+    };
+    serde_json::to_string(&resp).ok()
+}
+
+/// Processes a single JSON-RPC 2.0 request or notification line using strongly typed MCP models.
+///
+/// # Arguments
+/// * `input` - Raw JSON line read from the client.
+///
+/// # Returns
+/// `Some(json_string)` for requests or parse errors, or `None` for notifications.
+pub fn handle_request(input: &str) -> Option<String> {
+    let raw_value: Value = match serde_json::from_str(input) {
+        Ok(v) => v,
+        Err(_) => return err_response(RequestId::Null, -32700, "Parse error"),
+    };
+
+    // Distinguish notifications (no `id` field) from requests
+    if raw_value.get("id").is_none() {
+        if serde_json::from_value::<JsonRpcNotification>(raw_value).is_ok() {
+            return None;
+        }
+        return err_response(RequestId::Null, -32600, "Invalid Request");
+    }
+
+    let req: JsonRpcRequest = match serde_json::from_value(raw_value) {
+        Ok(r) => r,
+        Err(_) => return err_response(RequestId::Null, -32600, "Invalid Request"),
+    };
+
+    if req.jsonrpc != "2.0" {
+        return err_response(req.id, -32600, "Invalid Request: jsonrpc must be '2.0'");
+    }
+
+    match req.method.as_str() {
+        "initialize" => {
+            let init_res = InitializeResult {
+                protocol_version: "2024-11-05".to_string(),
+                capabilities: ServerCapabilities {
+                    experimental: None,
+                    logging: None,
+                    prompts: None,
+                    resources: None,
+                    tools: Some(ServerToolsCapability { list_changed: None }),
+                },
+                server_info: Implementation {
+                    name: "cdd-rust-mcp".to_string(),
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                },
+                instructions: None,
+                meta: None,
+            };
+            ok_response(req.id, &init_res)
+        }
+        "ping" => ok_response(req.id, &EmptyResult {}),
+        "tools/list" => {
+            let list_res = ListToolsResult {
+                tools: supported_tools(),
+                next_cursor: None,
+                meta: None,
+            };
+            ok_response(req.id, &list_res)
+        }
+        "tools/call" => {
+            let params_val = req.params.unwrap_or_else(|| json!({}));
+            let call_params: CallToolRequestParams = match serde_json::from_value(params_val) {
+                Ok(p) => p,
+                Err(e) => {
+                    return err_response(req.id, -32602, format!("Invalid params: {}", e));
+                }
+            };
+
+            let args_val = call_params.arguments.unwrap_or_else(|| json!({}));
+            match dispatch_tool_command(&call_params.name, &args_val, None) {
+                Ok(msg) => {
+                    let result = CallToolResult {
+                        content: vec![CallToolResultContent::Text(TextContent { text: msg })],
+                        is_error: Some(false),
+                        meta: None,
+                    };
+                    ok_response(req.id, &result)
+                }
+                Err(e) => {
+                    if call_params.name != "from_openapi"
+                        && call_params.name != "to_openapi"
+                        && call_params.name != "to_docs_json"
+                        && call_params.name != "sync"
+                    {
+                        err_response(req.id, -32601, e.to_string())
+                    } else {
+                        let result = CallToolResult {
+                            content: vec![CallToolResultContent::Text(TextContent {
+                                text: format!("Error executing {}: {}", call_params.name, e),
+                            })],
+                            is_error: Some(true),
+                            meta: None,
+                        };
+                        ok_response(req.id, &result)
+                    }
+                }
+            }
+        }
+        _ => err_response(req.id, -32601, "Method not found"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
+
+    struct ErrorReader;
+
+    impl io::Read for ErrorReader {
+        fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+            Err(io::Error::other("read error"))
+        }
+    }
+
+    impl io::BufRead for ErrorReader {
+        fn fill_buf(&mut self) -> io::Result<&[u8]> {
+            Err(io::Error::other("read error"))
+        }
+        fn consume(&mut self, _amt: usize) {}
+    }
+
+    #[test]
+    fn test_mcp_initialize_and_ping() {
+        let req = r#"{"jsonrpc": "2.0", "id": 1, "method": "initialize"}"#;
+        let resp_str = handle_request(req).expect("Failed to handle request");
+        let resp: JsonRpcResponse = serde_json::from_str(&resp_str).expect("Valid response");
+        assert_eq!(resp.id, RequestId::Number(1));
+        let init: InitializeResult =
+            serde_json::from_value(resp.result.expect("Result present")).expect("Valid init");
+        assert_eq!(init.server_info.name, "cdd-rust-mcp");
+
+        let ping_req = r#"{"jsonrpc": "2.0", "id": "p1", "method": "ping"}"#;
+        let ping_str = handle_request(ping_req).expect("Ping response");
+        let ping_resp: JsonRpcResponse = serde_json::from_str(&ping_str).expect("Valid ping");
+        assert_eq!(ping_resp.id, RequestId::String("p1".to_string()));
+    }
+
+    #[test]
+    fn test_mcp_tools_list() {
+        let req = r#"{"jsonrpc": "2.0", "id": 2, "method": "tools/list"}"#;
+        let resp_str = handle_request(req).expect("Failed to handle request");
+        let resp: JsonRpcResponse = serde_json::from_str(&resp_str).expect("Valid response");
+        let list: ListToolsResult =
+            serde_json::from_value(resp.result.expect("Result present")).expect("Valid list");
+        assert_eq!(list.tools.len(), 4);
+        assert!(list.tools.iter().any(|t| t.name == "from_openapi"));
+        assert!(list.tools.iter().any(|t| t.name == "to_docs_json"));
+    }
+
+    #[test]
+    fn test_mcp_notification_and_invalid_envelopes() {
+        let notif = r#"{"jsonrpc": "2.0", "method": "notifications/initialized"}"#;
+        assert!(handle_request(notif).is_none());
+
+        let invalid_notif = r#"{"jsonrpc": "2.0"}"#;
+        let resp_inv = handle_request(invalid_notif).expect("Invalid notification error");
+        assert!(resp_inv.contains("-32600"));
+
+        let bad_ver = r#"{"jsonrpc": "1.0", "id": 1, "method": "ping"}"#;
+        let resp_ver = handle_request(bad_ver).expect("Bad version error");
+        assert!(resp_ver.contains("-32600"));
+
+        let bad_id = r#"{"jsonrpc": "2.0", "id": [1, 2], "method": "ping"}"#;
+        let resp_id = handle_request(bad_id).expect("Bad id error");
+        assert!(resp_id.contains("-32600"));
+    }
+
+    #[test]
+    fn test_mcp_parse_error() {
+        let req = r#"invalid json"#;
+        let resp = handle_request(req).expect("Failed to handle request");
+        assert!(resp.contains("-32700"));
+    }
+
+    #[test]
+    fn test_mcp_method_not_found() {
+        let req = r#"{"jsonrpc": "2.0", "id": 3, "method": "unknown"}"#;
+        let resp = handle_request(req).expect("Failed to handle request");
+        assert!(resp.contains("-32601"));
+    }
+
+    #[test]
+    fn test_mcp_tools_call_unknown_and_invalid_params() {
+        let req = r#"{"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "unknown_tool"}}"#;
+        let resp = handle_request(req).expect("Failed to handle request");
+        assert!(resp.contains("Tool not found: unknown_tool"));
+
+        let bad_params =
+            r#"{"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": "not_an_object"}"#;
+        let resp_bad = handle_request(bad_params).expect("Invalid params response");
+        assert!(resp_bad.contains("-32602"));
+    }
+
+    #[test]
+    fn test_mcp_tools_call_from_openapi() {
+        let dir = tempfile::tempdir().expect("Failed to create temporary directory");
+        let spec_path = dir.path().join("openapi.json");
+        std::fs::write(
+            &spec_path,
+            r#"{"openapi":"3.0.0","info":{"title":"T","version":"1"},"paths":{}}"#,
+        )
+        .expect("Failed to write to file");
+        let out_dir = dir.path().join("out");
+
+        let req = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tools/call",
+            "params": {
+                "name": "from_openapi",
+                "arguments": {
+                    "subcommand": "to_sdk",
+                    "input": spec_path.to_str().expect("Failed to convert path to str"),
+                    "output": out_dir.to_str().expect("Failed to convert path to str")
+                }
+            }
+        })
+        .to_string();
+
+        let resp = handle_request(&req).expect("Failed to handle request");
+        assert!(resp.contains("Successfully executed ToSdk"));
+
+        let req_axum = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 51,
+            "method": "tools/call",
+            "params": {
+                "name": "from_openapi",
+                "arguments": {
+                    "subcommand": "to_server",
+                    "framework": "axum",
+                    "input": spec_path.to_str().expect("Failed to convert path to str"),
+                    "output": out_dir.join("axum").to_str().expect("Failed to convert path to str")
+                }
+            }
+        })
+        .to_string();
+        let resp_axum = handle_request(&req_axum).expect("Failed to handle request");
+        assert!(resp_axum.contains("Successfully executed ToServer"));
+
+        let req_err = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {
+                "name": "from_openapi",
+                "arguments": {
+                    "subcommand": "invalid_sub"
+                }
+            }
+        })
+        .to_string();
+        let resp_err = handle_request(&req_err).expect("Failed to handle request");
+        assert!(resp_err.contains(r#""isError":true"#));
+    }
+
+    #[test]
+    fn test_mcp_tools_call_to_openapi() {
+        let dir = tempfile::tempdir().expect("Failed to create temporary directory");
+        let src_dir = dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).expect("Failed to create directory");
+        std::fs::write(src_dir.join("lib.rs"), "pub struct Empty {}")
+            .expect("Failed to write to file");
+        let out_file = dir.path().join("openapi.json");
+
+        let req = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {
+                "name": "to_openapi",
+                "arguments": {
+                    "input": dir.path().to_str().expect("Failed to convert path to str"),
+                    "output": out_file.to_str().expect("Failed to convert path to str")
+                }
+            }
+        })
+        .to_string();
+
+        let resp = handle_request(&req).expect("Failed to handle request");
+        assert!(resp.contains("Successfully generated OpenAPI spec"));
+
+        let req_missing = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "tools/call",
+            "params": {
+                "name": "to_openapi",
+                "arguments": {}
+            }
+        })
+        .to_string();
+        let resp_missing = handle_request(&req_missing).expect("Failed to handle request");
+        assert!(resp_missing.contains("Missing required argument: 'input'"));
+    }
+
+    #[test]
+    fn test_mcp_tools_call_to_docs_json() {
+        let dir = tempfile::tempdir().expect("Failed to create temporary directory");
+        let spec_path = dir.path().join("openapi.json");
+        std::fs::write(
+            &spec_path,
+            r#"{"openapi":"3.0.0","info":{"title":"T","version":"1"},"paths":{}}"#,
+        )
+        .expect("Failed to write to file");
+        let out_file = dir.path().join("docs.json");
+
+        let req = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": {
+                "name": "to_docs_json",
+                "arguments": {
+                    "input": spec_path.to_str().expect("Failed to convert path to str"),
+                    "output": out_file.to_str().expect("Failed to convert path to str")
+                }
+            }
+        })
+        .to_string();
+
+        let resp = handle_request(&req).expect("Failed to handle request");
+        assert!(resp.contains("Successfully generated docs JSON"));
+
+        // Without output (returns JSON string directly)
+        let req_inline = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 101,
+            "method": "tools/call",
+            "params": {
+                "name": "to_docs_json",
+                "arguments": {
+                    "input": spec_path.to_str().expect("Failed to convert path to str")
+                }
+            }
+        })
+        .to_string();
+        let resp_inline = handle_request(&req_inline).expect("Failed to handle request");
+        assert!(resp_inline.contains(r#""isError":false"#));
+
+        let req_missing = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 11,
+            "method": "tools/call",
+            "params": {
+                "name": "to_docs_json",
+                "arguments": {}
+            }
+        })
+        .to_string();
+        let resp_missing = handle_request(&req_missing).expect("Failed to handle request");
+        assert!(resp_missing.contains("Missing required argument: 'input'"));
+    }
+
+    #[test]
+    fn test_mcp_tools_call_sync() {
+        let dir = tempfile::tempdir().expect("Failed to create temporary directory");
+
+        let req = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 13,
+            "method": "tools/call",
+            "params": {
+                "name": "sync",
+                "arguments": {
+                    "dir": dir.path().to_str().expect("Failed to convert path to str")
+                }
+            }
+        })
+        .to_string();
+
+        let resp = handle_request(&req).expect("Failed to handle request");
+        assert!(resp.contains("Successfully synced directory"));
+
+        let req_missing = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 14,
+            "method": "tools/call",
+            "params": {
+                "name": "sync",
+                "arguments": {}
+            }
+        })
+        .to_string();
+        let resp_missing = handle_request(&req_missing).expect("Failed to handle request");
+        assert!(resp_missing.contains("Missing required argument: 'dir'"));
+    }
 
     #[test]
     fn test_serve_mcp_inner() {
-        let input = r#"
-{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
+        let input_data = r#"   
+{"jsonrpc": "2.0", "id": 1, "method": "initialize"}
 {"jsonrpc": "2.0", "method": "notifications/initialized"}
-{"jsonrpc": "2.0", "id": 2, "method": "ping"}
-{"jsonrpc": "2.0", "id": 100, "method": "prompts/list"}
-{"jsonrpc": "2.0", "id": 101, "method": "prompts/get", "params": {"name": "test"}}
-{"jsonrpc": "2.0", "id": 102, "method": "resources/list"}
-{"jsonrpc": "2.0", "id": 103, "method": "resources/read", "params": {"uri": "file:///"}}
-{"jsonrpc": "2.0", "id": 1031, "method": "resources/read", "params": {"uri": "ast://internal/types"}}
-{"jsonrpc": "2.0", "id": 104, "method": "resources/templates/list"}
-{"jsonrpc": "2.0", "id": 105, "method": "resources/subscribe", "params": {"uri": "file:///"}}
-{"jsonrpc": "2.0", "id": 106, "method": "resources/unsubscribe", "params": {"uri": "file:///"}}
-{"jsonrpc": "2.0", "id": 107, "method": "logging/setLevel", "params": {"level": "debug"}}
-{"jsonrpc": "2.0", "id": 108, "method": "completion/complete", "params": {"ref": {"type": "ref", "name": "ref"}, "argument": {"name": "test", "value": "test"}}}
-{"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": "1", "progress": 1, "total": 100}}
-{"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 1, "reason": "cancel"}}
-{"jsonrpc": "2.0", "id": 3, "method": "tools/list"}
-{"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "cdd_generate", "arguments": {"input": "doesnt_exist.yaml", "output": "out", "framework": "actix"}}}
-{"jsonrpc": "2.0", "id": 44, "method": "tools/call", "params": {"name": "cdd_generate", "arguments": {"input": "doesnt_exist.yaml", "output": "out", "framework": "axum"}}}
-{"jsonrpc": "2.0", "id": 45, "method": "tools/call", "params": {"name": "cdd_generate", "arguments": {"input": "doesnt_exist.yaml", "output": "out", "framework": "reqwest"}}}
-{"jsonrpc": "2.0", "id": 46, "method": "tools/call", "params": {"name": "cdd_generate", "arguments": {"input": "doesnt_exist.yaml", "output": "out", "framework": "cli"}}}
-{"jsonrpc": "2.0", "id": 47, "method": "tools/call", "params": {"name": "cdd_generate", "arguments": {"input": "doesnt_exist.yaml", "output": "out", "framework": "other"}}}
-{"jsonrpc": "2.0", "id": 48, "method": "tools/call", "params": {"name": "cdd_sync", "arguments": {"db_path": "doesnt_exist.sqlite", "out_models_dir": "out"}}}
-{"jsonrpc": "2.0", "id": 49, "method": "tools/call", "params": {"name": "cdd_generate", "arguments": {"input": "only_one"}}}
-{"jsonrpc": "2.0", "id": 50, "method": "tools/call", "params": {"name": "cdd_sync", "arguments": {"db_path": "only_one"}}}
-{"jsonrpc": "2.0", "id": 51, "method": "tools/call", "params": {"name": "cdd_generate", "arguments": {"input": "success.yaml", "output": "out", "framework": "cli"}}}
-{"jsonrpc": "2.0", "id": 52, "method": "tools/call", "params": {"name": "cdd_sync", "arguments": {"db_path": "success.sqlite", "out_models_dir": "out"}}}
-{"jsonrpc": "2.0", "id": 53, "method": "tools/call", "params": {"name": "cdd_schema", "arguments": {"input": "doesnt_exist.yaml"}}}
-{"jsonrpc": "2.0", "id": 54, "method": "tools/call", "params": {"name": "cdd_schema", "arguments": {"input": "success.yaml"}}}
-{"jsonrpc": "2.0", "id": 55, "method": "tools/call", "params": {"name": "cdd_test_gen", "arguments": {"input": "doesnt_exist.yaml", "output": "out", "target": "server-actix"}}}
-{"jsonrpc": "2.0", "id": 56, "method": "tools/call", "params": {"name": "cdd_test_gen", "arguments": {"input": "success.yaml", "output": "out", "target": "server-actix"}}}
-{"jsonrpc": "2.0", "id": 57, "method": "tools/call", "params": {"name": "cdd_scaffold", "arguments": {"input": "doesnt_exist.yaml", "output": "out", "target": "server-actix"}}}
-{"jsonrpc": "2.0", "id": 58, "method": "tools/call", "params": {"name": "cdd_scaffold", "arguments": {"input": "success.yaml", "output": "out", "target": "server-actix"}}}
-{"jsonrpc": "2.0", "id": 59, "method": "tools/call", "params": {"name": "cdd_test_gen", "arguments": {"input": "doesnt_exist.yaml", "output": "out", "target": "server-axum"}}}
-{"jsonrpc": "2.0", "id": 60, "method": "tools/call", "params": {"name": "cdd_test_gen", "arguments": {"input": "doesnt_exist.yaml", "output": "out", "target": "client-reqwest"}}}
-{"jsonrpc": "2.0", "id": 61, "method": "tools/call", "params": {"name": "cdd_test_gen", "arguments": {"input": "doesnt_exist.yaml", "output": "out", "target": "client-internal"}}}
-{"jsonrpc": "2.0", "id": 62, "method": "tools/call", "params": {"name": "cdd_scaffold", "arguments": {"input": "doesnt_exist.yaml", "output": "out", "target": "server-axum"}}}
-{"jsonrpc": "2.0", "id": 63, "method": "tools/call", "params": {"name": "cdd_scaffold", "arguments": {"input": "doesnt_exist.yaml", "output": "out", "target": "client-reqwest"}}}
-{"jsonrpc": "2.0", "id": 64, "method": "tools/call", "params": {"name": "cdd_scaffold", "arguments": {"input": "doesnt_exist.yaml", "output": "out", "target": "client-internal"}}}
-{"jsonrpc": "2.0", "id": 5, "method": "unknown_method"}
-invalid json
-{"jsonrpc": "2.0", "method": "unknown_notification"}
 "#;
-        let mut stdin = input.as_bytes();
-        let mut stdout = Vec::new();
+        let mut reader = Cursor::new(input_data);
+        let mut writer = Vec::new();
 
-        serve_mcp_inner(&mut stdin, &mut stdout).expect("must succeed");
+        serve_mcp_inner(&mut reader, &mut writer).expect("Failed to serve MCP inner");
 
-        let output = String::from_utf8(stdout).expect("must succeed");
-        let lines: Vec<&str> = output.trim().split('\n').collect();
-
-        assert_eq!(lines.len(), 36);
-        assert!(lines[0].contains(r#""protocolVersion":"2024-11-05""#));
-        assert!(lines[1].contains(r#""result":{}"#));
-        assert!(lines[2].contains(r#""prompts":[]"#));
-        assert!(lines[3].contains(r#""Prompt not found""#));
-        assert!(lines[4].contains(r#""ast://internal/types""#));
-        assert!(lines[5].contains(r#""contents":[]"#));
-        assert!(lines[6].contains(r#"ast_mock"#));
-        assert!(lines[7].contains(r#""resourceTemplates":[]"#));
-        assert!(lines[8].contains(r#""result":{}"#));
-        assert!(lines[9].contains(r#""result":{}"#));
-        assert!(lines[10].contains(r#""result":{}"#));
-        assert!(lines[11].contains(r#""completion":{"#));
-        assert!(lines[12].contains(r#""tools":[{"#));
-        assert!(lines[13].contains(r#"Generation failed"#)); // missing file -> failed
-        assert!(lines[14].contains(r#"Generation failed"#));
-        assert!(lines[15].contains(r#"Generation failed"#));
-        assert!(lines[16].contains(r#"Generation failed"#));
-        assert!(lines[17].contains(r#"Generation failed"#));
-        assert!(lines[18].contains(r#"Sync failed"#));
-        assert!(lines[19].contains(r#"Call successful."#));
-        assert!(lines[20].contains(r#"Call successful."#));
-        assert!(lines[21].contains(r#"Generation successful"#)); // success.yaml
-        assert!(lines[22].contains(r#"Sync successful"#)); // success.sqlite
-        assert!(lines[23].contains(r#"Schema failed"#));
-        assert!(lines[24].contains(r#"Schema successful"#));
-        assert!(lines[25].contains(r#"TestGen failed"#));
-        assert!(lines[26].contains(r#"TestGen successful"#));
-        assert!(lines[27].contains(r#"Scaffold failed"#));
-        assert!(lines[28].contains(r#"Scaffold successful"#));
-        assert!(lines[29].contains(r#"TestGen failed"#));
-        assert!(lines[30].contains(r#"TestGen failed"#));
-        assert!(lines[31].contains(r#"TestGen failed"#));
-        assert!(lines[32].contains(r#"Scaffold failed"#));
-        assert!(lines[33].contains(r#"Scaffold failed"#));
-        assert!(lines[34].contains(r#"Scaffold failed"#));
-        assert!(lines[35].contains(r#"-32601"#));
-    }
-
-    struct ErrorReader;
-    impl std::io::Read for ErrorReader {
-        fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
-            Err(std::io::Error::other("mock error"))
-        }
-    }
-    impl BufRead for ErrorReader {
-        fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
-            Err(std::io::Error::other("mock error"))
-        }
-        fn consume(&mut self, _amt: usize) {}
+        let output = String::from_utf8(writer).expect("Failed to convert UTF-8 bytes to String");
+        assert!(output.contains("cdd-rust-mcp"));
+        assert_eq!(output.lines().count(), 1);
     }
 
     #[test]

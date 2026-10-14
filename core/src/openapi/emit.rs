@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Schema Generator
 //!
@@ -1547,12 +1546,7 @@ fn build_responses(route: &ParsedRoute) -> Value {
 
     if let Some(raw) = route.raw_responses.as_ref() {
         if let Some(raw_obj) = raw.as_object() {
-            let mut merged_value = Value::Object(raw_obj.clone());
-            rehydrate_header_content(&mut merged_value);
-            let mut merged = match merged_value {
-                Value::Object(map) => map,
-                _ => raw_obj.clone(),
-            };
+            let mut merged = raw_obj.clone();
             if route.response_status.is_some() || merged.is_empty() {
                 let raw_entry = merged.get(status).cloned();
                 let merged_entry = merge_response_entry_with_raw(entry, raw_entry.as_ref());
@@ -1567,22 +1561,27 @@ fn build_responses(route: &ParsedRoute) -> Value {
     Value::Object(responses)
 }
 
-fn build_response_entry(route: &ParsedRoute) -> Value {
+fn build_response_object(
+    response_summary: Option<&str>,
+    response_description: Option<&str>,
+    response_media_type: Option<&str>,
+    response_type: Option<&str>,
+    response_example: Option<&crate::openapi::parse::models::ExampleValue>,
+    response_headers: &[crate::openapi::parse::models::ResponseHeader],
+    response_links: Option<&[ParsedLink]>,
+) -> Value {
     let mut resp = Map::new();
-    if let Some(summary) = route.response_summary.as_ref() {
+    if let Some(summary) = response_summary {
         resp.insert("summary".to_string(), json!(summary));
     }
-    let description = route.response_description.as_deref().unwrap_or("OK");
-    let media_type = route
-        .response_media_type
-        .as_deref()
-        .unwrap_or("application/json");
+    let description = response_description.unwrap_or("OK");
+    let media_type = response_media_type.unwrap_or("application/json");
 
     resp.insert("description".to_string(), json!(description));
 
-    if route.response_type.is_some() || route.response_example.is_some() {
+    if response_type.is_some() || response_example.is_some() {
         let mut media = Map::new();
-        if let Some(ty) = &route.response_type {
+        if let Some(ty) = response_type {
             let (schema, _) = schema_from_rust_type(ty);
             if is_sequential_media_type(media_type) {
                 if let Some(item_schema) = schema_item_schema(&schema) {
@@ -1591,7 +1590,7 @@ fn build_response_entry(route: &ParsedRoute) -> Value {
             }
             media.insert("schema".to_string(), schema);
         }
-        if let Some(example) = &route.response_example {
+        if let Some(example) = response_example {
             insert_example_value(&mut media, example);
         }
         let mut content = Map::new();
@@ -1599,9 +1598,9 @@ fn build_response_entry(route: &ParsedRoute) -> Value {
         resp.insert("content".to_string(), Value::Object(content));
     }
 
-    if !route.response_headers.is_empty() {
+    if !response_headers.is_empty() {
         let mut headers = Map::new();
-        for header in &route.response_headers {
+        for header in response_headers {
             let (schema, _) = schema_from_rust_type(&header.ty);
             let mut h = Map::new();
             if let Some(desc) = &header.description {
@@ -1640,7 +1639,7 @@ fn build_response_entry(route: &ParsedRoute) -> Value {
         resp.insert("headers".to_string(), Value::Object(headers));
     }
 
-    if let Some(links) = route.response_links.as_ref() {
+    if let Some(links) = response_links {
         if !links.is_empty() {
             let mut link_map = Map::new();
             for link in links {
@@ -1653,34 +1652,16 @@ fn build_response_entry(route: &ParsedRoute) -> Value {
     Value::Object(resp)
 }
 
-fn rehydrate_header_content(value: &mut Value) {
-    match value {
-        Value::Object(map) => {
-            if let Some(headers_val) = map.get_mut("headers") {
-                if let Some(headers_map) = headers_val.as_object_mut() {
-                    for (_, header_val) in headers_map.iter_mut() {
-                        if let Some(obj) = header_val.as_object_mut() {
-                            if obj.contains_key("content") {
-                                obj.remove("x-cdd-content");
-                            } else if let Some(content) = obj.remove("x-cdd-content") {
-                                obj.insert("content".to_string(), content);
-                            }
-                        }
-                    }
-                }
-            }
-
-            for v in map.values_mut() {
-                rehydrate_header_content(v);
-            }
-        }
-        Value::Array(items) => {
-            for v in items.iter_mut() {
-                rehydrate_header_content(v);
-            }
-        }
-        _ => {}
-    }
+fn build_response_entry(route: &ParsedRoute) -> Value {
+    build_response_object(
+        route.response_summary.as_deref(),
+        route.response_description.as_deref(),
+        route.response_media_type.as_deref(),
+        route.response_type.as_deref(),
+        route.response_example.as_ref(),
+        &route.response_headers,
+        route.response_links.as_deref(),
+    )
 }
 
 fn build_link(link: &ParsedLink) -> Value {
@@ -1814,80 +1795,17 @@ fn build_callback_operation(
 
 fn build_callback_responses(callback: &crate::openapi::parse::models::ParsedCallback) -> Value {
     let mut responses = Map::new();
-    let mut resp = Map::new();
     let status = callback.response_status.as_deref().unwrap_or("200");
-    if let Some(summary) = callback.response_summary.as_ref() {
-        resp.insert("summary".to_string(), json!(summary));
-    }
-    let description = callback.response_description.as_deref().unwrap_or("OK");
-    let media_type = callback
-        .response_media_type
-        .as_deref()
-        .unwrap_or("application/json");
-
-    resp.insert("description".to_string(), json!(description));
-
-    if callback.response_type.is_some() || callback.response_example.is_some() {
-        let mut media = Map::new();
-        if let Some(ty) = &callback.response_type {
-            let (schema, _) = schema_from_rust_type(ty);
-            if is_sequential_media_type(media_type) {
-                if let Some(item_schema) = schema_item_schema(&schema) {
-                    media.insert("itemSchema".to_string(), item_schema);
-                }
-            }
-            media.insert("schema".to_string(), schema);
-        }
-        if let Some(example) = &callback.response_example {
-            insert_example_value(&mut media, example);
-        }
-        let mut content = Map::new();
-        content.insert(media_type.to_string(), Value::Object(media));
-        resp.insert("content".to_string(), Value::Object(content));
-    }
-
-    if !callback.response_headers.is_empty() {
-        let mut headers = Map::new();
-        for header in &callback.response_headers {
-            let (schema, _) = schema_from_rust_type(&header.ty);
-            let mut h = Map::new();
-            if let Some(desc) = &header.description {
-                h.insert("description".to_string(), json!(desc));
-            }
-            if header.required {
-                h.insert("required".to_string(), json!(true));
-            }
-            if header.deprecated {
-                h.insert("deprecated".to_string(), json!(true));
-            }
-            if let Some(media_type) = &header.content_media_type {
-                let mut media = Map::new();
-                media.insert("schema".to_string(), schema);
-                if let Some(example) = &header.example {
-                    insert_example_value(&mut media, example);
-                }
-                let mut content = Map::new();
-                content.insert(media_type.clone(), Value::Object(media));
-                h.insert("content".to_string(), Value::Object(content));
-            } else {
-                h.insert("schema".to_string(), schema);
-                if let Some(example) = &header.example {
-                    insert_example_value(&mut h, example);
-                }
-                if let Some(style) = &header.style {
-                    h.insert("style".to_string(), json!(style_to_str(style)));
-                }
-                if let Some(explode) = header.explode {
-                    h.insert("explode".to_string(), json!(explode));
-                }
-            }
-            insert_extensions(&mut h, &header.extensions);
-            headers.insert(header.name.clone(), Value::Object(h));
-        }
-        resp.insert("headers".to_string(), Value::Object(headers));
-    }
-
-    responses.insert(status.to_string(), Value::Object(resp));
+    let resp = build_response_object(
+        callback.response_summary.as_deref(),
+        callback.response_description.as_deref(),
+        callback.response_media_type.as_deref(),
+        callback.response_type.as_deref(),
+        callback.response_example.as_ref(),
+        &callback.response_headers,
+        None,
+    );
+    responses.insert(status.to_string(), resp);
     Value::Object(responses)
 }
 
@@ -1998,29 +1916,14 @@ fn is_reserved_method(method: &str) -> bool {
     )
 }
 
-fn normalize_media_type(media_type: &str) -> String {
-    media_type
-        .split(';')
-        .next()
-        .unwrap_or(media_type)
-        .trim()
-        .to_ascii_lowercase()
-}
-
 fn is_sequential_media_type(media_type: &str) -> bool {
-    let normalized = normalize_media_type(media_type);
-    matches!(
-        normalized.as_str(),
-        "application/jsonl"
-            | "application/x-ndjson"
-            | "application/json-seq"
-            | "application/geo+json-seq"
-            | "text/event-stream"
-            | "multipart/mixed"
-            | "multipart/byteranges"
-    ) || normalized.ends_with("+jsonl")
-        || normalized.ends_with("+ndjson")
-        || normalized.ends_with("+json-seq")
+    let mt = crate::openapi::parse::models::MediaType::parse(media_type);
+    mt.is_sequential_json()
+        || mt.is_event_stream()
+        || matches!(
+            mt.essence().as_str(),
+            "multipart/mixed" | "multipart/byteranges"
+        )
 }
 
 fn schema_item_schema(schema: &Value) -> Option<Value> {
@@ -5626,15 +5529,14 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_openapi_document_rehydrates_header_content() {
+    fn test_generate_openapi_document_preserves_header_content() {
         let info = OpenApiInfo::new("Test API", "1.0.0");
         let raw_responses = json!({
             "200": {
                 "description": "OK",
                 "headers": {
                     "X-Token": {
-                        "schema": { "type": "string" },
-                        "x-cdd-content": {
+                        "content": {
                             "text/plain": { "schema": { "type": "string" } }
                         }
                     }
@@ -5693,7 +5595,6 @@ mod tests {
             .expect("Failed to generate openapi document with routes");
         let header = &doc["paths"]["/items"]["get"]["responses"]["200"]["headers"]["X-Token"];
         assert!(header.get("content").is_some());
-        assert!(header.get("x-cdd-content").is_none());
     }
 
     #[test]

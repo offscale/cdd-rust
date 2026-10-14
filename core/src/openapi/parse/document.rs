@@ -1,11 +1,11 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # OpenAPI Document Parsing
 //!
 //! Provides a higher-level parser that extracts both routes and top-level
 //! OpenAPI document metadata for round-trip workflows.
 
+use crate::classes::parse::ParsedExternalDocs;
 use crate::error::{AppError, AppResult};
 use crate::openapi::emit::{
     OpenApiContact, OpenApiInfo, OpenApiLicense, OpenApiServer, OpenApiServerVariable, OpenApiTag,
@@ -13,12 +13,10 @@ use crate::openapi::emit::{
 use crate::openapi::parse::models::ParsedRoute;
 use crate::openapi::parse::registry::DocumentRegistry;
 use crate::openapi::parse::routes::builder::parse_security_requirements;
+use crate::openapi::parse::routes::parse_openapi_routes_from_value;
 use crate::openapi::parse::routes::shims::{ShimOpenApi, ShimServer, ShimServerVariable, ShimTag};
 use crate::openapi::parse::schemas::refs::compute_base_uri;
 use crate::openapi::parse::validation::validate_openapi_root;
-use crate::{
-    classes::parse::ParsedExternalDocs, parse_openapi_routes, parse_openapi_routes_with_registry,
-};
 use std::collections::BTreeMap;
 use url::Url;
 
@@ -67,11 +65,8 @@ pub fn parse_openapi_document_with_registry(
         .map_err(|e| AppError::General(format!("Failed to parse OpenAPI Shim: {}", e)))?;
     validate_openapi_root(&shim)?;
 
-    let routes = if registry.is_some() || retrieval_uri.is_some() {
-        parse_openapi_routes_with_registry(yaml_content, registry, retrieval_uri)?
-    } else {
-        parse_openapi_routes(yaml_content)?
-    };
+    let mut routes_val = raw_value.clone();
+    let routes = parse_openapi_routes_from_value(&mut routes_val, registry, retrieval_uri)?;
 
     let mut info = build_openapi_info(&shim)?;
     if let Some(requirements) = shim.security.as_ref() {
@@ -79,10 +74,7 @@ pub fn parse_openapi_document_with_registry(
         let mut owned_components = shim.components.clone();
         if let (Some(self_uri), Some(comps)) = (shim.self_uri.as_deref(), owned_components.as_mut())
         {
-            comps.extra.insert(
-                "__self".to_string(),
-                serde_json::Value::String(self_uri.to_string()),
-            );
+            comps.self_uri = Some(self_uri.to_string());
         }
         info.security = parse_security_requirements(
             requirements,

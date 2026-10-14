@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Utilities
 //!
@@ -219,7 +218,7 @@ mod tests {
     use crate::openapi::parse::models::RuntimeExpression;
 
     fn rx(s: &str) -> RuntimeExpression {
-        RuntimeExpression::new(s)
+        RuntimeExpression::parse(s).expect("valid runtime expression")
     }
 
     #[test]

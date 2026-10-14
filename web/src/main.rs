@@ -1,10 +1,12 @@
 #![warn(missing_docs)]
 #![deny(missing_docs)]
-//! # Web App
-#![cfg(not(tarpaulin_include))]
+
+//! # Web App Entrypoint
+//!
+//! CLI and HTTP server runner for the CDD reference web server.
 
 #[cfg(not(target_os = "wasi"))]
-use actix_web::{web, App, HttpServer};
+use actix_web::{web, App};
 #[cfg(not(target_os = "wasi"))]
 use cdd_web::{
     config,
@@ -13,213 +15,170 @@ use cdd_web::{
         factory::{AppDaos, DaoConfig},
     },
     health_check,
-    seeder::seed_database,
+    idp::configure_idp,
+    validation::StrictValidation,
+    webhooks,
 };
-#[cfg(not(target_os = "wasi"))]
 use clap::Parser;
-#[cfg(not(target_os = "wasi"))]
-use std::net::TcpListener;
-#[cfg(not(target_os = "wasi"))]
-use std::sync::Mutex;
+use std::env;
 
-/// CDD Mock Server CLI Configuration.
-#[cfg(not(target_os = "wasi"))]
-#[derive(Parser, Debug)]
+/// Command-line arguments for the CDD Web Server.
+#[derive(Parser, Debug, Clone, PartialEq, Eq)]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
-    /// Triggers the Concrete DAOs and overrides DATABASE_URL with a throwaway database.
+    /// Run the server in stub mode (returns 501 Not Implemented for DAO operations).
     #[arg(long)]
-    pub ephemeral: bool,
+    pub stub: bool,
 
-    /// Runs the fake data seeder on startup (requires a concrete DB connection).
+    /// Create an ephemeral database on startup.
+    #[arg(long)]
+    pub ephemeral_db: bool,
+
+    /// Seed the database with fake data on startup.
     #[arg(long)]
     pub seed: bool,
-
-    /// Enables strict request validation against constraints.
-    #[arg(long)]
-    pub strict_validation: bool,
-
-    /// Toggles mock security. Validates against mock tokens if active.
-    #[arg(long)]
-    pub enforce_auth: bool,
-
-    /// Start the integrated Identity Provider (IdP) module alongside the main application.
-    #[arg(long)]
-    pub start_auth_server: bool,
 }
 
+/// Resolves the [`DaoConfig`] from CLI flags and environment configuration.
+///
+/// # Arguments
+/// * `cli` - Parsed command-line arguments.
+///
+/// # Returns
+/// * `Result<DaoConfig, cdd_web::error::ServerError>` with the configured DAO strategy.
+///
+/// # Errors
+/// * Returns [`cdd_web::error::ServerError`] if concrete pool creation fails.
 #[cfg(not(target_os = "wasi"))]
-fn build_server(
-    listener: TcpListener,
-    daos: AppDaos,
-    strict_validation: bool,
-    enforce_auth: bool,
-    is_ephemeral: bool,
-    has_db: bool,
-    start_auth_server: bool,
-) -> std::io::Result<actix_web::dev::Server> {
-    // For backwards compatibility of pet store code currently present
-    let pet_store = web::Data::new(cdd_web::handlers::pet::PetStore {
-        pets: Mutex::new(std::collections::HashMap::new()),
-    });
-
-    let app_daos = web::Data::new(daos.clone());
-
-    Ok(HttpServer::new(move || {
-        let mut app = App::new()
-            .wrap(actix_cors::Cors::permissive())
-            .wrap(cdd_web::security::HybridAuth {
-                enforce_auth,
-                is_mock_mode: is_ephemeral || !has_db,
-                user_dao: daos.user_dao.clone(),
-            })
-            .wrap(cdd_web::validation::StrictValidation {
-                enabled: strict_validation,
-            })
-            .app_data(pet_store.clone())
-            .app_data(app_daos.clone())
-            .service(health_check)
-            .configure(config)
-            .configure(cdd_web::webhooks::config);
-
-        if start_auth_server {
-            app = app.configure(cdd_web::idp::config);
+pub fn build_dao_config(cli: &Cli) -> Result<DaoConfig, cdd_web::error::ServerError> {
+    if cli.stub {
+        Ok(DaoConfig::Stub)
+    } else {
+        let mut db_config = DbConfig::from_env();
+        if cli.ephemeral_db {
+            db_config.is_ephemeral = true;
         }
-
-        app
-    })
-    .listen(listener)?
-    .run())
+        let pool = create_pool(&db_config)?;
+        Ok(DaoConfig::Concrete(pool))
+    }
 }
 
-#[cfg(not(target_os = "wasi"))]
-fn resolve_bind_addr() -> String {
-    std::env::var("CDD_WEB_BIND").unwrap_or_else(|_| "localhost:8080".to_string())
+/// Resolves the `(host, port)` bind tuple from `HOST` and `PORT` environment variables.
+///
+/// # Returns
+/// * `(String, u16)` bind address and port (defaults to `("127.0.0.1", 8080)`).
+pub fn resolve_bind_addr() -> (String, u16) {
+    let host = env::var("HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    let port = env::var("PORT")
+        .unwrap_or_else(|_| "8080".to_string())
+        .parse::<u16>()
+        .unwrap_or(8080);
+    (host, port)
 }
 
+/// Entrypoint for the Actix Web server on non-WASI targets.
 #[cfg(not(target_os = "wasi"))]
+#[cfg(not(test))]
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let cli = Cli::parse();
 
-    // 1. Resolve configuration
-    let mut db_config = DbConfig::from_env();
-    if cli.ephemeral {
-        db_config.is_ephemeral = true;
-    }
+    let dao_config = build_dao_config(&cli)
+        .map_err(|e| std::io::Error::other(format!("Failed to initialize DB pool: {e}")))?;
 
-    // 2. Database Initialization & DAOs
-    let has_db = !db_config.database_url.is_empty();
+    let app_daos = AppDaos::new(dao_config);
 
-    let dao_config = if has_db || cli.ephemeral {
-        match create_pool(&db_config) {
-            Ok(pool) => DaoConfig::Concrete(pool),
-            Err(e) => {
-                eprintln!("Failed to create DB pool: {}", e);
-                std::process::exit(1);
-            }
-        }
-    } else {
-        DaoConfig::Stub
-    };
-
-    let daos = AppDaos::new(dao_config);
-
-    // 3. Data Seeding
     if cli.seed {
-        if !has_db && !cli.ephemeral {
-            eprintln!("Error: Cannot seed database without a database connection.");
-            std::process::exit(1);
-        }
-        match seed_database(daos.user_dao.clone()).await {
-            Ok(_) => println!("Successfully seeded the database."),
-            Err(e) => {
-                eprintln!("Failed to seed database: {}", e);
-                std::process::exit(1);
-            }
+        if let Err(e) = cdd_web::seeder::seed_database(app_daos.user_dao.clone()).await {
+            eprintln!("Failed to seed database: {e}");
         }
     }
 
-    // 4. Start Listeners
-    let bind_addr = resolve_bind_addr();
-    let listener = TcpListener::bind(bind_addr)?;
-    let server = build_server(
-        listener,
-        daos,
-        cli.strict_validation,
-        cli.enforce_auth,
-        cli.ephemeral,
-        has_db,
-        cli.start_auth_server,
-    )?;
+    let daos_data = web::Data::new(app_daos);
+    let pet_store = web::Data::new(cdd_web::handlers::pet::PetStore::default());
+    let order_store = web::Data::new(cdd_web::handlers::store::OrderStore::default());
+    let (host, port) = resolve_bind_addr();
 
-    if std::env::var("CDD_WEB_ONESHOT").is_ok() {
-        let handle = server.handle();
-        let server_task = actix_web::rt::spawn(server);
-        handle.stop(true).await;
-        let _ = server_task.await;
-        return Ok(());
-    }
-
-    server.await
+    actix_web::HttpServer::new(move || {
+        let cors = actix_cors::Cors::permissive();
+        App::new()
+            .wrap(cors)
+            .wrap(StrictValidation)
+            .app_data(daos_data.clone())
+            .app_data(pet_store.clone())
+            .app_data(order_store.clone())
+            .service(health_check)
+            .configure(config)
+            .configure(configure_idp)
+            .configure(webhooks::config)
+    })
+    .bind((host, port))?
+    .run()
+    .await
 }
 
 #[cfg(target_os = "wasi")]
-fn main() -> std::io::Result<()> {
-    Ok(())
+fn main() {
+    println!(
+        "CDD Web Server cannot run natively as an HTTP server on WASI without a runtime interface."
+    );
 }
 
 #[cfg(test)]
 mod tests {
-    #[cfg(not(target_os = "wasi"))]
     use super::*;
+    use actix_web::test;
 
-    #[cfg(not(target_os = "wasi"))]
-    #[test]
-    fn test_cli_parser_ephemeral() {
-        use clap::Parser;
-        let cli = Cli::parse_from(["cdd-web", "--ephemeral"]);
-        assert!(cli.ephemeral);
-        assert!(!cli.seed);
-    }
-
-    #[cfg(not(target_os = "wasi"))]
-    #[test]
-    fn test_cli_parser_seed() {
-        use clap::Parser;
-        let cli = Cli::parse_from(["cdd-web", "--seed"]);
-        assert!(!cli.ephemeral);
-        assert!(cli.seed);
-    }
-
-    #[cfg(not(target_os = "wasi"))]
     #[actix_web::test]
-    async fn test_cors_preflight() {
-        use actix_web::{test, App};
-        use cdd_web::{config, health_check};
-        use std::collections::HashMap;
-        use std::sync::Mutex;
+    async fn test_cli_parsing_and_bind_addr() {
+        let cli = Cli::parse_from(["cdd-web", "--stub", "--ephemeral-db", "--seed"]);
+        assert!(cli.stub);
+        assert!(cli.ephemeral_db);
+        assert!(cli.seed);
 
-        let pet_store = web::Data::new(cdd_web::handlers::pet::PetStore {
-            pets: Mutex::new(HashMap::new()),
-        });
+        let dao_cfg = build_dao_config(&cli);
+        assert!(matches!(dao_cfg, Ok(DaoConfig::Stub)));
 
-        let daos = AppDaos::new(DaoConfig::Stub);
-        let app_daos = web::Data::new(daos);
+        env::set_var("DATABASE_URL", "invalid_url");
+        let cli_concrete = Cli::parse_from(["cdd-web", "--ephemeral-db"]);
+        assert!(build_dao_config(&cli_concrete).is_err());
+        env::remove_var("DATABASE_URL");
+
+        env::remove_var("HOST");
+        env::remove_var("PORT");
+        assert_eq!(resolve_bind_addr(), ("127.0.0.1".to_string(), 8080));
+
+        env::set_var("HOST", "0.0.0.0");
+        env::set_var("PORT", "9090");
+        assert_eq!(resolve_bind_addr(), ("0.0.0.0".to_string(), 9090));
+        env::remove_var("HOST");
+        env::remove_var("PORT");
+    }
+
+    #[actix_web::test]
+    async fn test_app_wiring_and_cors() {
+        let app_daos = AppDaos::new(DaoConfig::Stub);
+        let daos_data = web::Data::new(app_daos);
+        let pet_store = web::Data::new(cdd_web::handlers::pet::PetStore::default());
+        let order_store = web::Data::new(cdd_web::handlers::store::OrderStore::default());
 
         let app = test::init_service(
             App::new()
                 .wrap(actix_cors::Cors::permissive())
+                .wrap(StrictValidation)
+                .app_data(daos_data)
                 .app_data(pet_store)
-                .app_data(app_daos)
+                .app_data(order_store)
                 .service(health_check)
-                .configure(config),
+                .configure(config)
+                .configure(configure_idp)
+                .configure(webhooks::config),
         )
         .await;
 
         let req = test::TestRequest::default()
             .method(actix_web::http::Method::OPTIONS)
-            .uri("/health")
+            .uri("/pet")
             .insert_header(("Origin", "http://example.com"))
             .insert_header(("Access-Control-Request-Method", "GET"))
             .to_request();

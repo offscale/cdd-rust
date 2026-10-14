@@ -1,18 +1,89 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
-//! Strongly typed MCP schema models.
+//! Strongly typed MCP schema models for the Model Context Protocol (2024-11-05).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Request ID in JSON-RPC 2.0.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum RequestId {
+    /// String ID.
+    String(String),
+    /// Number ID.
+    Number(i64),
+    /// Null ID (for notifications or error responses with unknown request ID).
+    Null,
+}
+
+impl From<i64> for RequestId {
+    fn from(n: i64) -> Self {
+        Self::Number(n)
+    }
+}
+
+impl From<&str> for RequestId {
+    fn from(s: &str) -> Self {
+        Self::String(s.to_string())
+    }
+}
+
+impl From<String> for RequestId {
+    fn from(s: String) -> Self {
+        Self::String(s)
+    }
+}
+
+/// Progress token for tracking long-running operations.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum ProgressToken {
+    /// String token.
+    String(String),
+    /// Number token.
+    Number(i64),
+}
+
+/// Logging severity level.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum LoggingLevel {
+    /// Debug level.
+    Debug,
+    /// Info level.
+    Info,
+    /// Notice level.
+    Notice,
+    /// Warning level.
+    Warning,
+    /// Error level.
+    Error,
+    /// Critical level.
+    Critical,
+    /// Alert level.
+    Alert,
+    /// Emergency level.
+    Emergency,
+}
+
+/// Conversation participant role.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Role {
+    /// User role.
+    User,
+    /// Assistant role.
+    Assistant,
+}
+
 /// Represents a JSON-RPC 2.0 Request.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct JsonRpcRequest {
-    /// The JSON-RPC version, must be "2.0".
+    /// The JSON-RPC version, must be `"2.0"`.
     pub jsonrpc: String,
     /// The request ID.
-    pub id: Value,
+    pub id: RequestId,
     /// The method to be invoked.
     pub method: String,
     /// The method parameters.
@@ -21,12 +92,12 @@ pub struct JsonRpcRequest {
 }
 
 /// Represents a JSON-RPC 2.0 Response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct JsonRpcResponse {
-    /// The JSON-RPC version, must be "2.0".
+    /// The JSON-RPC version, must be `"2.0"`.
     pub jsonrpc: String,
     /// The request ID.
-    pub id: Value,
+    pub id: RequestId,
     /// The result of the method invocation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<Value>,
@@ -36,7 +107,7 @@ pub struct JsonRpcResponse {
 }
 
 /// Represents a JSON-RPC 2.0 Error.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct JsonRpcError {
     /// The error code.
     pub code: i32,
@@ -48,9 +119,9 @@ pub struct JsonRpcError {
 }
 
 /// Represents a JSON-RPC 2.0 Notification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct JsonRpcNotification {
-    /// The JSON-RPC version, must be "2.0".
+    /// The JSON-RPC version, must be `"2.0"`.
     pub jsonrpc: String,
     /// The method to be invoked.
     pub method: String,
@@ -59,8 +130,20 @@ pub struct JsonRpcNotification {
     pub params: Option<Value>,
 }
 
+/// JSON-RPC Message envelope.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum JsonRpcMessage {
+    /// Request message.
+    Request(JsonRpcRequest),
+    /// Response message.
+    Response(JsonRpcResponse),
+    /// Notification message.
+    Notification(JsonRpcNotification),
+}
+
 /// Initialize request parameters.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct InitializeRequestParams {
     /// Protocol version.
@@ -75,7 +158,7 @@ pub struct InitializeRequestParams {
 }
 
 /// Client capabilities.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientCapabilities {
     /// Experimental capabilities.
@@ -90,7 +173,7 @@ pub struct ClientCapabilities {
 }
 
 /// Client roots capability.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientRootsCapability {
     /// Whether the client supports roots list changed notifications.
@@ -99,7 +182,7 @@ pub struct ClientRootsCapability {
 }
 
 /// Implementation details.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Implementation {
     /// Name.
     pub name: String,
@@ -108,7 +191,7 @@ pub struct Implementation {
 }
 
 /// Initialize result.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct InitializeResult {
     /// Protocol version.
@@ -126,7 +209,7 @@ pub struct InitializeResult {
 }
 
 /// Server capabilities.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerCapabilities {
     /// Experimental capabilities.
@@ -147,7 +230,7 @@ pub struct ServerCapabilities {
 }
 
 /// Server prompts capability.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerPromptsCapability {
     /// Whether the server supports list changed notifications.
@@ -156,7 +239,7 @@ pub struct ServerPromptsCapability {
 }
 
 /// Server resources capability.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerResourcesCapability {
     /// Whether the server supports list changed notifications.
@@ -168,7 +251,7 @@ pub struct ServerResourcesCapability {
 }
 
 /// Server tools capability.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerToolsCapability {
     /// Whether the server supports list changed notifications.
@@ -177,7 +260,7 @@ pub struct ServerToolsCapability {
 }
 
 /// Tool definition.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Tool {
     /// Name.
@@ -190,10 +273,10 @@ pub struct Tool {
 }
 
 /// Tool input schema.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolInputSchema {
-    /// Type (usually "object").
+    /// Type (usually `"object"`).
     #[serde(rename = "type")]
     pub schema_type: String,
     /// Properties.
@@ -205,7 +288,7 @@ pub struct ToolInputSchema {
 }
 
 /// Call tool request parameters.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CallToolRequestParams {
     /// Name.
     pub name: String,
@@ -218,7 +301,7 @@ pub struct CallToolRequestParams {
 }
 
 /// Content returned by a tool.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum CallToolResultContent {
     /// Text content.
@@ -233,14 +316,14 @@ pub enum CallToolResultContent {
 }
 
 /// Text content.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TextContent {
     /// Text.
     pub text: String,
 }
 
 /// Image content.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageContent {
     /// Data.
@@ -250,11 +333,8 @@ pub struct ImageContent {
 }
 
 /// Embedded resource content.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EmbeddedResource {
-    /// Type of content, must be "resource".
-    #[serde(rename = "type")]
-    pub type_: String,
     /// Resource.
     pub resource: Value,
     /// Optional annotations.
@@ -263,7 +343,7 @@ pub struct EmbeddedResource {
 }
 
 /// Call tool result.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CallToolResult {
     /// Content.
@@ -277,7 +357,7 @@ pub struct CallToolResult {
 }
 
 /// List tools request parameters.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ListToolsRequestParams {
     /// Cursor.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -288,7 +368,7 @@ pub struct ListToolsRequestParams {
 }
 
 /// List tools result.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ListToolsResult {
     /// Tools.
@@ -301,209 +381,8 @@ pub struct ListToolsResult {
     pub meta: Option<Value>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn test_jsonrpc_request_serialization() {
-        let req = JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
-            id: json!(1),
-            method: "test".to_string(),
-            params: Some(json!({"foo": "bar"})),
-        };
-        let serialized = serde_json::to_string(&req).expect("must succeed");
-        assert!(serialized.contains("test"));
-
-        let deserialized: JsonRpcRequest = serde_json::from_str(&serialized).expect("must succeed");
-        assert_eq!(deserialized.method, "test");
-    }
-
-    #[test]
-    fn test_jsonrpc_response_serialization() {
-        let res = JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
-            id: json!(1),
-            result: Some(json!({"foo": "bar"})),
-            error: None,
-        };
-        let serialized = serde_json::to_string(&res).expect("must succeed");
-        assert!(serialized.contains("bar"));
-
-        let deserialized: JsonRpcResponse =
-            serde_json::from_str(&serialized).expect("must succeed");
-        assert!(deserialized.result.is_some());
-    }
-
-    #[test]
-    fn test_jsonrpc_error_serialization() {
-        let err = JsonRpcError {
-            code: 1,
-            message: "error".to_string(),
-            data: None,
-        };
-        let serialized = serde_json::to_string(&err).expect("must succeed");
-        assert!(serialized.contains("error"));
-
-        let deserialized: JsonRpcError = serde_json::from_str(&serialized).expect("must succeed");
-        assert_eq!(deserialized.message, "error");
-    }
-
-    #[test]
-    fn test_jsonrpc_notification_serialization() {
-        let notif = JsonRpcNotification {
-            jsonrpc: "2.0".to_string(),
-            method: "notif".to_string(),
-            params: None,
-        };
-        let serialized = serde_json::to_string(&notif).expect("must succeed");
-        assert!(serialized.contains("notif"));
-
-        let deserialized: JsonRpcNotification =
-            serde_json::from_str(&serialized).expect("must succeed");
-        assert_eq!(deserialized.method, "notif");
-    }
-
-    #[test]
-    fn test_initialize_request_serialization() {
-        let req = InitializeRequestParams {
-            meta: None,
-            protocol_version: "2024-11-05".to_string(),
-            capabilities: ClientCapabilities::default(),
-            client_info: Implementation {
-                name: "test".to_string(),
-                version: "1.0".to_string(),
-            },
-        };
-        let serialized = serde_json::to_string(&req).expect("must succeed");
-        assert!(serialized.contains("2024-11-05"));
-
-        let deserialized: InitializeRequestParams =
-            serde_json::from_str(&serialized).expect("must succeed");
-        assert_eq!(deserialized.protocol_version, "2024-11-05");
-    }
-
-    #[test]
-    fn test_initialize_result_serialization() {
-        let res = InitializeResult {
-            meta: None,
-            protocol_version: "2024-11-05".to_string(),
-            capabilities: ServerCapabilities::default(),
-            server_info: Implementation {
-                name: "test".to_string(),
-                version: "1.0".to_string(),
-            },
-            instructions: None,
-        };
-        let serialized = serde_json::to_string(&res).expect("must succeed");
-        assert!(serialized.contains("2024-11-05"));
-
-        let deserialized: InitializeResult =
-            serde_json::from_str(&serialized).expect("must succeed");
-        assert_eq!(deserialized.protocol_version, "2024-11-05");
-    }
-
-    #[test]
-    fn test_tool_serialization() {
-        let tool = Tool {
-            name: "test".to_string(),
-            description: None,
-            input_schema: ToolInputSchema {
-                schema_type: "object".to_string(),
-                properties: None,
-                required: None,
-            },
-        };
-        let serialized = serde_json::to_string(&tool).expect("must succeed");
-        assert!(serialized.contains("test"));
-
-        let deserialized: Tool = serde_json::from_str(&serialized).expect("must succeed");
-        assert_eq!(deserialized.name, "test");
-    }
-
-    #[test]
-    fn test_call_tool_request_serialization() {
-        let req = CallToolRequestParams {
-            meta: None,
-            name: "test".to_string(),
-            arguments: None,
-        };
-        let serialized = serde_json::to_string(&req).expect("must succeed");
-        assert!(serialized.contains("test"));
-
-        let deserialized: CallToolRequestParams =
-            serde_json::from_str(&serialized).expect("must succeed");
-        assert_eq!(deserialized.name, "test");
-    }
-
-    #[test]
-    fn test_call_tool_result_serialization() {
-        let res = CallToolResult {
-            meta: None,
-            content: vec![CallToolResultContent::Text(TextContent {
-                text: "test".to_string(),
-            })],
-            is_error: None,
-        };
-        let serialized = serde_json::to_string(&res).expect("must succeed");
-        assert!(serialized.contains("test"));
-
-        let deserialized: CallToolResult = serde_json::from_str(&serialized).expect("must succeed");
-        assert_eq!(deserialized.content.len(), 1);
-    }
-
-    #[test]
-    fn test_call_tool_result_content_variants() {
-        let image = CallToolResultContent::Image(ImageContent {
-            data: "data".to_string(),
-            mime_type: "image/png".to_string(),
-        });
-        let serialized = serde_json::to_string(&image).expect("must succeed");
-        assert!(serialized.contains("image"));
-
-        let resource = CallToolResultContent::EmbeddedResource(EmbeddedResource {
-            type_: "resource".to_string(),
-            resource: json!({"foo": "bar"}),
-            annotations: None,
-        });
-        let serialized2 = serde_json::to_string(&resource).expect("must succeed");
-        assert!(serialized2.contains("resource"));
-    }
-
-    #[test]
-    fn test_list_tools_request_serialization() {
-        let req = ListToolsRequestParams {
-            cursor: None,
-            meta: None,
-        };
-        let serialized = serde_json::to_string(&req).expect("must succeed");
-        assert!(serialized.contains("{}"));
-
-        let deserialized: ListToolsRequestParams =
-            serde_json::from_str(&serialized).expect("must succeed");
-        assert!(deserialized.cursor.is_none());
-    }
-
-    #[test]
-    fn test_list_tools_result_serialization() {
-        let res = ListToolsResult {
-            meta: None,
-            tools: vec![],
-            next_cursor: None,
-        };
-        let serialized = serde_json::to_string(&res).expect("must succeed");
-        assert!(serialized.contains("tools"));
-
-        let deserialized: ListToolsResult =
-            serde_json::from_str(&serialized).expect("must succeed");
-        assert!(deserialized.tools.is_empty());
-    }
-}
-
 /// Resource definition.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Resource {
     /// URI.
@@ -519,7 +398,7 @@ pub struct Resource {
 }
 
 /// List resources request parameters.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ListResourcesRequestParams {
     /// Cursor.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -530,7 +409,7 @@ pub struct ListResourcesRequestParams {
 }
 
 /// List resources result.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ListResourcesResult {
     /// Resources.
@@ -544,7 +423,7 @@ pub struct ListResourcesResult {
 }
 
 /// Read resource request parameters.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReadResourceRequestParams {
     /// URI.
     pub uri: String,
@@ -554,7 +433,7 @@ pub struct ReadResourceRequestParams {
 }
 
 /// Resource contents.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum ResourceContents {
     /// Text resource.
@@ -564,7 +443,7 @@ pub enum ResourceContents {
 }
 
 /// Text resource contents.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TextResourceContents {
     /// URI.
@@ -577,7 +456,7 @@ pub struct TextResourceContents {
 }
 
 /// Blob resource contents.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BlobResourceContents {
     /// URI.
@@ -590,7 +469,7 @@ pub struct BlobResourceContents {
 }
 
 /// Read resource result.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReadResourceResult {
     /// Contents.
     pub contents: Vec<ResourceContents>,
@@ -600,7 +479,7 @@ pub struct ReadResourceResult {
 }
 
 /// Prompt definition.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Prompt {
     /// Name.
@@ -614,7 +493,7 @@ pub struct Prompt {
 }
 
 /// Prompt argument.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptArgument {
     /// Name.
@@ -628,7 +507,7 @@ pub struct PromptArgument {
 }
 
 /// List prompts request parameters.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ListPromptsRequestParams {
     /// Cursor.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -639,7 +518,7 @@ pub struct ListPromptsRequestParams {
 }
 
 /// List prompts result.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ListPromptsResult {
     /// Prompts.
@@ -653,7 +532,7 @@ pub struct ListPromptsResult {
 }
 
 /// Get prompt request parameters.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GetPromptRequestParams {
     /// Name.
     pub name: String,
@@ -666,17 +545,17 @@ pub struct GetPromptRequestParams {
 }
 
 /// Prompt message.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptMessage {
     /// Role.
-    pub role: String,
+    pub role: Role,
     /// Content.
     pub content: CallToolResultContent,
 }
 
 /// Get prompt result.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct GetPromptResult {
     /// Description.
@@ -689,111 +568,8 @@ pub struct GetPromptResult {
     pub meta: Option<Value>,
 }
 
-#[cfg(test)]
-mod additional_tests_more {
-    use super::*;
-
-    #[test]
-    fn test_resource_serialization() {
-        let r = Resource {
-            uri: "file:///a".to_string(),
-            name: "a".to_string(),
-            description: None,
-            mime_type: None,
-        };
-        assert!(serde_json::to_string(&r)
-            .expect("must succeed")
-            .contains("file:///a"));
-    }
-
-    #[test]
-    fn test_read_resource_result() {
-        let r = ReadResourceResult {
-            meta: None,
-            contents: vec![ResourceContents::Text(TextResourceContents {
-                uri: "file:///a".to_string(),
-                mime_type: None,
-                text: "text".to_string(),
-            })],
-        };
-        assert!(serde_json::to_string(&r)
-            .expect("must succeed")
-            .contains("text"));
-
-        let rb = ReadResourceResult {
-            meta: None,
-            contents: vec![ResourceContents::Blob(BlobResourceContents {
-                uri: "file:///a".to_string(),
-                mime_type: None,
-                blob: "base64".to_string(),
-            })],
-        };
-        assert!(serde_json::to_string(&rb)
-            .expect("must succeed")
-            .contains("base64"));
-    }
-
-    #[test]
-    fn test_prompt_serialization() {
-        let p = Prompt {
-            name: "test".to_string(),
-            description: None,
-            arguments: None,
-        };
-        assert!(serde_json::to_string(&p)
-            .expect("must succeed")
-            .contains("test"));
-    }
-
-    #[test]
-    fn test_list_prompts_request_serialization() {
-        let req = ListPromptsRequestParams {
-            cursor: None,
-            meta: None,
-        };
-        assert!(serde_json::to_string(&req)
-            .expect("must succeed")
-            .contains("{}"));
-    }
-
-    #[test]
-    fn test_list_resources_request_serialization() {
-        let req = ListResourcesRequestParams {
-            cursor: None,
-            meta: None,
-        };
-        assert!(serde_json::to_string(&req)
-            .expect("must succeed")
-            .contains("{}"));
-    }
-
-    #[test]
-    fn test_get_prompt_request_serialization() {
-        let req = GetPromptRequestParams {
-            meta: None,
-            name: "a".to_string(),
-            arguments: None,
-        };
-        assert!(serde_json::to_string(&req)
-            .expect("must succeed")
-            .contains("a"));
-    }
-
-    #[test]
-    fn test_get_prompt_result_serialization() {
-        let res = GetPromptResult {
-            meta: None,
-            description: None,
-            messages: vec![],
-        };
-        assert!(serde_json::to_string(&res)
-            .expect("must succeed")
-            .contains("messages"));
-    }
-}
-
 /// Create message request parameters.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateMessageRequestParams {
     /// Messages.
@@ -825,11 +601,11 @@ pub struct CreateMessageRequestParams {
 }
 
 /// Create message result.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateMessageResult {
     /// Role.
-    pub role: String,
+    pub role: Role,
     /// Content.
     pub content: CallToolResultContent,
     /// Model.
@@ -842,57 +618,18 @@ pub struct CreateMessageResult {
     pub meta: Option<Value>,
 }
 
-#[cfg(test)]
-mod additional_tests2 {
-    use super::*;
-
-    #[test]
-    fn test_create_message_request_serialization() {
-        let req = CreateMessageRequestParams {
-            meta: None,
-            messages: vec![],
-            model_preferences: None,
-            system_prompt: None,
-            temperature: None,
-            max_tokens: None,
-            stop_sequences: None,
-            include_context: None,
-            metadata: None,
-        };
-        assert!(serde_json::to_string(&req)
-            .expect("must succeed")
-            .contains("messages"));
-    }
-
-    #[test]
-    fn test_create_message_result_serialization() {
-        let res = CreateMessageResult {
-            meta: None,
-            role: "user".to_string(),
-            content: CallToolResultContent::Text(TextContent {
-                text: "t".to_string(),
-            }),
-            model: "model".to_string(),
-            stop_reason: None,
-        };
-        assert!(serde_json::to_string(&res)
-            .expect("must succeed")
-            .contains("user"));
-    }
-}
-
 /// Set logging level request.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SetLevelRequestParams {
     /// Level.
-    pub level: String,
+    pub level: LoggingLevel,
     /// Meta data.
     #[serde(rename = "_meta", skip_serializing_if = "Option::is_none")]
     pub meta: Option<Value>,
 }
 
 /// Subscribe request.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SubscribeRequestParams {
     /// URI.
     pub uri: String,
@@ -902,7 +639,7 @@ pub struct SubscribeRequestParams {
 }
 
 /// Unsubscribe request.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UnsubscribeRequestParams {
     /// URI.
     pub uri: String,
@@ -912,11 +649,11 @@ pub struct UnsubscribeRequestParams {
 }
 
 /// Logging message notification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LoggingMessageNotificationParams {
     /// Level.
-    pub level: String,
+    pub level: LoggingLevel,
     /// Logger.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub logger: Option<String>,
@@ -928,11 +665,11 @@ pub struct LoggingMessageNotificationParams {
 }
 
 /// Progress notification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProgressNotificationParams {
     /// Progress token.
-    pub progress_token: Value,
+    pub progress_token: ProgressToken,
     /// Progress.
     pub progress: f64,
     /// Total.
@@ -944,7 +681,7 @@ pub struct ProgressNotificationParams {
 }
 
 /// Resource updated notification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResourceUpdatedNotificationParams {
     /// URI.
     pub uri: String,
@@ -954,15 +691,15 @@ pub struct ResourceUpdatedNotificationParams {
 }
 
 /// Ping request.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PingRequestParams {}
 
 /// Cancelled notification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CancelledNotificationParams {
     /// Request ID.
-    pub request_id: Value,
+    pub request_id: RequestId,
     /// Reason.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -972,11 +709,11 @@ pub struct CancelledNotificationParams {
 }
 
 /// List roots request.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ListRootsRequestParams {}
 
 /// Root.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Root {
     /// URI.
     pub uri: String,
@@ -986,7 +723,7 @@ pub struct Root {
 }
 
 /// List roots result.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ListRootsResult {
     /// Roots.
     pub roots: Vec<Root>,
@@ -996,7 +733,7 @@ pub struct ListRootsResult {
 }
 
 /// Complete request.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CompleteRequestParams {
     /// Reference.
     pub ref_: CompleteRequestReference,
@@ -1008,7 +745,7 @@ pub struct CompleteRequestParams {
 }
 
 /// Complete request reference.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type")]
 pub enum CompleteRequestReference {
     /// Prompt reference.
@@ -1026,7 +763,7 @@ pub enum CompleteRequestReference {
 }
 
 /// Complete request argument.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CompleteRequestArgument {
     /// Name.
     pub name: String,
@@ -1035,7 +772,7 @@ pub struct CompleteRequestArgument {
 }
 
 /// Complete result.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CompleteResult {
     /// Completion.
     pub completion: CompleteResultCompletion,
@@ -1045,7 +782,7 @@ pub struct CompleteResult {
 }
 
 /// Complete result completion.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct CompleteResultCompletion {
     /// Values.
@@ -1059,21 +796,21 @@ pub struct CompleteResultCompletion {
 }
 
 /// Sampling message.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SamplingMessage {
     /// Role.
-    pub role: String,
+    pub role: Role,
     /// Content.
     pub content: CallToolResultContent,
 }
 
 /// Empty result.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EmptyResult {}
 
 /// Resource template.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ResourceTemplate {
     /// URI Template.
@@ -1089,7 +826,7 @@ pub struct ResourceTemplate {
 }
 
 /// List resource templates request.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ListResourceTemplatesRequestParams {
     /// Cursor.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1100,7 +837,7 @@ pub struct ListResourceTemplatesRequestParams {
 }
 
 /// List resource templates result.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ListResourceTemplatesResult {
     /// Resource templates.
@@ -1113,230 +850,24 @@ pub struct ListResourceTemplatesResult {
     pub meta: Option<Value>,
 }
 
-#[cfg(test)]
-mod additional_tests3 {
-    use super::*;
-
-    #[test]
-    fn test_set_level_request_serialization() {
-        let req = SetLevelRequestParams {
-            meta: None,
-            level: "info".to_string(),
-        };
-        assert!(serde_json::to_string(&req)
-            .expect("must succeed")
-            .contains("info"));
-    }
-
-    #[test]
-    fn test_subscribe_request_serialization() {
-        let req = SubscribeRequestParams {
-            meta: None,
-            uri: "file:///a".to_string(),
-        };
-        assert!(serde_json::to_string(&req)
-            .expect("must succeed")
-            .contains("file:///a"));
-    }
-
-    #[test]
-    fn test_unsubscribe_request_serialization() {
-        let req = UnsubscribeRequestParams {
-            meta: None,
-            uri: "file:///a".to_string(),
-        };
-        assert!(serde_json::to_string(&req)
-            .expect("must succeed")
-            .contains("file:///a"));
-    }
-
-    #[test]
-    fn test_logging_message_notification_serialization() {
-        let notif = LoggingMessageNotificationParams {
-            meta: None,
-            level: "info".to_string(),
-            logger: None,
-            data: Value::Null,
-        };
-        assert!(serde_json::to_string(&notif)
-            .expect("must succeed")
-            .contains("info"));
-    }
-
-    #[test]
-    fn test_progress_notification_serialization() {
-        let notif = ProgressNotificationParams {
-            meta: None,
-            progress_token: Value::Null,
-            progress: 1.0,
-            total: None,
-        };
-        assert!(serde_json::to_string(&notif)
-            .expect("must succeed")
-            .contains("progress"));
-    }
-
-    #[test]
-    fn test_resource_updated_notification_serialization() {
-        let notif = ResourceUpdatedNotificationParams {
-            meta: None,
-            uri: "file:///a".to_string(),
-        };
-        assert!(serde_json::to_string(&notif)
-            .expect("must succeed")
-            .contains("file:///a"));
-    }
-
-    #[test]
-    fn test_ping_request_serialization() {
-        let req = PingRequestParams {};
-        assert!(serde_json::to_string(&req)
-            .expect("must succeed")
-            .contains("{}"));
-    }
-
-    #[test]
-    fn test_cancelled_notification_serialization() {
-        let notif = CancelledNotificationParams {
-            meta: None,
-            request_id: Value::Null,
-            reason: None,
-        };
-        assert!(serde_json::to_string(&notif)
-            .expect("must succeed")
-            .contains("requestId"));
-    }
-
-    #[test]
-    fn test_list_roots_request_serialization() {
-        let req = ListRootsRequestParams {};
-        assert!(serde_json::to_string(&req)
-            .expect("must succeed")
-            .contains("{}"));
-    }
-
-    #[test]
-    fn test_list_roots_result_serialization() {
-        let res = ListRootsResult {
-            meta: None,
-            roots: vec![Root {
-                uri: "file:///a".to_string(),
-                name: None,
-            }],
-        };
-        assert!(serde_json::to_string(&res)
-            .expect("must succeed")
-            .contains("file:///a"));
-    }
-
-    #[test]
-    fn test_complete_request_serialization() {
-        let req = CompleteRequestParams {
-            meta: None,
-            ref_: CompleteRequestReference::Prompt {
-                name: "test".to_string(),
-            },
-            argument: CompleteRequestArgument {
-                name: "test".to_string(),
-                value: "test".to_string(),
-            },
-        };
-        assert!(serde_json::to_string(&req)
-            .expect("must succeed")
-            .contains("ref/prompt"));
-    }
-
-    #[test]
-    fn test_complete_result_serialization() {
-        let res = CompleteResult {
-            meta: None,
-            completion: CompleteResultCompletion {
-                values: vec![],
-                total: None,
-                has_more: None,
-            },
-        };
-        assert!(serde_json::to_string(&res)
-            .expect("must succeed")
-            .contains("completion"));
-    }
-
-    #[test]
-    fn test_sampling_message_serialization() {
-        let msg = SamplingMessage {
-            role: "user".to_string(),
-            content: CallToolResultContent::Text(TextContent {
-                text: "t".to_string(),
-            }),
-        };
-        assert!(serde_json::to_string(&msg)
-            .expect("must succeed")
-            .contains("user"));
-    }
-
-    #[test]
-    fn test_empty_result_serialization() {
-        let res = EmptyResult {};
-        assert!(serde_json::to_string(&res)
-            .expect("must succeed")
-            .contains("{}"));
-    }
-
-    #[test]
-    fn test_resource_template_serialization() {
-        let rt = ResourceTemplate {
-            uri_template: "test".to_string(),
-            name: "test".to_string(),
-            description: None,
-            mime_type: None,
-        };
-        assert!(serde_json::to_string(&rt)
-            .expect("must succeed")
-            .contains("test"));
-    }
-
-    #[test]
-    fn test_list_resource_templates_request_serialization() {
-        let req = ListResourceTemplatesRequestParams {
-            cursor: None,
-            meta: None,
-        };
-        assert!(serde_json::to_string(&req)
-            .expect("must succeed")
-            .contains("{}"));
-    }
-
-    #[test]
-    fn test_list_resource_templates_result_serialization() {
-        let res = ListResourceTemplatesResult {
-            meta: None,
-            resource_templates: vec![],
-            next_cursor: None,
-        };
-        assert!(serde_json::to_string(&res)
-            .expect("must succeed")
-            .contains("resourceTemplates"));
-    }
-}
-
 /// Tool list changed notification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolListChangedNotificationParams {}
 
 /// Resource list changed notification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResourceListChangedNotificationParams {}
 
 /// Prompt list changed notification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PromptListChangedNotificationParams {}
 
 /// Roots list changed notification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RootsListChangedNotificationParams {}
 
 /// Annotated.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Annotated {
     /// Annotations.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1344,7 +875,7 @@ pub struct Annotated {
 }
 
 /// Annotations.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Annotations {
     /// Audience.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1355,7 +886,7 @@ pub struct Annotations {
 }
 
 /// Client notification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum ClientNotification {
     /// Initialized.
@@ -1369,7 +900,7 @@ pub enum ClientNotification {
 }
 
 /// Initialized notification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InitializedNotification {
     /// Method.
     pub method: String,
@@ -1378,11 +909,11 @@ pub struct InitializedNotification {
 }
 
 /// Initialized notification params.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InitializedNotificationParams {}
 
 /// Cancelled notification wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CancelledNotification {
     /// Method.
     pub method: String,
@@ -1391,7 +922,7 @@ pub struct CancelledNotification {
 }
 
 /// Progress notification wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProgressNotification {
     /// Method.
     pub method: String,
@@ -1400,7 +931,7 @@ pub struct ProgressNotification {
 }
 
 /// Roots list changed notification wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RootsListChangedNotification {
     /// Method.
     pub method: String,
@@ -1409,7 +940,7 @@ pub struct RootsListChangedNotification {
 }
 
 /// Server notification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum ServerNotification {
     /// Cancelled.
@@ -1429,7 +960,7 @@ pub enum ServerNotification {
 }
 
 /// Resource updated notification wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResourceUpdatedNotification {
     /// Method.
     pub method: String,
@@ -1438,7 +969,7 @@ pub struct ResourceUpdatedNotification {
 }
 
 /// Resource list changed notification wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResourceListChangedNotification {
     /// Method.
     pub method: String,
@@ -1447,7 +978,7 @@ pub struct ResourceListChangedNotification {
 }
 
 /// Tool list changed notification wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolListChangedNotification {
     /// Method.
     pub method: String,
@@ -1456,7 +987,7 @@ pub struct ToolListChangedNotification {
 }
 
 /// Prompt list changed notification wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PromptListChangedNotification {
     /// Method.
     pub method: String,
@@ -1465,7 +996,7 @@ pub struct PromptListChangedNotification {
 }
 
 /// Logging message notification wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LoggingMessageNotification {
     /// Method.
     pub method: String,
@@ -1474,7 +1005,7 @@ pub struct LoggingMessageNotification {
 }
 
 /// Model hint.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ModelHint {
     /// Name.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1482,7 +1013,7 @@ pub struct ModelHint {
 }
 
 /// Model preferences.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelPreferences {
     /// Hints.
@@ -1500,7 +1031,7 @@ pub struct ModelPreferences {
 }
 
 /// Client request.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum ClientRequest {
     /// Ping.
@@ -1532,7 +1063,7 @@ pub enum ClientRequest {
 }
 
 /// Server request.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum ServerRequest {
     /// Ping.
@@ -1544,7 +1075,7 @@ pub enum ServerRequest {
 }
 
 /// Client result.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum ClientResult {
     /// Empty.
@@ -1556,7 +1087,7 @@ pub enum ClientResult {
 }
 
 /// Server result.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum ServerResult {
     /// Empty.
@@ -1582,7 +1113,7 @@ pub enum ServerResult {
 }
 
 /// Paginated request.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PaginatedRequest {
     /// Method.
     pub method: String,
@@ -1592,7 +1123,7 @@ pub struct PaginatedRequest {
 }
 
 /// Paginated request params.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PaginatedRequestParams {
     /// Cursor.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1600,7 +1131,7 @@ pub struct PaginatedRequestParams {
 }
 
 /// Paginated result.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PaginatedResult {
     /// Next cursor.
@@ -1612,7 +1143,7 @@ pub struct PaginatedResult {
 }
 
 /// Ping request wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PingRequest {
     /// Method.
     pub method: String,
@@ -1622,7 +1153,7 @@ pub struct PingRequest {
 }
 
 /// Initialize request wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InitializeRequest {
     /// Method.
     pub method: String,
@@ -1631,7 +1162,7 @@ pub struct InitializeRequest {
 }
 
 /// Complete request wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CompleteRequest {
     /// Method.
     pub method: String,
@@ -1640,7 +1171,7 @@ pub struct CompleteRequest {
 }
 
 /// Set level request wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SetLevelRequest {
     /// Method.
     pub method: String,
@@ -1649,7 +1180,7 @@ pub struct SetLevelRequest {
 }
 
 /// Get prompt request wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GetPromptRequest {
     /// Method.
     pub method: String,
@@ -1658,7 +1189,7 @@ pub struct GetPromptRequest {
 }
 
 /// List prompts request wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ListPromptsRequest {
     /// Method.
     pub method: String,
@@ -1668,7 +1199,7 @@ pub struct ListPromptsRequest {
 }
 
 /// List resources request wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ListResourcesRequest {
     /// Method.
     pub method: String,
@@ -1678,7 +1209,7 @@ pub struct ListResourcesRequest {
 }
 
 /// List resource templates request wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ListResourceTemplatesRequest {
     /// Method.
     pub method: String,
@@ -1688,7 +1219,7 @@ pub struct ListResourceTemplatesRequest {
 }
 
 /// Read resource request wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReadResourceRequest {
     /// Method.
     pub method: String,
@@ -1697,7 +1228,7 @@ pub struct ReadResourceRequest {
 }
 
 /// Subscribe request wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SubscribeRequest {
     /// Method.
     pub method: String,
@@ -1706,7 +1237,7 @@ pub struct SubscribeRequest {
 }
 
 /// Unsubscribe request wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UnsubscribeRequest {
     /// Method.
     pub method: String,
@@ -1715,7 +1246,7 @@ pub struct UnsubscribeRequest {
 }
 
 /// Call tool request wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CallToolRequest {
     /// Method.
     pub method: String,
@@ -1724,7 +1255,7 @@ pub struct CallToolRequest {
 }
 
 /// List tools request wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ListToolsRequest {
     /// Method.
     pub method: String,
@@ -1734,7 +1265,7 @@ pub struct ListToolsRequest {
 }
 
 /// Create message request wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CreateMessageRequest {
     /// Method.
     pub method: String,
@@ -1743,7 +1274,7 @@ pub struct CreateMessageRequest {
 }
 
 /// List roots request wrapper.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ListRootsRequest {
     /// Method.
     pub method: String,
@@ -1752,220 +1283,15 @@ pub struct ListRootsRequest {
     pub params: Option<ListRootsRequestParams>,
 }
 
-#[cfg(test)]
-mod additional_tests_events {
-    use super::*;
-
-    #[test]
-    fn test_tool_list_changed_notification_serialization() {
-        let notif = ToolListChangedNotificationParams {};
-        assert!(serde_json::to_string(&notif)
-            .expect("must succeed")
-            .contains("{}"));
-    }
-
-    #[test]
-    fn test_annotated_serialization() {
-        let ann = Annotated { annotations: None };
-        assert!(serde_json::to_string(&ann)
-            .expect("must succeed")
-            .contains("{}"));
-
-        let ann2 = Annotated {
-            annotations: Some(Annotations {
-                audience: Some(vec!["a".to_string()]),
-                priority: Some(1.0),
-            }),
-        };
-        assert!(serde_json::to_string(&ann2)
-            .expect("must succeed")
-            .contains("audience"));
-    }
-
-    #[test]
-    fn test_client_notification_serialization() {
-        let n = ClientNotification::Initialized(InitializedNotification {
-            method: "a".to_string(),
-            params: InitializedNotificationParams {},
-        });
-        assert!(serde_json::to_string(&n)
-            .expect("must succeed")
-            .contains("method"));
-    }
-
-    #[test]
-    fn test_server_notification_serialization() {
-        let n = ServerNotification::ToolListChanged(ToolListChangedNotification {
-            method: "a".to_string(),
-            params: ToolListChangedNotificationParams {},
-        });
-        assert!(serde_json::to_string(&n)
-            .expect("must succeed")
-            .contains("method"));
-    }
-
-    #[test]
-    fn test_model_preferences_serialization() {
-        let p = ModelPreferences {
-            hints: Some(vec![ModelHint {
-                name: Some("a".to_string()),
-            }]),
-            cost_priority: None,
-            speed_priority: None,
-            intelligence_priority: None,
-        };
-        assert!(serde_json::to_string(&p)
-            .expect("must succeed")
-            .contains("hints"));
-    }
-
-    #[test]
-    fn test_client_request_serialization() {
-        let req = ClientRequest::Ping(PingRequest {
-            method: "a".to_string(),
-            params: None,
-        });
-        assert!(serde_json::to_string(&req)
-            .expect("must succeed")
-            .contains("method"));
-    }
-
-    #[test]
-    fn test_server_request_serialization() {
-        let req = ServerRequest::Ping(PingRequest {
-            method: "a".to_string(),
-            params: None,
-        });
-        assert!(serde_json::to_string(&req)
-            .expect("must succeed")
-            .contains("method"));
-    }
-
-    #[test]
-    fn test_client_result_serialization() {
-        let res = ClientResult::Empty(EmptyResult {});
-        assert!(serde_json::to_string(&res)
-            .expect("must succeed")
-            .contains("{}"));
-    }
-
-    #[test]
-    fn test_server_result_serialization() {
-        let res = ServerResult::Empty(EmptyResult {});
-        assert!(serde_json::to_string(&res)
-            .expect("must succeed")
-            .contains("{}"));
-    }
-
-    #[test]
-    fn test_paginated_request_serialization() {
-        let req = PaginatedRequest {
-            method: "a".to_string(),
-            params: None,
-        };
-        assert!(serde_json::to_string(&req)
-            .expect("must succeed")
-            .contains("method"));
-    }
-
-    #[test]
-    fn test_paginated_result_serialization() {
-        let res = PaginatedResult {
-            next_cursor: None,
-            meta: None,
-        };
-        assert!(serde_json::to_string(&res)
-            .expect("must succeed")
-            .contains("{}"));
-    }
-}
-
-/// Logging level.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum LoggingLevel {
-    /// Debug.
-    Debug,
-    /// Info.
-    Info,
-    /// Notice.
-    Notice,
-    /// Warning.
-    Warning,
-    /// Error.
-    Error,
-    /// Critical.
-    Critical,
-    /// Alert.
-    Alert,
-    /// Emergency.
-    Emergency,
-}
-
-#[cfg(test)]
-mod additional_tests5 {
-    use super::*;
-
-    #[test]
-    fn test_logging_level_serialization() {
-        let level = LoggingLevel::Info;
-        assert!(serde_json::to_string(&level)
-            .expect("must succeed")
-            .contains("info"));
-    }
-}
-
 /// Cursor.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Cursor {
     /// Next cursor.
     pub next_cursor: String,
 }
 
-/// Request ID.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(untagged)]
-pub enum RequestId {
-    /// String ID.
-    String(String),
-    /// Number ID.
-    Number(i64),
-}
-
-/// Progress token.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(untagged)]
-pub enum ProgressToken {
-    /// String token.
-    String(String),
-    /// Number token.
-    Number(i64),
-}
-
-/// JSON-RPC Message.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum JsonRpcMessage {
-    /// Request.
-    Request(JsonRpcRequest),
-    /// Response.
-    Response(JsonRpcResponse),
-    /// Notification.
-    Notification(JsonRpcNotification),
-}
-
-/// Role.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum Role {
-    /// User.
-    User,
-    /// Assistant.
-    Assistant,
-}
-
 /// Prompt reference type.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum PromptReferenceType {
     /// Prompt.
@@ -1973,7 +1299,7 @@ pub enum PromptReferenceType {
 }
 
 /// Prompt reference.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptReference {
     /// Type.
@@ -1984,7 +1310,7 @@ pub struct PromptReference {
 }
 
 /// Resource reference type.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum ResourceReferenceType {
     /// Resource.
@@ -1992,7 +1318,7 @@ pub enum ResourceReferenceType {
 }
 
 /// Resource reference.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ResourceReference {
     /// Type.
@@ -2003,83 +1329,418 @@ pub struct ResourceReference {
 }
 
 #[cfg(test)]
-mod additional_tests6 {
+mod tests {
     use super::*;
+    use serde::de::DeserializeOwned;
+    use serde_json::json;
 
-    #[test]
-    fn test_cursor_serialization() {
-        let cursor = Cursor {
-            next_cursor: "a".to_string(),
-        };
-        assert!(serde_json::to_string(&cursor)
-            .expect("must succeed")
-            .contains("a"));
+    fn assert_roundtrip<T>(val: &T)
+    where
+        T: Serialize + DeserializeOwned + PartialEq + std::fmt::Debug,
+    {
+        let serialized = serde_json::to_string(val).expect("serialization must succeed");
+        let deserialized: T =
+            serde_json::from_str(&serialized).expect("deserialization must succeed");
+        assert_eq!(&deserialized, val);
     }
 
     #[test]
-    fn test_request_id_serialization() {
-        let id_str = RequestId::String("a".to_string());
-        assert!(serde_json::to_string(&id_str)
-            .expect("must succeed")
-            .contains("a"));
-        let id_num = RequestId::Number(1);
-        assert!(serde_json::to_string(&id_num)
-            .expect("must succeed")
-            .contains("1"));
-    }
+    fn test_jsonrpc_envelopes_roundtrip() {
+        assert_eq!(RequestId::from(1_i64), RequestId::Number(1));
+        assert_eq!(RequestId::from("req-1"), RequestId::String("req-1".into()));
+        assert_eq!(
+            RequestId::from("req-2".to_string()),
+            RequestId::String("req-2".into())
+        );
 
-    #[test]
-    fn test_progress_token_serialization() {
-        let t_str = ProgressToken::String("a".to_string());
-        assert!(serde_json::to_string(&t_str)
-            .expect("must succeed")
-            .contains("a"));
-        let t_num = ProgressToken::Number(1);
-        assert!(serde_json::to_string(&t_num)
-            .expect("must succeed")
-            .contains("1"));
-    }
-
-    #[test]
-    fn test_json_rpc_message_serialization() {
-        let msg = JsonRpcMessage::Request(JsonRpcRequest {
+        let req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
-            id: Value::Null,
-            method: "m".to_string(),
-            params: None,
-        });
-        assert!(serde_json::to_string(&msg)
-            .expect("must succeed")
-            .contains("method"));
-    }
-
-    #[test]
-    fn test_role_serialization() {
-        let role = Role::User;
-        assert!(serde_json::to_string(&role)
-            .expect("must succeed")
-            .contains("user"));
-    }
-
-    #[test]
-    fn test_prompt_reference_serialization() {
-        let r = PromptReference {
-            ref_type: PromptReferenceType::Prompt,
-            name: "a".to_string(),
+            id: RequestId::Number(1),
+            method: "test".to_string(),
+            params: Some(json!({"foo": "bar"})),
         };
-        assert!(serde_json::to_string(&r)
-            .expect("must succeed")
-            .contains("prompt"));
+        assert_roundtrip(&req);
+
+        let res = JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: RequestId::String("id-1".to_string()),
+            result: Some(json!({"foo": "bar"})),
+            error: None,
+        };
+        assert_roundtrip(&res);
+
+        let err = JsonRpcError {
+            code: -32600,
+            message: "Invalid Request".to_string(),
+            data: Some(json!({"detail": "missing method"})),
+        };
+        assert_roundtrip(&err);
+
+        let notif = JsonRpcNotification {
+            jsonrpc: "2.0".to_string(),
+            method: "notifications/initialized".to_string(),
+            params: None,
+        };
+        assert_roundtrip(&notif);
+
+        assert_roundtrip(&JsonRpcMessage::Request(req));
+        assert_roundtrip(&JsonRpcMessage::Response(res));
+        assert_roundtrip(&JsonRpcMessage::Notification(notif));
     }
 
     #[test]
-    fn test_resource_reference_serialization() {
-        let r = ResourceReference {
+    fn test_initialization_and_tools_roundtrip() {
+        let init_req = InitializeRequestParams {
+            meta: None,
+            protocol_version: "2024-11-05".to_string(),
+            capabilities: ClientCapabilities {
+                experimental: None,
+                roots: Some(ClientRootsCapability {
+                    list_changed: Some(true),
+                }),
+                sampling: None,
+            },
+            client_info: Implementation {
+                name: "test-client".to_string(),
+                version: "1.0.0".to_string(),
+            },
+        };
+        assert_roundtrip(&init_req);
+
+        let init_res = InitializeResult {
+            meta: None,
+            protocol_version: "2024-11-05".to_string(),
+            capabilities: ServerCapabilities {
+                experimental: None,
+                logging: None,
+                prompts: Some(ServerPromptsCapability {
+                    list_changed: Some(false),
+                }),
+                resources: Some(ServerResourcesCapability {
+                    list_changed: Some(true),
+                    subscribe: Some(true),
+                }),
+                tools: Some(ServerToolsCapability {
+                    list_changed: Some(true),
+                }),
+            },
+            server_info: Implementation {
+                name: "test-server".to_string(),
+                version: "1.0.0".to_string(),
+            },
+            instructions: Some("Use tools carefully".to_string()),
+        };
+        assert_roundtrip(&init_res);
+
+        let tool = Tool {
+            name: "my_tool".to_string(),
+            description: Some("A tool".to_string()),
+            input_schema: ToolInputSchema {
+                schema_type: "object".to_string(),
+                properties: Some(json!({"arg": {"type": "string"}})),
+                required: Some(vec!["arg".to_string()]),
+            },
+        };
+        assert_roundtrip(&tool);
+
+        let call_req = CallToolRequestParams {
+            meta: None,
+            name: "my_tool".to_string(),
+            arguments: Some(json!({"arg": "val"})),
+        };
+        assert_roundtrip(&call_req);
+
+        let call_res = CallToolResult {
+            meta: None,
+            content: vec![
+                CallToolResultContent::Text(TextContent {
+                    text: "output".to_string(),
+                }),
+                CallToolResultContent::Image(ImageContent {
+                    data: "base64data".to_string(),
+                    mime_type: "image/png".to_string(),
+                }),
+                CallToolResultContent::EmbeddedResource(EmbeddedResource {
+                    resource: json!({"uri": "file:///a"}),
+                    annotations: None,
+                }),
+            ],
+            is_error: Some(false),
+        };
+        assert_roundtrip(&call_res);
+
+        assert_roundtrip(&ListToolsRequestParams::default());
+        assert_roundtrip(&ListToolsResult {
+            meta: None,
+            tools: vec![tool],
+            next_cursor: None,
+        });
+    }
+
+    #[test]
+    fn test_resources_and_prompts_roundtrip() {
+        let resource = Resource {
+            uri: "file:///a".to_string(),
+            name: "a".to_string(),
+            description: Some("file a".to_string()),
+            mime_type: Some("text/plain".to_string()),
+        };
+        assert_roundtrip(&resource);
+
+        assert_roundtrip(&ListResourcesRequestParams::default());
+        assert_roundtrip(&ListResourcesResult {
+            resources: vec![resource],
+            next_cursor: None,
+            meta: None,
+        });
+
+        assert_roundtrip(&ReadResourceRequestParams {
+            uri: "file:///a".to_string(),
+            meta: None,
+        });
+
+        assert_roundtrip(&ReadResourceResult {
+            meta: None,
+            contents: vec![
+                ResourceContents::Text(TextResourceContents {
+                    uri: "file:///a".to_string(),
+                    mime_type: None,
+                    text: "hello".to_string(),
+                }),
+                ResourceContents::Blob(BlobResourceContents {
+                    uri: "file:///b".to_string(),
+                    mime_type: None,
+                    blob: "YmxvYg==".to_string(),
+                }),
+            ],
+        });
+
+        let prompt = Prompt {
+            name: "code_review".to_string(),
+            description: None,
+            arguments: Some(vec![PromptArgument {
+                name: "code".to_string(),
+                description: None,
+                required: Some(true),
+            }]),
+        };
+        assert_roundtrip(&prompt);
+        assert_roundtrip(&ListPromptsRequestParams::default());
+        assert_roundtrip(&ListPromptsResult {
+            prompts: vec![prompt],
+            next_cursor: None,
+            meta: None,
+        });
+        assert_roundtrip(&GetPromptRequestParams {
+            name: "code_review".to_string(),
+            arguments: None,
+            meta: None,
+        });
+        assert_roundtrip(&GetPromptResult {
+            description: None,
+            messages: vec![PromptMessage {
+                role: Role::User,
+                content: CallToolResultContent::Text(TextContent {
+                    text: "review this".to_string(),
+                }),
+            }],
+            meta: None,
+        });
+    }
+
+    #[test]
+    fn test_messages_logging_and_notifications_roundtrip() {
+        assert_roundtrip(&CreateMessageRequestParams {
+            messages: vec![PromptMessage {
+                role: Role::User,
+                content: CallToolResultContent::Text(TextContent {
+                    text: "hi".to_string(),
+                }),
+            }],
+            model_preferences: None,
+            system_prompt: None,
+            temperature: Some(0.5),
+            max_tokens: Some(100),
+            stop_sequences: None,
+            include_context: None,
+            metadata: None,
+            meta: None,
+        });
+
+        assert_roundtrip(&CreateMessageResult {
+            role: Role::Assistant,
+            content: CallToolResultContent::Text(TextContent {
+                text: "hello".to_string(),
+            }),
+            model: "gemini".to_string(),
+            stop_reason: Some("endTurn".to_string()),
+            meta: None,
+        });
+
+        assert_roundtrip(&SetLevelRequestParams {
+            level: LoggingLevel::Info,
+            meta: None,
+        });
+        assert_roundtrip(&SubscribeRequestParams {
+            uri: "file:///a".to_string(),
+            meta: None,
+        });
+        assert_roundtrip(&UnsubscribeRequestParams {
+            uri: "file:///a".to_string(),
+            meta: None,
+        });
+        assert_roundtrip(&LoggingMessageNotificationParams {
+            level: LoggingLevel::Warning,
+            logger: Some("auth".to_string()),
+            data: json!("warn"),
+            meta: None,
+        });
+        assert_roundtrip(&ProgressNotificationParams {
+            progress_token: ProgressToken::Number(42),
+            progress: 0.5,
+            total: Some(1.0),
+            meta: None,
+        });
+        assert_roundtrip(&ProgressNotificationParams {
+            progress_token: ProgressToken::String("tok".to_string()),
+            progress: 1.0,
+            total: None,
+            meta: None,
+        });
+        assert_roundtrip(&ResourceUpdatedNotificationParams {
+            uri: "file:///a".to_string(),
+            meta: None,
+        });
+        assert_roundtrip(&PingRequestParams {});
+        assert_roundtrip(&CancelledNotificationParams {
+            request_id: RequestId::Number(7),
+            reason: Some("timeout".to_string()),
+            meta: None,
+        });
+        assert_roundtrip(&ListRootsRequestParams {});
+        assert_roundtrip(&ListRootsResult {
+            roots: vec![Root {
+                uri: "file:///workspace".to_string(),
+                name: Some("ws".to_string()),
+            }],
+            meta: None,
+        });
+        assert_roundtrip(&CompleteRequestParams {
+            ref_: CompleteRequestReference::Prompt {
+                name: "p".to_string(),
+            },
+            argument: CompleteRequestArgument {
+                name: "a".to_string(),
+                value: "v".to_string(),
+            },
+            meta: None,
+        });
+        assert_roundtrip(&CompleteRequestParams {
+            ref_: CompleteRequestReference::Resource {
+                uri: "file:///r".to_string(),
+            },
+            argument: CompleteRequestArgument {
+                name: "a".to_string(),
+                value: "v".to_string(),
+            },
+            meta: None,
+        });
+        assert_roundtrip(&CompleteResult {
+            completion: CompleteResultCompletion {
+                values: vec!["v1".to_string()],
+                total: Some(1),
+                has_more: Some(false),
+            },
+            meta: None,
+        });
+        assert_roundtrip(&SamplingMessage {
+            role: Role::User,
+            content: CallToolResultContent::Text(TextContent {
+                text: "sample".to_string(),
+            }),
+        });
+        assert_roundtrip(&EmptyResult {});
+        assert_roundtrip(&ResourceTemplate {
+            uri_template: "file:///{path}".to_string(),
+            name: "tmpl".to_string(),
+            description: None,
+            mime_type: None,
+        });
+        assert_roundtrip(&ListResourceTemplatesRequestParams::default());
+        assert_roundtrip(&ListResourceTemplatesResult {
+            resource_templates: vec![],
+            next_cursor: None,
+            meta: None,
+        });
+    }
+
+    #[test]
+    fn test_wrappers_and_references_roundtrip() {
+        assert_roundtrip(&ToolListChangedNotificationParams {});
+        assert_roundtrip(&ResourceListChangedNotificationParams {});
+        assert_roundtrip(&PromptListChangedNotificationParams {});
+        assert_roundtrip(&RootsListChangedNotificationParams {});
+        assert_roundtrip(&Annotated {
+            annotations: Some(Annotations {
+                audience: Some(vec!["user".to_string()]),
+                priority: Some(0.8),
+            }),
+        });
+        assert_roundtrip(&ClientNotification::Initialized(InitializedNotification {
+            method: "notifications/initialized".to_string(),
+            params: InitializedNotificationParams {},
+        }));
+        assert_roundtrip(&ServerNotification::ResourceUpdated(
+            ResourceUpdatedNotification {
+                method: "notifications/resources/updated".to_string(),
+                params: ResourceUpdatedNotificationParams {
+                    uri: "file:///a".to_string(),
+                    meta: None,
+                },
+            },
+        ));
+        assert_roundtrip(&ToolListChangedNotification {
+            method: "notifications/tools/list_changed".to_string(),
+            params: ToolListChangedNotificationParams {},
+        });
+        assert_roundtrip(&ModelPreferences {
+            hints: Some(vec![ModelHint {
+                name: Some("pro".to_string()),
+            }]),
+            cost_priority: Some(0.2),
+            speed_priority: Some(0.5),
+            intelligence_priority: Some(0.9),
+        });
+        assert_roundtrip(&ClientRequest::Ping(PingRequest {
+            method: "ping".to_string(),
+            params: None,
+        }));
+        assert_roundtrip(&ServerRequest::Ping(PingRequest {
+            method: "ping".to_string(),
+            params: None,
+        }));
+        assert_roundtrip(&ClientResult::Empty(EmptyResult {}));
+        assert_roundtrip(&ServerResult::Empty(EmptyResult {}));
+        assert_roundtrip(&PaginatedRequest {
+            method: "tools/list".to_string(),
+            params: Some(PaginatedRequestParams {
+                cursor: Some("c1".to_string()),
+            }),
+        });
+        assert_roundtrip(&PaginatedResult {
+            next_cursor: Some("c2".to_string()),
+            meta: None,
+        });
+        assert_roundtrip(&Cursor {
+            next_cursor: "c3".to_string(),
+        });
+        assert_roundtrip(&PromptReference {
+            ref_type: PromptReferenceType::Prompt,
+            name: "p".to_string(),
+        });
+        assert_roundtrip(&ResourceReference {
             ref_type: ResourceReferenceType::Resource,
             uri: "file:///a".to_string(),
-        };
-        assert!(serde_json::to_string(&r)
-            .expect("must succeed")
-            .contains("resource"));
+        });
     }
 }

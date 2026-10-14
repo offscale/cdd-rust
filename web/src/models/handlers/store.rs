@@ -1,45 +1,25 @@
-#![allow(unused_variables)]
-#![allow(unused_imports)]
+#![deny(missing_docs)]
 
-use crate::models::*;
-use crate::security;
-use actix_multipart::Multipart;
-use actix_web::{web, HttpResponse, Responder};
-use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
-use serde::Deserialize;
-use serde_json::Value;
-use uuid::Uuid;
+//! Store endpoint parameter models.
 
-/// Returns pet inventories by status
-///
-/// Returns a map of status codes to quantities
-pub async fn get_inventory(api_key: web::ReqData<security::ApiKey>) -> impl Responder {
-    HttpResponse::NotImplemented().finish()
+use serde::{Deserialize, Serialize};
+
+/// Path parameter model for store order operations (`/store/order/{orderId}`).
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+pub struct OrderIdParam {
+    /// Numeric ID of the order.
+    pub order_id: i64,
 }
 
-/// Query parameters for `place_order`.
-#[derive(Debug, Clone, Deserialize)]
-pub struct PlaceOrderQuery {
-    /// order placed for purchasing the pet
-    pub body: Order,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// Place an order for a pet
-///
-pub async fn place_order(query: web::Query<PlaceOrderQuery>) -> impl Responder {
-    HttpResponse::NotImplemented().finish()
-}
-
-/// Find purchase order by ID
-///
-/// For valid response try integer IDs with value >= 1 and <= 10. Other values will generated exceptions
-pub async fn get_order_by_id(order_id: web::Path<i64>) -> impl Responder {
-    HttpResponse::NotImplemented().finish()
-}
-
-/// Delete purchase order by ID
-///
-/// For valid response try integer IDs with positive integer value. Negative or non-integer values will generate API errors
-pub async fn delete_order(order_id: web::Path<i64>) -> impl Responder {
-    HttpResponse::NotImplemented().finish()
+    #[test]
+    fn test_order_id_param() {
+        let p = OrderIdParam { order_id: 42 };
+        let s = serde_json::to_string(&p).expect("must serialize");
+        let d: OrderIdParam = serde_json::from_str(&s).expect("must deserialize");
+        assert_eq!(d, p);
+    }
 }

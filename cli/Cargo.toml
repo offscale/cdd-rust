@@ -16,6 +16,7 @@ derive_more = { version = "^2.1", features = ["from", "display"] }
 serde_json = { version = "^1", features = ["preserve_order"] }
 serde_yaml = "^0.9"
 serde = { version = "1.0.228", features = ["derive"] }
+url = "2.5"
 
 [target.'cfg(not(target_os = "wasi"))'.dependencies]
 ureq = { version = "3", optional = true }

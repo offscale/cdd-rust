@@ -1,68 +1,192 @@
+#![deny(missing_docs)]
+
 //! # Error Handling
 //!
 //! Provides the unified `AppError` enum used across the workspace.
 
-use derive_more::{Display, From};
+use derive_more::{Display, Error, From};
 
-/// The Global Error Enum.
+/// The Global Error Enum used across `cdd-core`, `cdd-cli`, and `cdd-web`.
 ///
-/// We use `derive_more` for boilerplate.
-#[derive(Debug, Display, From)]
+/// Uses `derive_more` for `Display`, `Error`, and `From` conversions.
+#[derive(Debug, Display, Error, From)]
 pub enum AppError {
     /// Wrapper for standard IO errors.
     #[display("IO Error: {_0}")]
     Io(std::io::Error),
 
-    /// Wrapper for format errors.
+    /// Wrapper for string formatting errors.
     #[display("Format Error: {_0}")]
     Fmt(std::fmt::Error),
 
-    /// Wrapper for JSON errors.
+    /// Wrapper for JSON serialization and deserialization errors.
     #[display("JSON Error: {_0}")]
     SerdeJson(serde_json::Error),
 
-    /// Wrapper for YAML errors.
+    /// Wrapper for YAML serialization and deserialization errors.
     #[display("YAML Error: {_0}")]
     SerdeYaml(serde_yaml::Error),
 
-    /// Wrapper for URL parse errors.
+    /// Wrapper for URL parsing errors.
     #[display("URL Parse Error: {_0}")]
     UrlParse(url::ParseError),
 
-    /// Wrapper for Utf8 errors.
+    /// Wrapper for UTF-8 decoding errors.
     #[display("UTF-8 Error: {_0}")]
     Utf8(std::str::Utf8Error),
 
-    /// Wrapper for Database string errors.
-    /// We ignore this for `From<String>` to avoid conflict with General.
+    /// AST parsing failure when analyzing Rust source code.
+    #[display("AST Parse Error in {target}: {details}")]
     #[from(ignore)]
+    #[error(ignore)]
+    AstParse {
+        /// The AST element or file target being parsed.
+        target: String,
+        /// Detailed explanation of the syntax/structure failure.
+        details: String,
+    },
+
+    /// Schema validation failure when inspecting OpenAPI or JSON Schema definitions.
+    #[display("Schema Validation Error at {path}: {reason}")]
+    #[from(ignore)]
+    #[error(ignore)]
+    SchemaValidation {
+        /// The JSON Pointer or document path where validation failed.
+        path: String,
+        /// Explanation of the validation failure.
+        reason: String,
+    },
+
+    /// Reference (`$ref`) resolution failure across internal or external documents.
+    #[display("Reference Resolution Error for '{reference}': {reason}")]
+    #[from(ignore)]
+    #[error(ignore)]
+    ReferenceResolution {
+        /// The `$ref` URI or pointer string.
+        reference: String,
+        /// Explanation of why resolution failed.
+        reason: String,
+    },
+
+    /// Cyclic reference detected in schemas, parameters, headers, links, or path items.
+    #[display("Cycle Detected in {kind}: {target}")]
+    #[from(ignore)]
+    #[error(ignore)]
+    CycleDetected {
+        /// The category of OpenAPI object (e.g. "schema", "parameter", "pathItem").
+        kind: String,
+        /// The identifier or reference involved in the cycle.
+        target: String,
+    },
+
+    /// Unsupported OpenAPI or Swagger specification version.
+    #[display("Unsupported Specification Version: {version}")]
+    #[from(ignore)]
+    #[error(ignore)]
+    UnsupportedSpecVersion {
+        /// The unsupported version string encountered.
+        version: String,
+    },
+
+    /// Missing required field in a specification or configuration object.
+    #[display("Missing Required Field '{field}' in {container}")]
+    #[from(ignore)]
+    #[error(ignore)]
+    MissingRequiredField {
+        /// The parent object or struct name.
+        container: String,
+        /// The missing field name.
+        field: String,
+    },
+
+    /// Wrapper for database or schema synchronization errors.
+    #[from(ignore)]
+    #[error(ignore)]
     #[display("Database Error: {_0}")]
     Database(String),
 
-    /// Generic errors.
+    /// Generic application error message.
+    #[error(ignore)]
     #[display("General Error: {_0}")]
     General(String),
 }
 
 impl From<&str> for AppError {
+    /// Converts a static or borrowed string slice into `AppError::General`.
+    ///
+    /// # Arguments
+    /// * `s` - The error message slice.
+    ///
+    /// # Returns
+    /// * `AppError::General` containing the owned string.
     fn from(s: &str) -> Self {
         AppError::General(s.to_string())
     }
 }
 
-/// Manual implementation of the standard Error trait.
-impl std::error::Error for AppError {}
-
-/// Helper type alias for Result using AppError.
+/// Helper type alias for `Result` using [`AppError`].
 pub type AppResult<T> = Result<T, AppError>;
 
 #[cfg(test)]
-mod additional_tests {
+mod tests {
     use super::*;
 
     #[test]
-    fn test_from_str() {
+    fn test_error_display_and_conversions() {
         let err: AppError = "some error".into();
-        assert_eq!(format!("{}", err), "General Error: some error");
+        assert_eq!(format!("{err}"), "General Error: some error");
+
+        let ast_err = AppError::AstParse {
+            target: "User".to_string(),
+            details: "missing brace".to_string(),
+        };
+        assert_eq!(
+            format!("{ast_err}"),
+            "AST Parse Error in User: missing brace"
+        );
+
+        let schema_err = AppError::SchemaValidation {
+            path: "/paths/pets".to_string(),
+            reason: "invalid type".to_string(),
+        };
+        assert_eq!(
+            format!("{schema_err}"),
+            "Schema Validation Error at /paths/pets: invalid type"
+        );
+
+        let ref_err = AppError::ReferenceResolution {
+            reference: "#/components/schemas/Missing".to_string(),
+            reason: "not found".to_string(),
+        };
+        assert_eq!(
+            format!("{ref_err}"),
+            "Reference Resolution Error for '#/components/schemas/Missing': not found"
+        );
+
+        let cycle_err = AppError::CycleDetected {
+            kind: "schema".to_string(),
+            target: "Node".to_string(),
+        };
+        assert_eq!(format!("{cycle_err}"), "Cycle Detected in schema: Node");
+
+        let ver_err = AppError::UnsupportedSpecVersion {
+            version: "1.0.0".to_string(),
+        };
+        assert_eq!(
+            format!("{ver_err}"),
+            "Unsupported Specification Version: 1.0.0"
+        );
+
+        let missing_err = AppError::MissingRequiredField {
+            container: "Info".to_string(),
+            field: "title".to_string(),
+        };
+        assert_eq!(
+            format!("{missing_err}"),
+            "Missing Required Field 'title' in Info"
+        );
+
+        let db_err = AppError::Database("connection lost".to_string());
+        assert_eq!(format!("{db_err}"), "Database Error: connection lost");
     }
 }

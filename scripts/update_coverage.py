@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
-import subprocess
+import glob
+import json
 import os
 import re
+import subprocess
+import sys
+
 
 def get_color(cov):
     try:
@@ -15,14 +19,40 @@ def get_color(cov):
     except ValueError:
         return "red"
 
+
+def check_no_coverage_cheats():
+    forbidden = ["tarpaulin_include", "coverage(off)"]
+    offenders = []
+    for path in (
+        glob.glob("core/src/**/*.rs", recursive=True)
+        + glob.glob("cli/src/**/*.rs", recursive=True)
+        + glob.glob("web/src/**/*.rs", recursive=True)
+    ):
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+        for token in forbidden:
+            if token in content:
+                offenders.append(f"{path} (contains '{token}')")
+        if "/// Documented" in content:
+            offenders.append(f"{path} (contains placeholder '/// Documented')")
+    if offenders:
+        print("Error: Coverage or documentation cheat markers detected:")
+        for offender in offenders:
+            print(f"  - {offender}")
+        sys.exit(1)
+
+
 def main():
+    check_no_coverage_cheats()
+
     print("Calculating test coverage...")
     test_cov = "0.00"
     try:
-        result = subprocess.run(["cargo", "tarpaulin", "--workspace"], capture_output=True, text=True)
-        # Parse test coverage
+        result = subprocess.run(
+            ["cargo", "tarpaulin", "--workspace"], capture_output=True, text=True
+        )
         output = result.stdout + result.stderr
-        match = re.search(r'(\d+\.\d+)%\s*coverage', output)
+        match = re.search(r"(\d+\.\d+)%\s*coverage", output)
         if match:
             test_cov = match.group(1)
     except FileNotFoundError:
@@ -35,39 +65,59 @@ def main():
     print("Calculating doc coverage...")
     doc_cov = "0.00"
     try:
-        # Check nightly
         subprocess.run(["cargo", "+nightly", "--version"], capture_output=True, check=True)
-        
-        # Get packages
-        result = subprocess.run(["cargo", "tree", "--workspace", "--depth", "0"], capture_output=True, text=True, check=True)
-        packages = []
-        for line in result.stdout.splitlines():
-            if ' v' in line:
-                packages.append(line.split(' v')[0])
-                
+
+        targets = [
+            ("cdd-core", ["--lib"]),
+            ("cdd-cli", ["--lib"]),
+            ("cdd-cli", ["--bin", "cdd-rust"]),
+            ("cdd-web", ["--lib"]),
+            ("cdd-web", ["--bin", "cdd-web"]),
+        ]
+
         total_docs = 0
         documented = 0
-        
-        for pkg in packages:
+
+        for pkg, target_args in targets:
             res = subprocess.run(
-                ["cargo", "+nightly", "rustdoc", "-p", pkg, "--", "-Z", "unstable-options", "--show-coverage", "--output-format", "json"],
-                capture_output=True, text=True
+                [
+                    "cargo",
+                    "+nightly",
+                    "rustdoc",
+                    "-p",
+                    pkg,
+                    *target_args,
+                    "--",
+                    "-Z",
+                    "unstable-options",
+                    "--show-coverage",
+                    "--output-format",
+                    "json",
+                ],
+                capture_output=True,
+                text=True,
             )
-            # Find "total": X and "with_docs": Y
             out = res.stdout + res.stderr
-            total_matches = re.findall(r'"total":\s*(\d+)', out)
-            docs_matches = re.findall(r'"with_docs":\s*(\d+)', out)
-            
-            for m in total_matches:
-                total_docs += int(m)
-            for m in docs_matches:
-                documented += int(m)
-                
+            match = re.search(r'Generated output into "([^"]+\.json)"', out)
+            if match and os.path.exists(match.group(1)):
+                with open(match.group(1), "r", encoding="utf-8") as jf:
+                    data = json.load(jf)
+                for file_stats in data.values():
+                    total_docs += int(file_stats.get("total", 0))
+                    documented += int(file_stats.get("with_docs", 0))
+
         if total_docs > 0:
             doc_cov = f"{(documented * 100.0 / total_docs):.2f}"
-            
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        print("Warning: nightly toolchain is not installed or error calculating doc coverage. Doc coverage will be 0.00%.")
+            if documented < total_docs:
+                print(
+                    f"Error: Doc coverage is {doc_cov}% ({documented}/{total_docs}), required 100.00%."
+                )
+                sys.exit(1)
+
+    except (FileNotFoundError, subprocess.CalledProcessError) as e:
+        print(
+            f"Warning: nightly toolchain is not installed or error calculating doc coverage ({e}). Doc coverage will be 0.00%."
+        )
 
     print(f"Doc coverage: {doc_cov}%")
 
@@ -76,14 +126,23 @@ def main():
 
     if os.path.exists("README.md"):
         print("Updating README.md badges...")
-        with open("README.md", "r") as f:
+        with open("README.md", "r", encoding="utf-8") as f:
             content = f.read()
-            
-        content = re.sub(r'badge/test_coverage-[\d\.]+(?:%|%25)-([a-zA-Z]+)', f'badge/test_coverage-{test_cov}%25-{test_color}', content)
-        content = re.sub(r'badge/doc_coverage-[\d\.]+(?:%|%25)-([a-zA-Z]+)', f'badge/doc_coverage-{doc_cov}%25-{doc_color}', content)
-        
-        with open("README.md", "w") as f:
+
+        content = re.sub(
+            r"badge/test_coverage-[\d\.]+(?:%|%25)-([a-zA-Z]+)",
+            f"badge/test_coverage-{test_cov}%25-{test_color}",
+            content,
+        )
+        content = re.sub(
+            r"badge/doc_coverage-[\d\.]+(?:%|%25)-([a-zA-Z]+)",
+            f"badge/doc_coverage-{doc_cov}%25-{doc_color}",
+            content,
+        )
+
+        with open("README.md", "w", encoding="utf-8") as f:
             f.write(content)
+
 
 if __name__ == "__main__":
     main()

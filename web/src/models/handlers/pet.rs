@@ -1,151 +1,76 @@
-#![allow(unused_variables)]
-#![allow(unused_imports)]
+#![deny(missing_docs)]
 
-use crate::models::*;
-use crate::security;
-use actix_multipart::Multipart;
-use actix_web::{web, HttpResponse, Responder};
-use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
-use serde::Deserialize;
-use serde_json::Value;
-use uuid::Uuid;
+//! Pet endpoint parameter models.
 
-/// Query parameters for `add_pet`.
-#[derive(Debug, Clone, Deserialize)]
-pub struct AddPetQuery {
-    /// Pet object that needs to be added to the store
-    pub body: Pet,
-}
+use serde::{Deserialize, Serialize};
 
-/// Add a new pet to the store
-///
-pub async fn add_pet(
-    query: web::Query<AddPetQuery>,
-    petstore_auth: web::ReqData<
-        security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>,
-    >,
-) -> impl Responder {
-    HttpResponse::NotImplemented().finish()
-}
-
-/// Query parameters for `update_pet`.
-#[derive(Debug, Clone, Deserialize)]
-pub struct UpdatePetQuery {
-    /// Pet object that needs to be added to the store
-    pub body: Pet,
-}
-
-/// Update an existing pet
-///
-pub async fn update_pet(
-    query: web::Query<UpdatePetQuery>,
-    petstore_auth: web::ReqData<
-        security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>,
-    >,
-) -> impl Responder {
-    HttpResponse::NotImplemented().finish()
-}
-
-/// Query parameters for `find_pets_by_status`.
-#[derive(Debug, Clone, Deserialize)]
+/// Query parameters for `GET /pet/findByStatus`.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct FindPetsByStatusQuery {
-    /// Status values that need to be considered for filter
+    /// Status values that need to be considered for filter.
     pub status: Vec<String>,
 }
 
-/// Finds Pets by status
-///
-/// Multiple status values can be provided with comma separated strings
-pub async fn find_pets_by_status(
-    query: web::Query<FindPetsByStatusQuery>,
-    petstore_auth: web::ReqData<
-        security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>,
-    >,
-) -> impl Responder {
-    HttpResponse::NotImplemented().finish()
-}
-
-/// Query parameters for `find_pets_by_tags`.
-#[derive(Debug, Clone, Deserialize)]
+/// Query parameters for `GET /pet/findByTags`.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct FindPetsByTagsQuery {
-    /// Tags to filter by
+    /// Tags to filter by.
     pub tags: Vec<String>,
 }
 
-/// Finds Pets by tags
-///
-/// Multiple tags can be provided with comma separated strings. Use tag1, tag2, tag3 for testing.
-#[deprecated]
-pub async fn find_pets_by_tags(
-    query: web::Query<FindPetsByTagsQuery>,
-    petstore_auth: web::ReqData<
-        security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>,
-    >,
-) -> impl Responder {
-    HttpResponse::NotImplemented().finish()
-}
-
-/// Find pet by ID
-///
-/// Returns a single pet
-pub async fn get_pet_by_id(
-    pet_id: web::Path<i64>,
-    api_key: web::ReqData<security::ApiKey>,
-) -> impl Responder {
-    HttpResponse::NotImplemented().finish()
-}
-
-/// Query parameters for `update_pet_with_form`.
-#[derive(Debug, Clone, Deserialize)]
-pub struct UpdatePetWithFormQuery {
-    /// Updated name of the pet
+/// Form parameters for `POST /pet/{petId}`.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct UpdatePetWithFormForm {
+    /// Updated name of the pet.
     pub name: Option<String>,
-    /// Updated status of the pet
+    /// Updated status of the pet.
     pub status: Option<String>,
 }
 
-/// Updates a pet in the store with form data
-///
-pub async fn update_pet_with_form(
-    pet_id: web::Path<i64>,
-    query: web::Query<UpdatePetWithFormQuery>,
-    petstore_auth: web::ReqData<
-        security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>,
-    >,
-) -> impl Responder {
-    HttpResponse::NotImplemented().finish()
+/// Header parameters for `DELETE /pet/{petId}`.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct DeletePetHeaders {
+    /// Optional API key header.
+    pub api_key: Option<String>,
 }
 
-/// Deletes a pet
-///
-pub async fn delete_pet(
-    pet_id: web::Path<i64>,
-    api_key: web::Header<String>,
-    petstore_auth: web::ReqData<
-        security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>,
-    >,
-) -> impl Responder {
-    HttpResponse::NotImplemented().finish()
-}
-
-/// Query parameters for `upload_file`.
-#[derive(Debug, Clone, Deserialize)]
+/// Query parameters for `POST /pet/{petId}/uploadImage`.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct UploadFileQuery {
-    /// Additional data to pass to server
-    #[serde(rename = "additionalMetadata")]
-    pub additionalmetadata: Option<String>,
-    /// file to upload
-    pub file: Option<Vec<u8>>,
+    /// Additional metadata to pass to server.
+    pub additional_metadata: Option<String>,
 }
 
-/// uploads an image
-///
-pub async fn upload_file(
-    pet_id: web::Path<i64>,
-    query: web::Query<UploadFileQuery>,
-    petstore_auth: web::ReqData<
-        security::PetstoreAuth<(security::scopes::WritePets, security::scopes::ReadPets)>,
-    >,
-) -> impl Responder {
-    HttpResponse::NotImplemented().finish()
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pet_handler_models_serde() {
+        let q = FindPetsByStatusQuery {
+            status: vec!["available".to_string()],
+        };
+        let json = serde_json::to_string(&q).expect("must serialize");
+        let parsed: FindPetsByStatusQuery = serde_json::from_str(&json).expect("must deserialize");
+        assert_eq!(parsed, q);
+
+        let tags = FindPetsByTagsQuery {
+            tags: vec!["tag1".to_string()],
+        };
+        assert_eq!(tags.tags.len(), 1);
+
+        let form = UpdatePetWithFormForm {
+            name: Some("Rex".to_string()),
+            status: None,
+        };
+        assert_eq!(form.name.as_deref(), Some("Rex"));
+
+        let headers = DeletePetHeaders { api_key: None };
+        assert!(headers.api_key.is_none());
+
+        let upload = UploadFileQuery {
+            additional_metadata: Some("meta".to_string()),
+        };
+        assert_eq!(upload.additional_metadata.as_deref(), Some("meta"));
+    }
 }

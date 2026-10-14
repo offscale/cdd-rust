@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Callback Parsing
 //!
@@ -33,9 +32,7 @@ pub fn resolve_callback_object(
     match cb_ref {
         RefOr::T(map) => Ok((map.clone(), None, None)),
         RefOr::Ref(r) => {
-            if let Some((comps, self_uri)) =
-                components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))
-            {
+            if let Some((comps, self_uri)) = components.map(|c| (c, c.self_uri.as_deref())) {
                 if let Some(ref_name) =
                     extract_component_name(&r.ref_location, self_uri, "callbacks")
                 {
@@ -364,6 +361,7 @@ mod tests {
         let mut components = ShimComponents {
             security_schemes: None,
             path_items: None,
+            self_uri: None,
             extra: BTreeMap::new(),
         };
         components.extra.insert(
@@ -600,6 +598,7 @@ mod tests {
         let mut components = ShimComponents {
             security_schemes: None,
             path_items: None,
+            self_uri: None,
             extra: BTreeMap::new(),
         };
 

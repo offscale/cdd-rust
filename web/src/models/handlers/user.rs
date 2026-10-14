@@ -1,112 +1,30 @@
-#![allow(unused_variables)]
-#![allow(unused_imports)]
+#![deny(missing_docs)]
 
-use crate::models::*;
-use crate::security;
-use actix_multipart::Multipart;
-use actix_web::{web, HttpResponse, Responder};
-use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
-use serde::Deserialize;
-use serde_json::Value;
-use uuid::Uuid;
+//! User endpoint parameter models.
 
-/// Query parameters for `create_user`.
-#[derive(Debug, Clone, Deserialize)]
-pub struct CreateUserQuery {
-    /// Created user object
-    pub body: User,
-}
+use serde::{Deserialize, Serialize};
 
-/// Create user
-///
-/// This can only be done by the logged in user.
-pub async fn create_user(query: web::Query<CreateUserQuery>) -> impl Responder {
-    HttpResponse::NotImplemented().finish()
-}
-
-/// Query parameters for `create_users_with_array_input`.
-#[derive(Debug, Clone, Deserialize)]
-pub struct CreateUsersWithArrayInputQuery {
-    /// List of user object
-    pub body: Vec<User>,
-}
-
-/// Creates list of users with given input array
-///
-pub async fn create_users_with_array_input(
-    query: web::Query<CreateUsersWithArrayInputQuery>,
-) -> impl Responder {
-    HttpResponse::NotImplemented().finish()
-}
-
-/// Query parameters for `create_users_with_list_input`.
-#[derive(Debug, Clone, Deserialize)]
-pub struct CreateUsersWithListInputQuery {
-    /// List of user object
-    pub body: Vec<User>,
-}
-
-/// Creates list of users with given input array
-///
-pub async fn create_users_with_list_input(
-    query: web::Query<CreateUsersWithListInputQuery>,
-) -> impl Responder {
-    HttpResponse::NotImplemented().finish()
-}
-
-/// Query parameters for `login_user`.
-#[derive(Debug, Clone, Deserialize)]
+/// Query parameters for `GET /user/login`.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct LoginUserQuery {
-    /// The password for login in clear text
-    pub password: String,
-    /// The user name for login
+    /// The user name for login.
     pub username: String,
+    /// The password for login in clear text.
+    pub password: String,
 }
 
-/// Logs user into the system
-///
-pub async fn login_user(query: web::Query<LoginUserQuery>) -> actix_web::Result<HttpResponse> {
-    // Required Response Headers:
-    // - X-Expires-After: String (date in UTC when token expires)
-    // - X-Rate-Limit: String (calls per hour allowed by the user)
-    // Example:
-    // HttpResponse::[Status]()
-    //     .finish()
-    Ok(HttpResponse::NotImplemented().finish())
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// Logs out current logged in user session
-///
-pub async fn logout_user() -> impl Responder {
-    HttpResponse::NotImplemented().finish()
-}
-
-/// Get user by user name
-///
-pub async fn get_user_by_name(username: web::Path<String>) -> impl Responder {
-    HttpResponse::NotImplemented().finish()
-}
-
-/// Query parameters for `update_user`.
-#[derive(Debug, Clone, Deserialize)]
-pub struct UpdateUserQuery {
-    /// Updated user object
-    pub body: User,
-}
-
-/// Updated user
-///
-/// This can only be done by the logged in user.
-pub async fn update_user(
-    username: web::Path<String>,
-    query: web::Query<UpdateUserQuery>,
-) -> impl Responder {
-    HttpResponse::NotImplemented().finish()
-}
-
-/// Delete user
-///
-/// This can only be done by the logged in user.
-pub async fn delete_user(username: web::Path<String>) -> impl Responder {
-    HttpResponse::NotImplemented().finish()
+    #[test]
+    fn test_login_user_query() {
+        let q = LoginUserQuery {
+            username: "alice".to_string(),
+            password: "secret".to_string(),
+        };
+        let s = serde_json::to_string(&q).expect("must serialize");
+        let d: LoginUserQuery = serde_json::from_str(&s).expect("must deserialize");
+        assert_eq!(d, q);
+    }
 }

@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Route Builder
 //!
@@ -666,7 +665,7 @@ fn resolve_security_scheme(
             }
 
             // URI-form security scheme reference (OAS 3.2).
-            let self_uri = comps.extra.get("__self").and_then(|v| v.as_str());
+            let self_uri = comps.self_uri.as_deref();
             if let Some(ref_name) = extract_component_name(name, self_uri, "securitySchemes") {
                 if let Some(ref_or) = schemes.get(&ref_name) {
                     if let Some(info) =
@@ -712,7 +711,7 @@ fn resolve_security_scheme_ref(
     registry: Option<&DocumentRegistry>,
     base_uri: Option<&Url>,
 ) -> Option<SecuritySchemeInfo> {
-    let self_uri = components.extra.get("__self").and_then(|v| v.as_str());
+    let self_uri = components.self_uri.as_deref();
     if let Some(ref_name) = extract_component_name(ref_str, self_uri, "securitySchemes") {
         if let Some(RefOr::T(shim)) = schemes.get(&ref_name) {
             return Some(build_security_scheme_info(shim));

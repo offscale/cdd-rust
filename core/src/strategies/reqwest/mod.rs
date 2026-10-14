@@ -1,10 +1,9 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Reqwest Strategy Module
 //!
-//! Implementation of `BackendStrategy` for generating a pure Rust client library
-//! using `reqwest` and `serde`.
+//! Implementation of [`CodegenStrategy`], [`HttpClientStrategy`], and [`BackendStrategy`]
+//! for generating a pure Rust client library using `reqwest` and `serde`.
 
 pub mod extractors;
 pub mod registration;
@@ -12,88 +11,43 @@ pub mod scaffolding;
 pub mod testing;
 
 use crate::openapi::parse::ParsedRoute;
-use crate::strategies::BackendStrategy;
+use crate::strategies::{BackendStrategy, CodegenStrategy, HttpClientStrategy, StrategyKind};
 
 /// Strategy for generating Reqwest client SDK code.
 pub struct ReqwestStrategy;
 
-impl BackendStrategy for ReqwestStrategy {
-    fn handler_imports(&self) -> String {
+impl CodegenStrategy for ReqwestStrategy {
+    fn kind(&self) -> StrategyKind {
+        StrategyKind::HttpClient
+    }
+
+    fn module_imports(&self) -> String {
         scaffolding::handler_imports()
     }
 
-    fn handler_signature(
-        &self,
-        route: &crate::openapi::parse::ParsedRoute,
-        args: &[String],
-    ) -> String {
+    fn emit_handler(&self, route: &ParsedRoute, args: &[String]) -> String {
         scaffolding::handler_signature(route, args)
     }
+}
 
-    fn extra_handler_docs(&self, route: &ParsedRoute) -> String {
+impl HttpClientStrategy for ReqwestStrategy {
+    fn client_operation_docs(&self, route: &ParsedRoute) -> String {
         format!(
-            "/// @OAS_METHOD: {}\n/// @OAS_PATH: {}\n",
+            "/// @OAS_METHOD: {}
+/// @OAS_PATH: {}
+",
             route.method, route.path
         )
     }
 
-    fn path_extractor(&self, inner_types: &[String]) -> String {
-        extractors::path_extractor(inner_types)
+    fn client_mock_test(&self, route: &ParsedRoute, crate_name: &str) -> String {
+        testing::generate_custom_test(route, crate_name)
     }
+}
 
-    fn query_extractor(&self) -> String {
-        extractors::query_extractor()
-    }
-
-    fn typed_query_extractor(&self, inner_type: &str) -> String {
-        extractors::typed_query_extractor(inner_type)
-    }
-
-    fn query_string_extractor(
-        &self,
-        inner_type: &str,
-        content_media_type: Option<&crate::openapi::parse::models::ContentMediaType>,
-    ) -> String {
-        extractors::query_string_extractor(inner_type, content_media_type)
-    }
-
-    fn header_extractor(&self, inner_type: &str) -> String {
-        extractors::header_extractor(inner_type)
-    }
-
-    fn cookie_extractor(&self) -> String {
-        extractors::cookie_extractor()
-    }
-
-    fn body_extractor(&self, body_type: &str) -> String {
-        extractors::body_extractor(body_type)
-    }
-
-    fn form_extractor(&self, body_type: &str) -> String {
-        extractors::form_extractor(body_type)
-    }
-
-    fn multipart_extractor(&self, body_type: &str) -> String {
-        extractors::multipart_extractor(body_type)
-    }
-
-    fn text_extractor(&self, body_type: &str) -> String {
-        extractors::text_extractor(body_type)
-    }
-
-    fn bytes_extractor(&self, body_type: &str) -> String {
-        extractors::bytes_extractor(body_type)
-    }
-
-    fn security_extractor(
-        &self,
-        requirements: &[crate::openapi::parse::models::SecurityRequirementGroup],
-    ) -> String {
-        extractors::security_extractor(requirements)
-    }
-
-    fn route_registration_statement(&self, route: &ParsedRoute, handler_full_path: &str) -> String {
-        registration::route_registration_statement(route, handler_full_path)
+impl BackendStrategy for ReqwestStrategy {
+    fn extra_handler_docs(&self, route: &ParsedRoute) -> String {
+        self.client_operation_docs(route)
     }
 
     fn test_imports(&self) -> String {
@@ -124,11 +78,7 @@ impl BackendStrategy for ReqwestStrategy {
         testing::test_assertion()
     }
 
-    fn test_validation_helper(&self) -> String {
-        testing::test_validation_helper()
-    }
-
     fn generate_custom_test(&self, route: &ParsedRoute, app_factory: &str) -> Option<String> {
-        Some(testing::generate_custom_test(route, app_factory))
+        Some(self.client_mock_test(route, app_factory))
     }
 }

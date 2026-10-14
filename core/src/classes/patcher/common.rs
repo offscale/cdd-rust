@@ -1,4 +1,7 @@
-#![cfg(not(tarpaulin_include))]
+#![deny(missing_docs)]
+
+//! Shared AST lookup and indentation helpers for source patching.
+
 use crate::error::{AppError, AppResult};
 use ra_ap_syntax::ast::HasName;
 use ra_ap_syntax::{ast, AstNode, SourceFile, SyntaxKind, SyntaxToken};

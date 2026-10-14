@@ -1,653 +1,469 @@
-//! JSON-RPC Server Module
+#![deny(missing_docs)]
 #![cfg(feature = "server")]
+
+//! JSON-RPC Server Module
+//!
+//! Exposes `cdd-cli` commands over an HTTP JSON-RPC 2.0 endpoint by delegating
+//! to the unified `crate::mcp::dispatch_tool_command` registry.
+
+use crate::from_openapi::FromOpenApiSubcommand;
+use crate::mcp::dispatch_tool_command;
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use cdd_core::error::AppResult;
 use clap::Args;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 
-use crate::from_openapi::{from_openapi, FromOpenApiConfig, ServerFramework};
-use crate::to_docs_json::{to_docs_json, ToDocsJsonConfig};
-use crate::to_openapi::{to_openapi, ToOpenApiConfig};
-use std::path::PathBuf;
-
-/// Arguments for the JSON-RPC server command.
+/// Arguments for the `serve_json_rpc` command.
 #[derive(Args, Debug, Clone)]
 pub struct ServeJsonRpcArgs {
     /// Port to listen on.
-    #[clap(short, long, default_value = "8080", env = "CDD_PORT")]
-    /// The port to listen on.
+    #[clap(short = 'p', long, default_value_t = 8080, env = "CDD_PORT")]
     pub port: u16,
 
-    /// Interface to listen on.
-    #[clap(short, long, default_value = "127.0.0.1", env = "CDD_LISTEN")]
-    /// The address to listen on.
+    /// Host address to bind to.
+    #[clap(short = 'l', long, default_value = "127.0.0.1", env = "CDD_LISTEN")]
     pub listen: String,
 }
 
-/// JSON-RPC Request schema.
-#[derive(Deserialize, Serialize, Debug, PartialEq)]
-struct RpcRequest {
-    /// JSON-RPC version.
+/// JSON-RPC 2.0 Request Envelope.
+#[derive(Deserialize, Debug)]
+struct JsonRpcRequest {
     jsonrpc: String,
-    /// Method name.
     method: String,
-    /// Parameters.
-    #[allow(dead_code)]
-    params: Option<serde_json::Value>,
-    /// Request ID.
-    id: Option<serde_json::Value>,
+    params: Option<Value>,
+    id: Option<Value>,
 }
 
-/// JSON-RPC Response schema.
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct RpcResponse {
-    /// JSON-RPC version.
+/// JSON-RPC 2.0 Response Envelope.
+#[derive(Serialize, Debug)]
+struct JsonRpcResponse {
     jsonrpc: String,
-    /// Result payload.
     #[serde(skip_serializing_if = "Option::is_none")]
-    result: Option<serde_json::Value>,
-    /// Error payload.
+    result: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<RpcError>,
-    /// Request ID.
-    id: Option<serde_json::Value>,
+    error: Option<JsonRpcError>,
+    id: Value,
 }
 
-/// JSON-RPC Error schema.
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct RpcError {
-    /// Error code.
+/// JSON-RPC 2.0 Error Object.
+#[derive(Serialize, Debug)]
+struct JsonRpcError {
     code: i32,
-    /// Error message.
     message: String,
 }
 
-/// Handler for the JSON-RPC POST endpoint.
-async fn handle_rpc(req: web::Json<RpcRequest>) -> impl Responder {
+async fn handle_rpc(body: String) -> impl Responder {
+    let req: JsonRpcRequest = match serde_json::from_str(&body) {
+        Ok(r) => r,
+        Err(e) => {
+            return HttpResponse::Ok().json(JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32700,
+                    message: format!("Parse error: {}", e),
+                }),
+                id: Value::Null,
+            });
+        }
+    };
+
+    let id = req.id.unwrap_or(Value::Null);
+
     if req.jsonrpc != "2.0" {
-        return HttpResponse::Ok().json(RpcResponse {
+        return HttpResponse::Ok().json(JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
             result: None,
-            error: Some(RpcError {
+            error: Some(JsonRpcError {
                 code: -32600,
-                message: "Invalid Request".to_string(),
+                message: "Invalid Request: jsonrpc must be '2.0'".to_string(),
             }),
-            id: req.id.clone(),
+            id,
         });
     }
 
-    match req.method.as_str() {
-        "version" => HttpResponse::Ok().json(RpcResponse {
+    let params = req.params.unwrap_or_else(|| json!({}));
+
+    let response = match req.method.as_str() {
+        "version" => JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
-            result: Some(serde_json::json!("0.0.1")),
+            result: Some(json!({ "version": env!("CARGO_PKG_VERSION") })),
             error: None,
-            id: req.id.clone(),
-        }),
-        "to_openapi" => {
-            if let Some(serde_json::Value::Object(map)) = &req.params {
-                if let (
-                    Some(serde_json::Value::String(input)),
-                    Some(serde_json::Value::String(output)),
-                ) = (map.get("input"), map.get("output"))
-                {
-                    let config = ToOpenApiConfig {
-                        input: PathBuf::from(input),
-                        output: PathBuf::from(output),
-                    };
-                    match to_openapi(&config) {
-                        Ok(_) => HttpResponse::Ok().json(RpcResponse {
-                            jsonrpc: "2.0".to_string(),
-                            result: Some(serde_json::json!("Success")),
-                            error: None,
-                            id: req.id.clone(),
-                        }),
-                        Err(e) => HttpResponse::Ok().json(RpcResponse {
-                            jsonrpc: "2.0".to_string(),
-                            result: None,
-                            error: Some(RpcError {
-                                code: -32000,
-                                message: format!("{}", e),
-                            }),
-                            id: req.id.clone(),
-                        }),
-                    }
+            id,
+        },
+        "to_openapi" => match dispatch_tool_command("to_openapi", &params, None) {
+            Ok(_) => JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                result: Some(json!({"status": "success", "message": "Generated OpenAPI spec"})),
+                error: None,
+                id,
+            },
+            Err(e) => {
+                let code = if e.to_string().contains("Missing required argument") {
+                    -32602
                 } else {
-                    HttpResponse::Ok().json(RpcResponse {
-                        jsonrpc: "2.0".to_string(),
-                        result: None,
-                        error: Some(RpcError {
-                            code: -32602,
-                            message: "Invalid params for to_openapi".to_string(),
-                        }),
-                        id: req.id.clone(),
-                    })
-                }
-            } else {
-                HttpResponse::Ok().json(RpcResponse {
-                    jsonrpc: "2.0".to_string(),
-                    result: None,
-                    error: Some(RpcError {
-                        code: -32602,
-                        message: "Invalid params".to_string(),
-                    }),
-                    id: req.id.clone(),
-                })
-            }
-        }
-        "to_docs_json" => {
-            if let Some(serde_json::Value::Object(map)) = &req.params {
-                if let Some(serde_json::Value::String(input)) = map.get("input") {
-                    let output = map
-                        .get("output")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
-                    let no_imports = map
-                        .get("no_imports")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-                    let no_wrapping = map
-                        .get("no_wrapping")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
-
-                    let config = ToDocsJsonConfig {
-                        input: input.to_string(),
-                        output,
-                        no_imports,
-                        no_wrapping,
-                    };
-                    match to_docs_json(&config) {
-                        Ok(_) => HttpResponse::Ok().json(RpcResponse {
-                            jsonrpc: "2.0".to_string(),
-                            result: Some(serde_json::json!("Success")),
-                            error: None,
-                            id: req.id.clone(),
-                        }),
-                        Err(e) => HttpResponse::Ok().json(RpcResponse {
-                            jsonrpc: "2.0".to_string(),
-                            result: None,
-                            error: Some(RpcError {
-                                code: -32000,
-                                message: format!("{}", e),
-                            }),
-                            id: req.id.clone(),
-                        }),
-                    }
-                } else {
-                    HttpResponse::Ok().json(RpcResponse {
-                        jsonrpc: "2.0".to_string(),
-                        result: None,
-                        error: Some(RpcError {
-                            code: -32602,
-                            message: "Invalid params for to_docs_json".to_string(),
-                        }),
-                        id: req.id.clone(),
-                    })
-                }
-            } else {
-                HttpResponse::Ok().json(RpcResponse {
-                    jsonrpc: "2.0".to_string(),
-                    result: None,
-                    error: Some(RpcError {
-                        code: -32602,
-                        message: "Invalid params".to_string(),
-                    }),
-                    id: req.id.clone(),
-                })
-            }
-        }
-        "from_openapi_to_sdk" | "from_openapi_to_sdk_cli" | "from_openapi_to_server" => {
-            if let Some(serde_json::Value::Object(map)) = &req.params {
-                let subcommand = req.method.replace("from_openapi_", "");
-
-                let input = map.get("input").and_then(|v| v.as_str()).map(PathBuf::from);
-                let input_dir = map
-                    .get("input_dir")
-                    .and_then(|v| v.as_str())
-                    .map(PathBuf::from);
-                let output_dir = map
-                    .get("output")
-                    .and_then(|v| v.as_str())
-                    .map(PathBuf::from);
-                let no_github_actions = map
-                    .get("no_github_actions")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                let no_installable_package = map
-                    .get("no_installable_package")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                let tests = map.get("tests").and_then(|v| v.as_bool()).unwrap_or(false);
-                let mcp = map.get("mcp").and_then(|v| v.as_bool()).unwrap_or(false);
-
-                let config = FromOpenApiConfig {
-                    subcommand,
-                    input,
-                    input_dir,
-                    output_dir,
-                    no_github_actions,
-                    no_installable_package,
-                    tests,
-                    mcp,
-                    framework: ServerFramework::ActixWeb, // default
+                    -32000
                 };
-
-                match from_openapi(&config) {
-                    Ok(_) => HttpResponse::Ok().json(RpcResponse {
-                        jsonrpc: "2.0".to_string(),
-                        result: Some(serde_json::json!("Success")),
-                        error: None,
-                        id: req.id.clone(),
-                    }),
-                    Err(e) => HttpResponse::Ok().json(RpcResponse {
-                        jsonrpc: "2.0".to_string(),
-                        result: None,
-                        error: Some(RpcError {
-                            code: -32000,
-                            message: format!("{}", e),
-                        }),
-                        id: req.id.clone(),
-                    }),
-                }
-            } else {
-                HttpResponse::Ok().json(RpcResponse {
+                JsonRpcResponse {
                     jsonrpc: "2.0".to_string(),
                     result: None,
-                    error: Some(RpcError {
-                        code: -32602,
-                        message: "Invalid params".to_string(),
+                    error: Some(JsonRpcError {
+                        code,
+                        message: e.to_string(),
                     }),
-                    id: req.id.clone(),
-                })
+                    id,
+                }
+            }
+        },
+        "to_docs_json" => match dispatch_tool_command("to_docs_json", &params, None) {
+            Ok(out_str) => {
+                let result_val = if params.get("output").is_some() {
+                    json!({"status": "success", "message": "Generated docs JSON"})
+                } else {
+                    serde_json::from_str(&out_str).unwrap_or(Value::String(out_str))
+                };
+                JsonRpcResponse {
+                    jsonrpc: "2.0".to_string(),
+                    result: Some(result_val),
+                    error: None,
+                    id,
+                }
+            }
+            Err(e) => {
+                let code = if e.to_string().contains("Missing required argument") {
+                    -32602
+                } else {
+                    -32000
+                };
+                JsonRpcResponse {
+                    jsonrpc: "2.0".to_string(),
+                    result: None,
+                    error: Some(JsonRpcError {
+                        code,
+                        message: e.to_string(),
+                    }),
+                    id,
+                }
+            }
+        },
+        "from_openapi" | "to_sdk" | "to_sdk_cli" | "to_server" => {
+            match dispatch_tool_command(
+                req.method.as_str(),
+                &params,
+                Some(FromOpenApiSubcommand::ToSdk),
+            ) {
+                Ok(_) => JsonRpcResponse {
+                    jsonrpc: "2.0".to_string(),
+                    result: Some(json!({"status": "success", "message": "Executed from_openapi"})),
+                    error: None,
+                    id,
+                },
+                Err(e) => JsonRpcResponse {
+                    jsonrpc: "2.0".to_string(),
+                    result: None,
+                    error: Some(JsonRpcError {
+                        code: -32000,
+                        message: e.to_string(),
+                    }),
+                    id,
+                },
             }
         }
-        _ => HttpResponse::Ok().json(RpcResponse {
+        "sync" => match dispatch_tool_command("sync", &params, None) {
+            Ok(_) => JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                result: Some(json!({"status": "success", "message": "Synced project"})),
+                error: None,
+                id,
+            },
+            Err(e) => JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32000,
+                    message: e.to_string(),
+                }),
+                id,
+            },
+        },
+        _ => JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
             result: None,
-            error: Some(RpcError {
+            error: Some(JsonRpcError {
                 code: -32601,
-                message: "Method not found".to_string(),
+                message: format!("Method not found: {}", req.method),
             }),
-            id: req.id.clone(),
-        }),
-    }
+            id,
+        },
+    };
+
+    HttpResponse::Ok().json(response)
 }
 
-/// Starts the JSON-RPC server based on provided arguments.
+/// Runs the JSON-RPC server over HTTP.
+///
+/// # Arguments
+/// * `args` - Server bind host and port configuration.
+///
+/// # Returns
+/// `Ok(())` when the server stops cleanly.
+///
+/// # Errors
+/// Returns [`cdd_core::error::AppError`] if binding or running the HTTP server fails.
 pub fn run_serve_json_rpc(args: &ServeJsonRpcArgs) -> AppResult<()> {
-    let listen = args.listen.clone();
-    let port = args.port;
+    let config = ServeJsonRpcConfig {
+        port: args.port,
+        listen: args.listen.clone(),
+    };
+    serve_json_rpc(&config)
+}
 
-    actix_rt::System::new()
-        .block_on(async move {
-            println!("Starting JSON-RPC server on {}:{}", listen, port);
-            let server = HttpServer::new(|| App::new().route("/", web::post().to(handle_rpc)))
-                .bind((listen, port))?;
-            server.run().await
-        })
-        .map_err(|e| cdd_core::error::AppError::General(format!("Server error: {}", e)))
+/// Configuration for `serve_json_rpc` programmatic API.
+#[derive(Debug, Default, Clone)]
+pub struct ServeJsonRpcConfig {
+    /// Port to listen on.
+    pub port: u16,
+    /// Host address to bind to.
+    pub listen: String,
+}
+
+/// Start the JSON-RPC server.
+///
+/// # Arguments
+/// * `config` - Programmatic configuration for `serve_json_rpc`.
+///
+/// # Returns
+/// `Ok(())` when the server stops cleanly.
+///
+/// # Errors
+/// Returns [`cdd_core::error::AppError`] if binding or running the HTTP server fails.
+pub fn serve_json_rpc(config: &ServeJsonRpcConfig) -> AppResult<()> {
+    let bind_addr = format!("{}:{}", config.listen, config.port);
+    println!("Starting JSON-RPC server on http://{}", bind_addr);
+
+    let sys = actix_web::rt::System::new();
+    sys.block_on(async move {
+        HttpServer::new(|| App::new().route("/", web::post().to(handle_rpc)))
+            .bind(&bind_addr)?
+            .run()
+            .await
+    })?;
+
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actix_web::test;
+    use actix_web::{test, App};
+    use tempfile::tempdir;
+
+    #[actix_rt::test]
+    async fn test_rpc_parse_error_and_invalid_version() {
+        let app = test::init_service(App::new().route("/", web::post().to(handle_rpc))).await;
+        let req = test::TestRequest::post()
+            .uri("/")
+            .set_payload("invalid json")
+            .to_request();
+        let resp: Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(resp["error"]["code"], -32700);
+
+        let req_ver = test::TestRequest::post()
+            .uri("/")
+            .set_payload(r#"{"jsonrpc": "1.0", "method": "version", "id": 1}"#)
+            .to_request();
+        let resp_ver: Value = test::call_and_read_body_json(&app, req_ver).await;
+        assert_eq!(resp_ver["error"]["code"], -32600);
+    }
 
     #[actix_rt::test]
     async fn test_rpc_version() {
-        let req = RpcRequest {
-            jsonrpc: "2.0".to_string(),
-            method: "version".to_string(),
-            #[allow(dead_code)]
-            params: None,
-            id: Some(serde_json::json!(1)),
-        };
-
-        let app = test::init_service(
-            actix_web::App::new().route("/", actix_web::web::post().to(handle_rpc)),
-        )
-        .await;
-
+        let app = test::init_service(App::new().route("/", web::post().to(handle_rpc))).await;
         let req = test::TestRequest::post()
             .uri("/")
-            .set_json(&req)
+            .set_payload(r#"{"jsonrpc": "2.0", "method": "version", "id": 1}"#)
             .to_request();
-
-        let resp: RpcResponse = test::call_and_read_body_json(&app, req).await;
-        assert_eq!(resp.result, Some(serde_json::json!("0.0.1")));
+        let resp: Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(resp["result"]["version"], env!("CARGO_PKG_VERSION"));
     }
 
     #[actix_rt::test]
-    async fn test_rpc_invalid_jsonrpc() {
-        let req = RpcRequest {
-            jsonrpc: "1.0".to_string(),
-            method: "version".to_string(),
-            #[allow(dead_code)]
-            params: None,
-            id: Some(serde_json::json!(1)),
-        };
-
-        let app = test::init_service(
-            actix_web::App::new().route("/", actix_web::web::post().to(handle_rpc)),
-        )
-        .await;
-
+    async fn test_rpc_unknown_method() {
+        let app = test::init_service(App::new().route("/", web::post().to(handle_rpc))).await;
         let req = test::TestRequest::post()
             .uri("/")
-            .set_json(&req)
+            .set_payload(r#"{"jsonrpc": "2.0", "method": "unknown", "id": 1}"#)
             .to_request();
-
-        let resp: RpcResponse = test::call_and_read_body_json(&app, req).await;
-        assert!(resp.error.is_some());
-        assert_eq!(resp.error.expect("Missing error").code, -32600);
+        let resp: Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(resp["error"]["code"], -32601);
     }
 
     #[actix_rt::test]
-    async fn test_rpc_method_not_found() {
-        let req = RpcRequest {
-            jsonrpc: "2.0".to_string(),
-            method: "unknown_method".to_string(),
-            #[allow(dead_code)]
-            params: None,
-            id: Some(serde_json::json!(1)),
-        };
-
-        let app = test::init_service(
-            actix_web::App::new().route("/", actix_web::web::post().to(handle_rpc)),
-        )
-        .await;
-
-        let req = test::TestRequest::post()
-            .uri("/")
-            .set_json(&req)
-            .to_request();
-
-        let resp: RpcResponse = test::call_and_read_body_json(&app, req).await;
-        assert!(resp.error.is_some());
-        assert_eq!(resp.error.expect("Missing error").code, -32601);
-    }
-}
-
-/// Configuration for `serve_json_rpc` programmatic API.
-#[derive(Debug)]
-pub struct ServeJsonRpcConfig {
-    /// The port to listen on.
-    pub port: u16,
-    /// The address to listen on.
-    pub listen: String,
-}
-
-impl Default for ServeJsonRpcConfig {
-    fn default() -> Self {
-        Self {
-            port: 8080,
-            listen: "127.0.0.1".to_string(),
-        }
-    }
-}
-
-/// Expose CLI interface as a JSON-RPC server.
-#[cfg(all(feature = "server", not(target_os = "wasi")))]
-pub fn serve_json_rpc(config: &ServeJsonRpcConfig) -> AppResult<()> {
-    let args = ServeJsonRpcArgs {
-        port: config.port,
-        listen: config.listen.clone(),
-    };
-    run_serve_json_rpc(&args)
-}
-
-#[cfg(any(not(feature = "server"), target_os = "wasi"))]
-pub fn serve_json_rpc(config: &ServeJsonRpcConfig) -> AppResult<()> {
-    Err(cdd_core::error::AppError::General(
-        "serve_json_rpc is not supported on this target.".to_string(),
-    ))
-}
-
-#[cfg(test)]
-mod extra_rpc_tests {
-    use super::*;
-    use actix_web::test;
-
-    async fn send_rpc(req: &RpcRequest) -> RpcResponse {
-        let app = test::init_service(
-            actix_web::App::new().route("/", actix_web::web::post().to(handle_rpc)),
-        )
-        .await;
-
-        let request = test::TestRequest::post()
-            .uri("/")
-            .set_json(req)
-            .to_request();
-
-        test::call_and_read_body_json(&app, request).await
-    }
-
-    #[actix_rt::test]
-    async fn test_to_openapi_rpc() {
-        // Missing params
-        let req = RpcRequest {
-            jsonrpc: "2.0".to_string(),
-            method: "to_openapi".to_string(),
-            params: None,
-            id: None,
-        };
-        let res = send_rpc(&req).await;
-        assert_eq!(res.error.expect("must succeed").code, -32602);
-
-        // Invalid params
-        let req = RpcRequest {
-            jsonrpc: "2.0".to_string(),
-            method: "to_openapi".to_string(),
-            params: Some(serde_json::json!({"foo": "bar"})),
-            id: None,
-        };
-        let res = send_rpc(&req).await;
-        assert_eq!(res.error.expect("must succeed").code, -32602);
-
-        // Success execution - pointing to something that will error inside generate
-        let req = RpcRequest {
-            jsonrpc: "2.0".to_string(),
-            method: "to_openapi".to_string(),
-            params: Some(serde_json::json!({"input": "/does/not/exist", "output": "out"})),
-            id: None,
-        };
-        let res = send_rpc(&req).await;
-        assert_eq!(res.error.expect("must succeed").code, -32000);
-    }
-
-    #[actix_rt::test]
-    async fn test_to_docs_json_rpc() {
-        // Missing params
-        let req = RpcRequest {
-            jsonrpc: "2.0".to_string(),
-            method: "to_docs_json".to_string(),
-            params: None,
-            id: None,
-        };
-        let res = send_rpc(&req).await;
-        assert_eq!(res.error.expect("must succeed").code, -32602);
-
-        // Invalid params
-        let req = RpcRequest {
-            jsonrpc: "2.0".to_string(),
-            method: "to_docs_json".to_string(),
-            params: Some(serde_json::json!({"foo": "bar"})),
-            id: None,
-        };
-        let res = send_rpc(&req).await;
-        assert_eq!(res.error.expect("must succeed").code, -32602);
-
-        // Fail inside generate
-        let req = RpcRequest {
-            jsonrpc: "2.0".to_string(),
-            method: "to_docs_json".to_string(),
-            params: Some(serde_json::json!({"input": "/does/not/exist"})),
-            id: None,
-        };
-        let res = send_rpc(&req).await;
-        assert_eq!(res.error.expect("must succeed").code, -32000);
-    }
-
-    #[actix_rt::test]
-    async fn test_from_openapi_rpc() {
-        // Missing params
-        let req = RpcRequest {
-            jsonrpc: "2.0".to_string(),
-            method: "from_openapi_to_sdk".to_string(),
-            params: None,
-            id: None,
-        };
-        let res = send_rpc(&req).await;
-        assert_eq!(res.error.expect("must succeed").code, -32602);
-
-        // Success inside, but it will error
-        let req = RpcRequest {
-            jsonrpc: "2.0".to_string(),
-            method: "from_openapi_to_sdk".to_string(),
-            params: Some(serde_json::json!({"input": "/does/not/exist"})),
-            id: None,
-        };
-        let res = send_rpc(&req).await;
-        assert_eq!(res.error.expect("must succeed").code, -32000);
-
-        let req = RpcRequest {
-            jsonrpc: "2.0".to_string(),
-            method: "from_openapi_to_sdk_cli".to_string(),
-            params: Some(serde_json::json!({"input": "/does/not/exist"})),
-            id: None,
-        };
-        send_rpc(&req).await;
-
-        let req = RpcRequest {
-            jsonrpc: "2.0".to_string(),
-            method: "from_openapi_to_server".to_string(),
-            params: Some(serde_json::json!({"input": "/does/not/exist"})),
-            id: None,
-        };
-        send_rpc(&req).await;
-    }
-}
-
-#[cfg(test)]
-mod extra_config_tests {
-    use super::*;
-
-    #[test]
-    fn test_serve_json_rpc_config() {
-        let config = ServeJsonRpcConfig::default();
-        assert_eq!(config.port, 8080);
-        assert_eq!(config.listen, "127.0.0.1");
-    }
-}
-
-#[cfg(test)]
-mod extra_rpc_success_tests {
-    use super::*;
-    use actix_web::test;
-
-    async fn send_rpc(req: &RpcRequest) -> RpcResponse {
-        let app = test::init_service(
-            actix_web::App::new().route("/", actix_web::web::post().to(handle_rpc)),
-        )
-        .await;
-
-        let request = test::TestRequest::post()
-            .uri("/")
-            .set_json(req)
-            .to_request();
-
-        test::call_and_read_body_json(&app, request).await
-    }
-
-    #[actix_rt::test]
-    async fn test_to_openapi_rpc_success() {
-        use tempfile::tempdir;
-        let dir = tempdir().expect("must succeed");
+    async fn test_rpc_to_openapi() {
+        let dir = tempdir().expect("Failed to create temporary directory");
         let src_dir = dir.path().join("src");
-        std::fs::create_dir_all(&src_dir).expect("must succeed");
-        let input = src_dir.join("input.rs");
-        let output = dir.path().join("out.yaml");
-        let schema =
-            "pub struct User { pub id: i32 } \n #[get(\"/users\")] pub async fn get_users() {}";
-        std::fs::write(&input, schema).expect("must succeed");
+        std::fs::create_dir_all(&src_dir).expect("Failed to create directory");
+        std::fs::write(src_dir.join("lib.rs"), "pub struct Empty {}")
+            .expect("Failed to write to file");
+        let out_file = dir.path().join("openapi.json");
 
-        let req = RpcRequest {
-            jsonrpc: "2.0".to_string(),
-            method: "to_openapi".to_string(),
-            params: Some(serde_json::json!({
-                "input": src_dir.to_str().expect("must succeed"),
-                "output": output.to_str().expect("must succeed")
-            })),
-            id: None,
-        };
-        let res = send_rpc(&req).await;
-        assert_eq!(res.error, None);
+        let app = test::init_service(App::new().route("/", web::post().to(handle_rpc))).await;
+
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "to_openapi",
+            "params": {
+                "input": dir.path().to_str().expect("Failed to convert path to str"),
+                "output": out_file.to_str().expect("Failed to convert path to str")
+            },
+            "id": 1
+        })
+        .to_string();
+        let req = test::TestRequest::post()
+            .uri("/")
+            .set_payload(payload)
+            .to_request();
+        let resp: Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(resp["result"]["status"], "success");
+
+        let req_missing = test::TestRequest::post()
+            .uri("/")
+            .set_payload(r#"{"jsonrpc": "2.0", "method": "to_openapi", "params": {}, "id": 2}"#)
+            .to_request();
+        let resp_missing: Value = test::call_and_read_body_json(&app, req_missing).await;
+        assert_eq!(resp_missing["error"]["code"], -32602);
+
+        let req_err = test::TestRequest::post()
+            .uri("/")
+            .set_payload(r#"{"jsonrpc": "2.0", "method": "to_openapi", "params": {"input": "/does/not/exist"}, "id": 3}"#)
+            .to_request();
+        let resp_err: Value = test::call_and_read_body_json(&app, req_err).await;
+        assert_eq!(resp_err["error"]["code"], -32000);
     }
 
     #[actix_rt::test]
-    async fn test_to_docs_json_rpc_success() {
-        use tempfile::tempdir;
-        let dir = tempdir().expect("must succeed");
-        let input = dir.path().join("input.rs");
-        let output = dir.path().join("out.yaml");
-        let schema = "openapi: 3.0.0\ninfo:\n  title: API\n  version: 1.0.0\npaths: {}";
-        std::fs::write(&input, schema).expect("must succeed");
+    async fn test_rpc_to_docs_json() {
+        let dir = tempdir().expect("Failed to create temporary directory");
+        let spec_path = dir.path().join("openapi.json");
+        std::fs::write(
+            &spec_path,
+            r#"{"openapi":"3.0.0","info":{"title":"T","version":"1"},"paths":{}}"#,
+        )
+        .expect("Failed to write to file");
+        let out_file = dir.path().join("docs.json");
 
-        let req = RpcRequest {
-            jsonrpc: "2.0".to_string(),
-            method: "to_docs_json".to_string(),
-            params: Some(serde_json::json!({
-                "input": input.to_str().expect("must succeed"),
-                "output": output.to_str().expect("must succeed")
-            })),
-            id: None,
-        };
-        let res = send_rpc(&req).await;
-        assert_eq!(res.error, None);
+        let app = test::init_service(App::new().route("/", web::post().to(handle_rpc))).await;
+
+        let payload_out = json!({
+            "jsonrpc": "2.0",
+            "method": "to_docs_json",
+            "params": {
+                "input": spec_path.to_str().expect("Failed to convert path to str"),
+                "output": out_file.to_str().expect("Failed to convert path to str")
+            },
+            "id": 1
+        })
+        .to_string();
+        let req_out = test::TestRequest::post()
+            .uri("/")
+            .set_payload(payload_out)
+            .to_request();
+        let resp_out: Value = test::call_and_read_body_json(&app, req_out).await;
+        assert_eq!(resp_out["result"]["status"], "success");
+
+        let payload_no_out = json!({
+            "jsonrpc": "2.0",
+            "method": "to_docs_json",
+            "params": {
+                "input": spec_path.to_str().expect("Failed to convert path to str")
+            },
+            "id": 2
+        })
+        .to_string();
+        let req_no_out = test::TestRequest::post()
+            .uri("/")
+            .set_payload(payload_no_out)
+            .to_request();
+        let resp_no_out: Value = test::call_and_read_body_json(&app, req_no_out).await;
+        assert!(resp_no_out["result"].is_array());
+
+        let req_missing = test::TestRequest::post()
+            .uri("/")
+            .set_payload(r#"{"jsonrpc": "2.0", "method": "to_docs_json", "params": {}, "id": 3}"#)
+            .to_request();
+        let resp_missing: Value = test::call_and_read_body_json(&app, req_missing).await;
+        assert_eq!(resp_missing["error"]["code"], -32602);
     }
 
     #[actix_rt::test]
-    async fn test_from_openapi_rpc_success() {
-        use tempfile::tempdir;
-        let dir = tempdir().expect("must succeed");
-        let input = dir.path().join("openapi.yaml");
-        let output = dir.path().join("out");
+    async fn test_rpc_from_openapi_and_sync() {
+        let dir = tempdir().expect("Failed to create temporary directory");
+        let spec_path = dir.path().join("openapi.json");
+        std::fs::write(
+            &spec_path,
+            r#"{"openapi":"3.0.0","info":{"title":"T","version":"1"},"paths":{}}"#,
+        )
+        .expect("Failed to write to file");
+        let out_dir = dir.path().join("out");
 
-        let schema = r#"
-openapi: 3.0.0
-info:
-  title: API
-  version: 1.0.0
-paths: {}
-        "#;
-        std::fs::write(&input, schema).expect("must succeed");
+        let app = test::init_service(App::new().route("/", web::post().to(handle_rpc))).await;
 
-        let req = RpcRequest {
-            jsonrpc: "2.0".to_string(),
-            method: "from_openapi_to_sdk".to_string(),
-            params: Some(serde_json::json!({
-                "input": input.to_str().expect("must succeed"),
-                "output": output.to_str().expect("must succeed")
-            })),
-            id: None,
-        };
-        let res = send_rpc(&req).await;
-        assert_eq!(res.error, None);
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "method": "to_sdk",
+            "params": {
+                "input": spec_path.to_str().expect("Failed to convert path to str"),
+                "output_dir": out_dir.to_str().expect("Failed to convert path to str"),
+                "framework": "axum"
+            },
+            "id": 1
+        })
+        .to_string();
+        let req = test::TestRequest::post()
+            .uri("/")
+            .set_payload(payload)
+            .to_request();
+        let resp: Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(resp["result"]["status"], "success");
+
+        let req_err = test::TestRequest::post()
+            .uri("/")
+            .set_payload(r#"{"jsonrpc": "2.0", "method": "from_openapi", "params": {"subcommand": "bad"}, "id": 2}"#)
+            .to_request();
+        let resp_err: Value = test::call_and_read_body_json(&app, req_err).await;
+        assert_eq!(resp_err["error"]["code"], -32000);
+
+        let sync_payload = json!({
+            "jsonrpc": "2.0",
+            "method": "sync",
+            "params": {
+                "dir": dir.path().to_str().expect("Failed to convert path to str")
+            },
+            "id": 3
+        })
+        .to_string();
+        let req_sync = test::TestRequest::post()
+            .uri("/")
+            .set_payload(sync_payload)
+            .to_request();
+        let resp_sync: Value = test::call_and_read_body_json(&app, req_sync).await;
+        assert_eq!(resp_sync["result"]["status"], "success");
+
+        let req_sync_err = test::TestRequest::post()
+            .uri("/")
+            .set_payload(r#"{"jsonrpc": "2.0", "method": "sync", "params": {}, "id": 4}"#)
+            .to_request();
+        let resp_sync_err: Value = test::call_and_read_body_json(&app, req_sync_err).await;
+        assert_eq!(resp_sync_err["error"]["code"], -32000);
     }
-}
 
-#[cfg(test)]
-mod server_spawn_test {
-    use super::*;
-    #[test]
-    fn test_serve_json_rpc_spawns() {
-        let config = ServeJsonRpcConfig {
-            port: 8089,
-            listen: "127.0.0.1".to_string(),
+    #[core::prelude::v1::test]
+    fn test_serve_json_rpc_bind_error() {
+        let args = ServeJsonRpcArgs {
+            port: 80,
+            listen: "invalid.host.address.local".to_string(),
         };
-        let _handle = std::thread::spawn(move || {
-            let _ = serve_json_rpc(&config);
-        });
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(run_serve_json_rpc(&args).is_err());
     }
 }

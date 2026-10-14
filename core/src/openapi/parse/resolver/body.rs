@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Body Resolution
 //!
@@ -297,24 +296,19 @@ fn media_specificity_score(media_type: &str, preferred: Option<&str>) -> (i32, i
 }
 
 fn is_json_media_type(media_type: &str) -> bool {
-    let normalized = normalize_media_type(media_type);
-    normalized == "application/json"
-        || normalized.ends_with("+json")
-        || normalized == "application/*+json"
-        || is_sequential_json_media_type(&normalized)
+    crate::openapi::parse::models::MediaType::parse(media_type).is_json()
 }
 
 fn is_form_media_type(media_type: &str) -> bool {
-    normalize_media_type(media_type) == "application/x-www-form-urlencoded"
+    crate::openapi::parse::models::MediaType::parse(media_type).is_form_urlencoded()
 }
 
 fn is_multipart_media_type(media_type: &str) -> bool {
-    normalize_media_type(media_type).starts_with("multipart/")
+    crate::openapi::parse::models::MediaType::parse(media_type).is_multipart()
 }
 
 fn is_text_media_type(media_type: &str) -> bool {
-    let normalized = normalize_media_type(media_type);
-    normalized.starts_with("text/") || is_xml_media_type(&normalized)
+    crate::openapi::parse::models::MediaType::parse(media_type).is_text()
 }
 
 fn is_binary_media_type(media_type: &str) -> bool {
@@ -327,25 +321,11 @@ fn is_binary_media_type(media_type: &str) -> bool {
 }
 
 fn normalize_media_type(media_type: &str) -> String {
-    media_type
-        .split(';')
-        .next()
-        .unwrap_or(media_type)
-        .trim()
-        .to_ascii_lowercase()
+    crate::openapi::parse::models::MediaType::normalize(media_type)
 }
 
 fn is_sequential_json_media_type(media_type: &str) -> bool {
-    let normalized = normalize_media_type(media_type);
-    matches!(
-        normalized.as_str(),
-        "application/jsonl"
-            | "application/x-ndjson"
-            | "application/json-seq"
-            | "application/geo+json-seq"
-    ) || normalized.ends_with("+jsonl")
-        || normalized.ends_with("+ndjson")
-        || normalized.ends_with("+json-seq")
+    crate::openapi::parse::models::MediaType::parse(media_type).is_sequential_json()
 }
 
 fn is_sequential_media_type(media_type: &str) -> bool {
@@ -358,11 +338,6 @@ fn is_sequential_media_type(media_type: &str) -> bool {
         normalized.as_str(),
         "text/event-stream" | "multipart/mixed" | "multipart/byteranges"
     )
-}
-
-fn is_xml_media_type(media_type: &str) -> bool {
-    let normalized = normalize_media_type(media_type);
-    normalized == "application/xml" || normalized == "text/xml" || normalized.ends_with("+xml")
 }
 
 fn default_body_type(format: BodyFormat, media_type: &str) -> String {
@@ -397,7 +372,7 @@ fn resolve_request_body_from_components(
     base_uri: Option<&Url>,
 ) -> Option<ResolvedRequestBody> {
     if let Some(components) = components {
-        let self_uri = components.extra.get("__self").and_then(|v| v.as_str());
+        let self_uri = components.self_uri.as_deref();
         if let Some(ref_name) = extract_component_name(&r.ref_location, self_uri, "requestBodies") {
             if let Some(body_json) = components
                 .extra
@@ -577,8 +552,7 @@ fn resolve_example_ref(
         return None;
     }
 
-    let (comps, self_uri) =
-        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))?;
+    let (comps, self_uri) = components.map(|c| (c, c.self_uri.as_deref()))?;
     let name = extract_component_name(ref_str, self_uri, "examples")?;
     let example_json = comps.extra.get("examples").and_then(|e| e.get(&name))?;
     extract_example_value(example_json, components, media_type, visiting)
@@ -602,8 +576,7 @@ fn resolve_example_from_components(
     r: &utoipa::openapi::Ref,
     components: Option<&ShimComponents>,
 ) -> Option<ExampleValue> {
-    let (comps, self_uri) =
-        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))?;
+    let (comps, self_uri) = components.map(|c| (c, c.self_uri.as_deref()))?;
     let ref_name = extract_component_name(&r.ref_location, self_uri, "examples")?;
     let example_json = comps.extra.get("examples").and_then(|e| e.get(&ref_name))?;
     let example = serde_json::from_value::<Example>(example_json.clone()).ok()?;
@@ -664,8 +637,7 @@ fn resolve_schema_example_ref(
     ref_str: &str,
     components: Option<&ShimComponents>,
 ) -> Option<serde_json::Value> {
-    let (comps, self_uri) =
-        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))?;
+    let (comps, self_uri) = components.map(|c| (c, c.self_uri.as_deref()))?;
     let name = extract_component_name(ref_str, self_uri, "schemas")?;
     let schema_json = comps.extra.get("schemas").and_then(|s| s.get(&name))?;
     extract_schema_example_from_value(schema_json)
@@ -703,9 +675,7 @@ fn resolve_media_type_ref(
         return None;
     }
 
-    if let Some((comps, self_uri)) =
-        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))
-    {
+    if let Some((comps, self_uri)) = components.map(|c| (c, c.self_uri.as_deref())) {
         if let Some(name) = extract_component_name(ref_str, self_uri, "mediaTypes") {
             if let Some(media_types) = comps.extra.get("mediaTypes").and_then(|v| v.as_object()) {
                 if let Some(resolved) = media_types.get(&name) {
@@ -957,7 +927,7 @@ fn resolve_encoding_header_type(
         return Ok(Some(map_schema_to_rust_type(&schema, true)?));
     }
 
-    if let Some(content_val) = obj.get("content").or_else(|| obj.get("x-cdd-content")) {
+    if let Some(content_val) = obj.get("content") {
         let Some(content_map) = content_val.as_object() else {
             return Err(AppError::General(
                 "Encoding header content must be an object".to_string(),
@@ -1034,9 +1004,7 @@ fn resolve_header_value_for_encoding(
         )));
     }
 
-    if let Some((comps, self_uri)) =
-        components.map(|c| (c, c.extra.get("__self").and_then(|v| v.as_str())))
-    {
+    if let Some((comps, self_uri)) = components.map(|c| (c, c.self_uri.as_deref())) {
         if let Some(name) = extract_component_name(ref_str, self_uri, "headers") {
             if let Some(resolved) = comps
                 .extra
@@ -1233,12 +1201,9 @@ mod tests {
         let mut components = ShimComponents {
             security_schemes: None,
             path_items: None,
+            self_uri: Some("https://example.com/openapi.yaml".to_string()),
             extra: BTreeMap::new(),
         };
-        components.extra.insert(
-            "__self".to_string(),
-            json!("https://example.com/openapi.yaml"),
-        );
         components.extra.insert(
             "examples".to_string(),
             json!({
@@ -1285,12 +1250,9 @@ mod tests {
         let mut components = ShimComponents {
             security_schemes: None,
             path_items: None,
+            self_uri: Some("https://example.com/openapi.yaml".to_string()),
             extra: BTreeMap::new(),
         };
-        components.extra.insert(
-            "__self".to_string(),
-            json!("https://example.com/openapi.yaml"),
-        );
         components.extra.insert(
             "examples".to_string(),
             json!({
@@ -1948,12 +1910,9 @@ components:
         let mut components = ShimComponents {
             security_schemes: None,
             path_items: None,
+            self_uri: Some("https://example.com/openapi.yaml".to_string()),
             extra: BTreeMap::new(),
         };
-        components.extra.insert(
-            "__self".to_string(),
-            json!("https://example.com/openapi.yaml"),
-        );
         components.extra.insert(
             "requestBodies".to_string(),
             json!({
@@ -1984,12 +1943,9 @@ components:
         let mut components = ShimComponents {
             security_schemes: None,
             path_items: None,
+            self_uri: Some("https://example.com/openapi.yaml".to_string()),
             extra: BTreeMap::new(),
         };
-        components.extra.insert(
-            "__self".to_string(),
-            json!("https://example.com/openapi.yaml"),
-        );
         components.extra.insert(
             "requestBodies".to_string(),
             json!({
@@ -2021,6 +1977,7 @@ components:
         let mut components = ShimComponents {
             security_schemes: None,
             path_items: None,
+            self_uri: None,
             extra: BTreeMap::new(),
         };
         components.extra.insert(
@@ -2113,12 +2070,9 @@ components:
         let mut components = ShimComponents {
             security_schemes: None,
             path_items: None,
+            self_uri: Some("https://example.com/openapi.yaml".to_string()),
             extra: BTreeMap::new(),
         };
-        components.extra.insert(
-            "__self".to_string(),
-            json!("https://example.com/openapi.yaml"),
-        );
         components.extra.insert(
             "schemas".to_string(),
             json!({

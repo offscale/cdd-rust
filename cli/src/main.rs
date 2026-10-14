@@ -1,6 +1,5 @@
 #![warn(missing_docs)]
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # CDD CLI
 //!
@@ -14,35 +13,30 @@
 //! - `serve_json_rpc`: Expose CLI interface as a JSON-RPC server.
 //! - `mcp`: Run the generator as an MCP server.
 
-use cdd_core::AppResult;
-use clap::{Parser, Subcommand, ValueEnum};
-
 use cdd_cli::generator::DieselMapper;
-
-/// Target generation mode.
-#[derive(ValueEnum, Clone, Debug, PartialEq)]
-pub enum TargetModeDuplicate {
-    /// Generate Actix Web server scaffolding.
-    ServerActix,
-    /// Generate Axum server scaffolding.
-    ServerAxum,
-    /// Generate Reqwest client scaffolding.
-    Client,
-    /// Generate Clap CLI scaffolding.
-    Cli,
-}
+use cdd_cli::TargetMode;
+use cdd_core::AppResult;
+use clap::{Parser, Subcommand};
 
 /// The main CLI struct holding all arguments.
 #[derive(Parser, Debug)]
 #[clap(
     author,
     version,
-    about = "CDD Toolchain CLI\n\nStandard Commands:\n  from_openapi    Generate code from an OpenAPI specification.\n  to_openapi      Generate an OpenAPI specification from source code.\n  sync            Synchronize an OpenAPI specification with source code.\n  to_docs_json    Generate JSON documentation with code snippets.\n  serve_json_rpc  Expose CLI interface as a JSON-RPC server.\n  mcp             Run the generator as an MCP server over stdio."
+    about = "CDD Toolchain CLI
+
+Standard Commands:
+  from_openapi    Generate code from an OpenAPI specification.
+  to_openapi      Generate an OpenAPI specification from source code.
+  sync            Synchronize an OpenAPI specification with source code.
+  to_docs_json    Generate JSON documentation with code snippets.
+  serve_json_rpc  Expose CLI interface as a JSON-RPC server.
+  mcp             Run the generator as an MCP server over stdio."
 )]
-struct Cli {
+pub struct Cli {
     /// The subcommand to execute.
     #[clap(subcommand)]
-    command: Commands,
+    pub command: Commands,
 
     /// Target mode (server or client).
     #[clap(
@@ -52,13 +46,13 @@ struct Cli {
         default_value = "server-actix",
         global = true
     )]
-    target: cdd_cli::TargetMode,
+    pub target: TargetMode,
 }
 
 /// All available commands in the CLI.
 #[derive(Subcommand, Debug)]
 #[allow(clippy::large_enum_variant)]
-enum Commands {
+pub enum Commands {
     /// Synchronize an OpenAPI specification with source code.
     Sync(cdd_cli::sync::SyncArgs),
     /// Generate JSON documentation with code snippets for an OpenAPI specification.
@@ -82,10 +76,14 @@ enum Commands {
     Mcp(cdd_cli::mcp::McpArgs),
 }
 
-/// The main entry point of the CLI application.
-fn main() -> AppResult<()> {
-    let cli = Cli::parse();
-
+/// Dispatches a parsed [`Cli`] command to its underlying implementation.
+///
+/// # Arguments
+/// * `cli` - Parsed CLI arguments.
+///
+/// # Returns
+/// * `AppResult<()>` indicating execution success or error.
+pub fn dispatch_cli(cli: &Cli) -> AppResult<()> {
     match &cli.command {
         Commands::Sync(args) => {
             let mapper = DieselMapper;
@@ -118,13 +116,40 @@ fn main() -> AppResult<()> {
     Ok(())
 }
 
+/// The main entry point of the CLI application.
+#[cfg(not(test))]
+fn main() -> AppResult<()> {
+    let cli = Cli::parse();
+    dispatch_cli(&cli)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn verify_cli_structure() {
+    fn verify_cli_structure_and_dispatch() {
         use clap::CommandFactory;
         Cli::command().debug_assert();
+
+        let sync_cli = Cli::parse_from(["cdd-rust", "sync", "--truth", "code"]);
+        assert!(dispatch_cli(&sync_cli).is_ok());
+
+        let to_openapi_err =
+            Cli::parse_from(["cdd-rust", "to_openapi", "-i", "/nonexistent_input_path"]);
+        assert!(dispatch_cli(&to_openapi_err).is_err());
+
+        let to_docs_err =
+            Cli::parse_from(["cdd-rust", "to_docs_json", "-i", "/nonexistent_spec.yaml"]);
+        assert!(dispatch_cli(&to_docs_err).is_err());
+
+        let from_oa_err = Cli::parse_from([
+            "cdd-rust",
+            "from_openapi",
+            "to_sdk",
+            "-i",
+            "/nonexistent_spec.yaml",
+        ]);
+        assert!(dispatch_cli(&from_oa_err).is_err());
     }
 }

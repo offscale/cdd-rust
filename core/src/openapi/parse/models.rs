@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # OpenAPI Models
 //!
@@ -56,10 +55,9 @@ pub struct ParsedServer {
 pub struct RuntimeExpression(String);
 
 impl RuntimeExpression {
-    /// Creates a new RuntimeExpression from a string.
-    /// Note: Does not currently enforce strict ABNF validation on creation,
-    /// but is typed to distinguish from standard strings.
-    pub fn new(s: impl Into<String>) -> Self {
+    /// Internal test constructor that normalizes and validates the expression.
+    #[cfg(test)]
+    pub(crate) fn new(s: impl Into<String>) -> Self {
         let raw = s.into();
         let normalized = normalize_runtime_expression(&raw);
         Self(normalized)
@@ -729,85 +727,6 @@ pub struct RouteParam {
     pub extensions: BTreeMap<String, JsonValue>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{ContentMediaType, LinkParamValue, RuntimeExpression};
-    use serde_json::json;
-
-    #[test]
-    fn test_runtime_expression_helpers() {
-        let expr = RuntimeExpression::new("$request.body#/id");
-        assert_eq!(expr.as_str(), "$request.body#/id");
-        assert!(expr.is_expression());
-
-        let plain = RuntimeExpression::new("id");
-        assert!(!plain.is_expression());
-    }
-
-    #[test]
-    fn test_runtime_expression_brace_normalization() {
-        let expr = RuntimeExpression::new("{$request.body#/id}");
-        assert_eq!(expr.as_str(), "$request.body#/id");
-        assert!(expr.is_expression());
-    }
-
-    #[test]
-    fn test_runtime_expression_parse_validation() {
-        let expr = RuntimeExpression::parse_expression("$request.path.id")
-            .expect("Failed to parse expression");
-        assert_eq!(expr.as_str(), "$request.path.id");
-
-        let invalid = RuntimeExpression::parse_expression("$request.body#bad");
-        assert!(invalid.is_err());
-    }
-
-    #[test]
-    fn test_runtime_expression_template_parse() {
-        let expr = RuntimeExpression::parse_expression(
-            "http://example.com?foo={$request.path.id}&bar={$response.header.Location}",
-        )
-        .expect("Failed to parse expression");
-        assert!(expr.is_expression());
-
-        let plain = RuntimeExpression::parse("no expressions here").expect("Failed to parse");
-        assert!(!plain.is_expression());
-    }
-
-    #[test]
-    fn test_link_param_value_literal() {
-        let literal = LinkParamValue::Literal(json!(42));
-        assert!(matches!(literal, LinkParamValue::Literal(_)));
-    }
-
-    #[test]
-    fn test_runtime_expression_display_and_debug() {
-        let expr = RuntimeExpression::new("$response.body#/name");
-        let display = format!("{}", expr);
-        assert_eq!(display, "$response.body#/name");
-
-        let debug = format!("{:?}", expr);
-        assert!(debug.contains("RuntimeExpression"));
-        assert!(debug.contains("$response.body#/name"));
-    }
-
-    #[test]
-    fn test_content_media_type_normalization() {
-        assert_eq!(
-            ContentMediaType::from_media_type("application/x-www-form-urlencoded"),
-            ContentMediaType::FormUrlEncoded
-        );
-        assert_eq!(
-            ContentMediaType::from_media_type("application/vnd.api+json; charset=utf-8"),
-            ContentMediaType::Json
-        );
-
-        match ContentMediaType::from_media_type("text/plain") {
-            ContentMediaType::Other(val) => assert_eq!(val, "text/plain"),
-            _ => panic!("Expected Other for text/plain"),
-        }
-    }
-}
-
 /// The source location of a parameter.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ParamSource {
@@ -1042,4 +961,1016 @@ fn is_tchar(c: char) -> bool {
                 | '|'
                 | '~'
         )
+}
+
+/// Validated custom HTTP method token (RFC 9110 `tchar` token).
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
+pub struct CustomHttpMethod(String);
+
+impl CustomHttpMethod {
+    /// Parses and validates a custom HTTP method token.
+    ///
+    /// # Arguments
+    /// * `raw` - Raw method string.
+    ///
+    /// # Returns
+    /// A validated [`CustomHttpMethod`].
+    ///
+    /// # Errors
+    /// Returns [`AppError`] if the token is empty or contains non-token characters.
+    pub fn parse(raw: &str) -> AppResult<Self> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() || !trimmed.chars().all(is_tchar) {
+            return Err(AppError::General(format!(
+                "Invalid HTTP method token: '{}'",
+                raw
+            )));
+        }
+        Ok(Self(trimmed.to_ascii_uppercase()))
+    }
+
+    /// Returns the method token string slice.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Strongly typed HTTP method representation supporting standard OAS 3.2 methods
+/// (`GET`..`QUERY`) and `additionalOperations` custom methods.
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub enum HttpMethod {
+    /// HTTP `GET`.
+    Get,
+    /// HTTP `POST`.
+    Post,
+    /// HTTP `PUT`.
+    Put,
+    /// HTTP `DELETE`.
+    Delete,
+    /// HTTP `PATCH`.
+    Patch,
+    /// HTTP `OPTIONS`.
+    Options,
+    /// HTTP `HEAD`.
+    Head,
+    /// HTTP `TRACE`.
+    Trace,
+    /// HTTP `QUERY` (OAS 3.2).
+    Query,
+    /// Custom HTTP method token (`additionalOperations`).
+    Custom(CustomHttpMethod),
+}
+
+impl HttpMethod {
+    /// Returns the uppercase HTTP method string.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Get => "GET",
+            Self::Post => "POST",
+            Self::Put => "PUT",
+            Self::Delete => "DELETE",
+            Self::Patch => "PATCH",
+            Self::Options => "OPTIONS",
+            Self::Head => "HEAD",
+            Self::Trace => "TRACE",
+            Self::Query => "QUERY",
+            Self::Custom(c) => c.as_str(),
+        }
+    }
+
+    /// Returns the lowercase method name suitable for OpenAPI keys and framework builders.
+    pub fn to_lowercase_str(&self) -> String {
+        self.as_str().to_ascii_lowercase()
+    }
+}
+
+impl fmt::Display for HttpMethod {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for HttpMethod {
+    type Err = AppError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_uppercase().as_str() {
+            "GET" => Ok(Self::Get),
+            "POST" => Ok(Self::Post),
+            "PUT" => Ok(Self::Put),
+            "DELETE" => Ok(Self::Delete),
+            "PATCH" => Ok(Self::Patch),
+            "OPTIONS" => Ok(Self::Options),
+            "HEAD" => Ok(Self::Head),
+            "TRACE" => Ok(Self::Trace),
+            "QUERY" => Ok(Self::Query),
+            other => Ok(Self::Custom(CustomHttpMethod::parse(other)?)),
+        }
+    }
+}
+
+/// HTTP response status range (`1XX`..`5XX`).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub enum StatusRange {
+    /// Informational `1XX`.
+    Info1xx,
+    /// Successful `2XX`.
+    Success2xx,
+    /// Redirection `3XX`.
+    Redirect3xx,
+    /// Client Error `4XX`.
+    ClientError4xx,
+    /// Server Error `5XX`.
+    ServerError5xx,
+}
+
+/// Strongly typed OpenAPI response status code specification (`200`, `2XX`, or `default`).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub enum StatusCodeSpec {
+    /// Explicit 3-digit HTTP status code (`100`..=`599`).
+    Code(u16),
+    /// Wildcard status range (`1XX`..`5XX`).
+    Range(StatusRange),
+    /// OpenAPI `default` fallback response.
+    Default,
+}
+
+impl StatusCodeSpec {
+    /// Returns a concrete HTTP status code suitable for unit test assertions.
+    pub fn representative_code(&self) -> u16 {
+        match self {
+            Self::Code(c) => *c,
+            Self::Range(StatusRange::Info1xx) => 100,
+            Self::Range(StatusRange::Success2xx) | Self::Default => 200,
+            Self::Range(StatusRange::Redirect3xx) => 302,
+            Self::Range(StatusRange::ClientError4xx) => 400,
+            Self::Range(StatusRange::ServerError5xx) => 500,
+        }
+    }
+}
+
+impl fmt::Display for StatusCodeSpec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Code(c) => write!(f, "{}", c),
+            Self::Range(StatusRange::Info1xx) => f.write_str("1XX"),
+            Self::Range(StatusRange::Success2xx) => f.write_str("2XX"),
+            Self::Range(StatusRange::Redirect3xx) => f.write_str("3XX"),
+            Self::Range(StatusRange::ClientError4xx) => f.write_str("4XX"),
+            Self::Range(StatusRange::ServerError5xx) => f.write_str("5XX"),
+            Self::Default => f.write_str("default"),
+        }
+    }
+}
+
+impl std::str::FromStr for StatusCodeSpec {
+    type Err = AppError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let trimmed = s.trim();
+        if trimmed.eq_ignore_ascii_case("default") {
+            return Ok(Self::Default);
+        }
+        match trimmed.to_ascii_uppercase().as_str() {
+            "1XX" => return Ok(Self::Range(StatusRange::Info1xx)),
+            "2XX" => return Ok(Self::Range(StatusRange::Success2xx)),
+            "3XX" => return Ok(Self::Range(StatusRange::Redirect3xx)),
+            "4XX" => return Ok(Self::Range(StatusRange::ClientError4xx)),
+            "5XX" => return Ok(Self::Range(StatusRange::ServerError5xx)),
+            _ => {}
+        }
+        if trimmed.len() == 3 {
+            if let Ok(code) = trimmed.parse::<u16>() {
+                if (100..=599).contains(&code) {
+                    return Ok(Self::Code(code));
+                }
+            }
+        }
+        Err(AppError::General(format!(
+            "Invalid OpenAPI status code specification: '{}'",
+            s
+        )))
+    }
+}
+
+/// Structured MIME / Media Type representation with type, subtype, `+suffix`, and parameters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MediaType {
+    /// Top-level type (e.g. `"application"`, `"text"`, `"*"`).
+    pub top_type: String,
+    /// Subtype without parameters (e.g. `"json"`, `"problem+json"`, `"*"`).
+    pub subtype: String,
+    /// Optional structured syntax suffix without leading `+` (e.g. `"json"`, `"xml"`, `"jsonl"`).
+    pub suffix: Option<String>,
+    /// Optional media type parameters (`charset`, `boundary`, etc.).
+    pub parameters: BTreeMap<String, String>,
+}
+
+impl MediaType {
+    /// Parses a media type string into its structured components.
+    ///
+    /// # Arguments
+    /// * `raw` - Raw media type string (e.g. `"Application/Problem+JSON; charset=utf-8"`).
+    pub fn parse(raw: &str) -> Self {
+        let mut segments = raw.split(';');
+        let ess = segments.next().unwrap_or(raw).trim().to_ascii_lowercase();
+        let (top_type, subtype) = match ess.split_once('/') {
+            Some((t, s)) => (t.trim().to_string(), s.trim().to_string()),
+            None => (ess, "*".to_string()),
+        };
+        let suffix = subtype
+            .rsplit_once('+')
+            .map(|(_, suf)| suf.trim().to_string())
+            .filter(|s| !s.is_empty());
+
+        let mut parameters = BTreeMap::new();
+        for seg in segments {
+            if let Some((k, v)) = seg.split_once('=') {
+                parameters.insert(
+                    k.trim().to_ascii_lowercase(),
+                    v.trim().trim_matches('"').to_string(),
+                );
+            }
+        }
+
+        Self {
+            top_type,
+            subtype,
+            suffix,
+            parameters,
+        }
+    }
+
+    /// Returns the normalized `type/subtype` essence in lowercase without parameters.
+    pub fn essence(&self) -> String {
+        format!("{}/{}", self.top_type, self.subtype)
+    }
+
+    /// Normalizes a raw media type string to its lowercase `type/subtype` essence.
+    pub fn normalize(raw: &str) -> String {
+        let ess = raw.split(';').next().unwrap_or(raw).trim();
+        ess.to_ascii_lowercase()
+    }
+
+    /// Checks whether this media type represents a sequential JSON stream
+    /// (`application/jsonl`, `application/x-ndjson`, `application/json-seq`, `+jsonl`, etc.).
+    pub fn is_sequential_json(&self) -> bool {
+        let ess = self.essence();
+        matches!(
+            ess.as_str(),
+            "application/jsonl"
+                | "application/x-ndjson"
+                | "application/json-seq"
+                | "application/geo+json-seq"
+        ) || matches!(
+            self.suffix.as_deref(),
+            Some("jsonl" | "ndjson" | "json-seq")
+        )
+    }
+
+    /// Checks whether this media type represents JSON or a `+json` structured syntax.
+    pub fn is_json(&self) -> bool {
+        let ess = self.essence();
+        ess == "application/json"
+            || ess == "application/*+json"
+            || self.suffix.as_deref() == Some("json")
+            || self.is_sequential_json()
+    }
+
+    /// Checks whether this media type represents text or XML.
+    pub fn is_text(&self) -> bool {
+        let ess = self.essence();
+        self.top_type == "text" || ess == "application/xml" || self.suffix.as_deref() == Some("xml")
+    }
+
+    /// Checks whether this media type represents `text/event-stream`.
+    pub fn is_event_stream(&self) -> bool {
+        self.top_type == "text" && self.subtype == "event-stream"
+    }
+
+    /// Checks whether this media type represents `application/x-www-form-urlencoded`.
+    pub fn is_form_urlencoded(&self) -> bool {
+        self.top_type == "application" && self.subtype == "x-www-form-urlencoded"
+    }
+
+    /// Checks whether this media type is `multipart/*`.
+    pub fn is_multipart(&self) -> bool {
+        self.top_type == "multipart"
+    }
+}
+
+/// Validated Rust identifier newtype centralizing keyword escaping and identifier sanitization.
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
+pub struct RustIdent(String);
+
+impl RustIdent {
+    /// Checks whether `ident` is a strict or reserved Rust keyword.
+    pub fn is_keyword(ident: &str) -> bool {
+        matches!(
+            ident,
+            "as" | "break"
+                | "const"
+                | "continue"
+                | "crate"
+                | "else"
+                | "enum"
+                | "extern"
+                | "false"
+                | "fn"
+                | "for"
+                | "if"
+                | "impl"
+                | "in"
+                | "let"
+                | "loop"
+                | "match"
+                | "mod"
+                | "move"
+                | "mut"
+                | "pub"
+                | "ref"
+                | "return"
+                | "self"
+                | "Self"
+                | "static"
+                | "struct"
+                | "super"
+                | "trait"
+                | "true"
+                | "type"
+                | "unsafe"
+                | "use"
+                | "where"
+                | "while"
+                | "async"
+                | "await"
+                | "dyn"
+                | "abstract"
+                | "become"
+                | "box"
+                | "do"
+                | "final"
+                | "macro"
+                | "override"
+                | "priv"
+                | "typeof"
+                | "unsized"
+                | "virtual"
+                | "yield"
+                | "try"
+        )
+    }
+
+    /// Sanitizes an arbitrary string into a valid `snake_case` Rust identifier.
+    pub fn sanitize_snake(raw: &str, fallback: &str) -> Self {
+        let mut out = String::new();
+        let mut prev_underscore = false;
+
+        for ch in raw.chars() {
+            if ch.is_ascii_alphanumeric() {
+                out.push(ch.to_ascii_lowercase());
+                prev_underscore = false;
+            } else if !prev_underscore && !out.is_empty() {
+                out.push('_');
+                prev_underscore = true;
+            }
+        }
+
+        while out.ends_with('_') {
+            out.pop();
+        }
+
+        if out.is_empty() {
+            out.push_str(fallback);
+        }
+
+        if out
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_digit())
+            .unwrap_or(false)
+        {
+            out.insert(0, '_');
+        }
+
+        if Self::is_keyword(&out) {
+            out.push('_');
+        }
+
+        Self(out)
+    }
+
+    /// Sanitizes an arbitrary string into a valid `PascalCase` Rust type or enum variant identifier.
+    pub fn sanitize_pascal(raw: &str, fallback: &str) -> Self {
+        let mut out = String::new();
+        let mut capitalize = true;
+
+        for ch in raw.chars() {
+            if ch.is_ascii_alphanumeric() {
+                if capitalize {
+                    out.push(ch.to_ascii_uppercase());
+                    capitalize = false;
+                } else {
+                    out.push(ch);
+                }
+            } else {
+                capitalize = true;
+            }
+        }
+
+        if out.is_empty() {
+            out.push_str(fallback);
+        }
+
+        if out
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_digit())
+            .unwrap_or(false)
+        {
+            out = format!("{}{}", fallback, out);
+        }
+
+        if Self::is_keyword(&out) {
+            out.push_str(fallback);
+        }
+
+        Self(out)
+    }
+
+    /// Returns the sanitized identifier string slice.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Consumes the wrapper and returns the inner `String`.
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl fmt::Display for RustIdent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// Validated OpenAPI `operationId` newtype.
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
+pub struct OperationId(String);
+
+impl OperationId {
+    /// Constructs a validated `OperationId`, rejecting empty or whitespace-only values.
+    pub fn parse(raw: impl Into<String>) -> AppResult<Self> {
+        let s = raw.into();
+        if s.trim().is_empty() {
+            return Err(AppError::General(
+                "operationId must not be empty".to_string(),
+            ));
+        }
+        Ok(Self(s))
+    }
+
+    /// Converts the operation ID into a sanitized `snake_case` handler [`RustIdent`].
+    pub fn to_handler_ident(&self) -> RustIdent {
+        RustIdent::sanitize_snake(&self.0, "operation")
+    }
+
+    /// Returns the raw `operationId` string slice.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Validated OpenAPI specification extension key (`x-...`).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
+#[serde(transparent)]
+pub struct ExtensionKey(String);
+
+impl ExtensionKey {
+    /// Constructs a validated `ExtensionKey` enforcing the `x-` prefix.
+    pub fn parse(raw: impl Into<String>) -> AppResult<Self> {
+        let s = raw.into();
+        if !s.starts_with("x-") || s.len() <= 2 {
+            return Err(AppError::General(format!(
+                "Specification extension key '{}' must start with 'x-'",
+                s
+            )));
+        }
+        Ok(Self(s))
+    }
+
+    /// Returns the extension key string slice.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ExtensionKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Self::parse(s).map_err(serde::de::Error::custom)
+    }
+}
+
+/// Primitive scalar Rust types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PrimitiveType {
+    /// `bool`.
+    Bool,
+    /// `i8`.
+    I8,
+    /// `i16`.
+    I16,
+    /// `i32`.
+    I32,
+    /// `i64`.
+    I64,
+    /// `i128`.
+    I128,
+    /// `isize`.
+    Isize,
+    /// `u8`.
+    U8,
+    /// `u16`.
+    U16,
+    /// `u32`.
+    U32,
+    /// `u64`.
+    U64,
+    /// `u128`.
+    U128,
+    /// `usize`.
+    Usize,
+    /// `f32`.
+    F32,
+    /// `f64`.
+    F64,
+}
+
+/// Structured domain AST for Rust types, replacing fragile substring checks
+/// (`ty.contains("u8")`, `ty.starts_with("Option<")`, `ty.contains("Uuid")`, etc.).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RustType {
+    /// Scalar primitive type (`i32`, `u8`, `f64`, `bool`, etc.).
+    Primitive(PrimitiveType),
+    /// `String` or `&str`.
+    String,
+    /// `uuid::Uuid`.
+    Uuid,
+    /// `chrono::DateTime<Utc>`.
+    DateTime,
+    /// `chrono::NaiveDate`.
+    NaiveDate,
+    /// `chrono::NaiveDateTime`.
+    NaiveDateTime,
+    /// `bytes::Bytes`, `Vec<u8>`, or `&[u8]`.
+    Bytes,
+    /// `serde_json::Value`.
+    Value,
+    /// `Option<T>`.
+    Option(Box<RustType>),
+    /// `Vec<T>`.
+    Vec(Box<RustType>),
+    /// `Secret<T>`.
+    Secret(Box<RustType>),
+    /// `HashMap<K, V>`.
+    HashMap(Box<RustType>, Box<RustType>),
+    /// `BTreeMap<K, V>`.
+    BTreeMap(Box<RustType>, Box<RustType>),
+    /// Tuple `(T1, T2, ...)`.
+    Tuple(Vec<RustType>),
+    /// Custom struct or enum identifier.
+    Custom(RustIdent),
+}
+
+impl RustType {
+    /// Parses a Rust type string into a structured [`RustType`] AST.
+    pub fn parse(raw: &str) -> Self {
+        let trimmed = raw.trim().trim_start_matches('&').trim();
+        if trimmed == "[u8]" {
+            return Self::Bytes;
+        }
+        if let Some(inner) = trimmed
+            .strip_prefix("Option<")
+            .and_then(|s| s.strip_suffix('>'))
+        {
+            return Self::Option(Box::new(Self::parse(inner)));
+        }
+        if let Some(inner) = trimmed
+            .strip_prefix("Vec<")
+            .and_then(|s| s.strip_suffix('>'))
+        {
+            let parsed_inner = Self::parse(inner);
+            if parsed_inner == Self::Primitive(PrimitiveType::U8) {
+                return Self::Bytes;
+            }
+            return Self::Vec(Box::new(parsed_inner));
+        }
+        if let Some(inner) = trimmed
+            .strip_prefix("Secret<")
+            .and_then(|s| s.strip_suffix('>'))
+        {
+            return Self::Secret(Box::new(Self::parse(inner)));
+        }
+        if let Some(inner) = trimmed
+            .strip_prefix("HashMap<")
+            .or_else(|| trimmed.strip_prefix("std::collections::HashMap<"))
+            .and_then(|s| s.strip_suffix('>'))
+        {
+            if let Some((k, v)) = inner.split_once(',') {
+                return Self::HashMap(Box::new(Self::parse(k)), Box::new(Self::parse(v)));
+            }
+        }
+        if let Some(inner) = trimmed
+            .strip_prefix("BTreeMap<")
+            .or_else(|| trimmed.strip_prefix("std::collections::BTreeMap<"))
+            .and_then(|s| s.strip_suffix('>'))
+        {
+            if let Some((k, v)) = inner.split_once(',') {
+                return Self::BTreeMap(Box::new(Self::parse(k)), Box::new(Self::parse(v)));
+            }
+        }
+        if let Some(inner) = trimmed.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
+            if inner.is_empty() {
+                return Self::Tuple(vec![]);
+            }
+            let items = inner.split(',').map(Self::parse).collect();
+            return Self::Tuple(items);
+        }
+
+        let last_seg = trimmed.rsplit("::").next().unwrap_or(trimmed);
+        match last_seg {
+            "bool" => Self::Primitive(PrimitiveType::Bool),
+            "i8" => Self::Primitive(PrimitiveType::I8),
+            "i16" => Self::Primitive(PrimitiveType::I16),
+            "i32" => Self::Primitive(PrimitiveType::I32),
+            "i64" => Self::Primitive(PrimitiveType::I64),
+            "i128" => Self::Primitive(PrimitiveType::I128),
+            "isize" => Self::Primitive(PrimitiveType::Isize),
+            "u8" => Self::Primitive(PrimitiveType::U8),
+            "u16" => Self::Primitive(PrimitiveType::U16),
+            "u32" => Self::Primitive(PrimitiveType::U32),
+            "u64" => Self::Primitive(PrimitiveType::U64),
+            "u128" => Self::Primitive(PrimitiveType::U128),
+            "usize" => Self::Primitive(PrimitiveType::Usize),
+            "f32" => Self::Primitive(PrimitiveType::F32),
+            "f64" => Self::Primitive(PrimitiveType::F64),
+            "String" | "str" | "char" => Self::String,
+            "Uuid" => Self::Uuid,
+            "DateTime" | "DateTime<Utc>" => Self::DateTime,
+            "NaiveDate" => Self::NaiveDate,
+            "NaiveDateTime" => Self::NaiveDateTime,
+            "Bytes" | "ByteBuf" => Self::Bytes,
+            "Value" => Self::Value,
+            other => Self::Custom(RustIdent::sanitize_pascal(other, "CustomType")),
+        }
+    }
+
+    /// Unwraps `Option<T>` if present and returns the inner [`RustType`].
+    pub fn unwrap_option(&self) -> &Self {
+        match self {
+            Self::Option(inner) => inner.unwrap_option(),
+            other => other,
+        }
+    }
+
+    /// Checks whether this type (or its inner `Option<T>`) is `Uuid`.
+    pub fn is_uuid(&self) -> bool {
+        matches!(self.unwrap_option(), Self::Uuid)
+    }
+
+    /// Checks whether this type (or its inner `Option<T>`) is `bool`.
+    pub fn is_bool(&self) -> bool {
+        matches!(self.unwrap_option(), Self::Primitive(PrimitiveType::Bool))
+    }
+
+    /// Checks whether this type (or its inner `Option<T>`) is an integer primitive.
+    pub fn is_integer(&self) -> bool {
+        matches!(
+            self.unwrap_option(),
+            Self::Primitive(
+                PrimitiveType::I8
+                    | PrimitiveType::I16
+                    | PrimitiveType::I32
+                    | PrimitiveType::I64
+                    | PrimitiveType::I128
+                    | PrimitiveType::Isize
+                    | PrimitiveType::U8
+                    | PrimitiveType::U16
+                    | PrimitiveType::U32
+                    | PrimitiveType::U64
+                    | PrimitiveType::U128
+                    | PrimitiveType::Usize
+            )
+        )
+    }
+
+    /// Returns a sample URL path segment string literal for unit testing this type.
+    pub fn sample_url_segment(&self) -> &'static str {
+        match self.unwrap_option() {
+            Self::Uuid => "00000000-0000-0000-0000-000000000000",
+            Self::Primitive(PrimitiveType::Bool) => "true",
+            _ => "0",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ContentMediaType, CustomHttpMethod, ExtensionKey, HttpMethod, LinkParamValue, MediaType,
+        OperationId, PrimitiveType, RuntimeExpression, RustIdent, RustType, StatusCodeSpec,
+        StatusRange,
+    };
+    use serde_json::json;
+
+    #[test]
+    fn test_domain_types_http_method_status_media_ident_ext_rust_type() {
+        assert_eq!("get".parse::<HttpMethod>().expect("get"), HttpMethod::Get);
+        assert_eq!(
+            "POST".parse::<HttpMethod>().expect("post"),
+            HttpMethod::Post
+        );
+        assert_eq!("PUT".parse::<HttpMethod>().expect("put"), HttpMethod::Put);
+        assert_eq!(
+            "DELETE".parse::<HttpMethod>().expect("del"),
+            HttpMethod::Delete
+        );
+        assert_eq!(
+            "PATCH".parse::<HttpMethod>().expect("patch"),
+            HttpMethod::Patch
+        );
+        assert_eq!(
+            "OPTIONS".parse::<HttpMethod>().expect("opt"),
+            HttpMethod::Options
+        );
+        assert_eq!(
+            "HEAD".parse::<HttpMethod>().expect("head"),
+            HttpMethod::Head
+        );
+        assert_eq!(
+            "TRACE".parse::<HttpMethod>().expect("trace"),
+            HttpMethod::Trace
+        );
+        assert_eq!(
+            "QUERY".parse::<HttpMethod>().expect("query"),
+            HttpMethod::Query
+        );
+        let custom = "PROPFIND".parse::<HttpMethod>().expect("custom");
+        assert_eq!(custom.as_str(), "PROPFIND");
+        assert_eq!(custom.to_lowercase_str(), "propfind");
+        assert_eq!(format!("{}", custom), "PROPFIND");
+        assert!(CustomHttpMethod::parse("bad method").is_err());
+
+        assert_eq!(
+            "200".parse::<StatusCodeSpec>().expect("200"),
+            StatusCodeSpec::Code(200)
+        );
+        assert_eq!(
+            "2XX".parse::<StatusCodeSpec>().expect("2XX"),
+            StatusCodeSpec::Range(StatusRange::Success2xx)
+        );
+        assert_eq!(
+            "1XX"
+                .parse::<StatusCodeSpec>()
+                .expect("1XX")
+                .representative_code(),
+            100
+        );
+        assert_eq!(
+            "3XX"
+                .parse::<StatusCodeSpec>()
+                .expect("3XX")
+                .representative_code(),
+            302
+        );
+        assert_eq!(
+            "4XX"
+                .parse::<StatusCodeSpec>()
+                .expect("4XX")
+                .representative_code(),
+            400
+        );
+        assert_eq!(
+            "5XX"
+                .parse::<StatusCodeSpec>()
+                .expect("5XX")
+                .representative_code(),
+            500
+        );
+        assert_eq!(
+            "default".parse::<StatusCodeSpec>().expect("default"),
+            StatusCodeSpec::Default
+        );
+        assert_eq!(format!("{}", StatusCodeSpec::Code(201)), "201");
+        assert_eq!(
+            format!("{}", StatusCodeSpec::Range(StatusRange::Info1xx)),
+            "1XX"
+        );
+        assert_eq!(
+            format!("{}", StatusCodeSpec::Range(StatusRange::Success2xx)),
+            "2XX"
+        );
+        assert_eq!(
+            format!("{}", StatusCodeSpec::Range(StatusRange::Redirect3xx)),
+            "3XX"
+        );
+        assert_eq!(
+            format!("{}", StatusCodeSpec::Range(StatusRange::ClientError4xx)),
+            "4XX"
+        );
+        assert_eq!(
+            format!("{}", StatusCodeSpec::Range(StatusRange::ServerError5xx)),
+            "5XX"
+        );
+        assert_eq!(format!("{}", StatusCodeSpec::Default), "default");
+        assert!("999".parse::<StatusCodeSpec>().is_err());
+
+        let mt = MediaType::parse("Application/Problem+JSON; charset=\"utf-8\"");
+        assert_eq!(mt.top_type, "application");
+        assert_eq!(mt.subtype, "problem+json");
+        assert_eq!(mt.suffix.as_deref(), Some("json"));
+        assert_eq!(
+            mt.parameters.get("charset").map(String::as_str),
+            Some("utf-8")
+        );
+        assert!(mt.is_json());
+        assert!(!mt.is_sequential_json());
+        assert!(MediaType::parse("application/jsonl").is_sequential_json());
+        assert!(MediaType::parse("text/plain").is_text());
+        assert!(MediaType::parse("text/event-stream").is_event_stream());
+        assert!(MediaType::parse("application/x-www-form-urlencoded").is_form_urlencoded());
+        assert!(MediaType::parse("multipart/form-data").is_multipart());
+        assert_eq!(
+            MediaType::normalize("Text/Plain; charset=utf-8"),
+            "text/plain"
+        );
+
+        assert_eq!(RustIdent::sanitize_snake("type", "param").as_str(), "type_");
+        assert_eq!(
+            RustIdent::sanitize_snake("123-abc", "param").as_str(),
+            "_123_abc"
+        );
+        assert_eq!(
+            RustIdent::sanitize_pascal("my_model", "Model").as_str(),
+            "MyModel"
+        );
+        assert_eq!(
+            RustIdent::sanitize_pascal("123", "Schema").into_inner(),
+            "Schema123"
+        );
+        assert_eq!(format!("{}", RustIdent::sanitize_snake("id", "p")), "id");
+
+        let op_id = OperationId::parse("getUserById").expect("op_id");
+        assert_eq!(op_id.as_str(), "getUserById");
+        assert_eq!(op_id.to_handler_ident().as_str(), "getuserbyid");
+        assert!(OperationId::parse("   ").is_err());
+
+        let ext = ExtensionKey::parse("x-rate-limit").expect("ext");
+        assert_eq!(ext.as_str(), "x-rate-limit");
+        assert!(ExtensionKey::parse("rate-limit").is_err());
+        let deser_ext: ExtensionKey = serde_json::from_str("\"x-custom\"").expect("deser ext");
+        assert_eq!(deser_ext.as_str(), "x-custom");
+        assert!(serde_json::from_str::<ExtensionKey>("\"invalid\"").is_err());
+
+        assert_eq!(
+            RustType::parse("Option<Uuid>").sample_url_segment(),
+            "00000000-0000-0000-0000-000000000000"
+        );
+        assert_eq!(RustType::parse("bool").sample_url_segment(), "true");
+        assert_eq!(RustType::parse("i64").sample_url_segment(), "0");
+        assert!(RustType::parse("Option<Uuid>").is_uuid());
+        assert!(RustType::parse("bool").is_bool());
+        assert!(RustType::parse("u32").is_integer());
+        assert_eq!(RustType::parse("Vec<u8>"), RustType::Bytes);
+        assert_eq!(RustType::parse("&[u8]"), RustType::Bytes);
+        assert_eq!(
+            RustType::parse("Secret<String>"),
+            RustType::Secret(Box::new(RustType::String))
+        );
+        assert_eq!(
+            RustType::parse("HashMap<String, i32>"),
+            RustType::HashMap(
+                Box::new(RustType::String),
+                Box::new(RustType::Primitive(PrimitiveType::I32))
+            )
+        );
+        assert_eq!(
+            RustType::parse("BTreeMap<String, serde_json::Value>"),
+            RustType::BTreeMap(Box::new(RustType::String), Box::new(RustType::Value))
+        );
+        assert_eq!(RustType::parse("()"), RustType::Tuple(vec![]));
+        assert_eq!(
+            RustType::parse("(i8, i16, i128, isize, u16, u64, u128, usize, f32, f64, DateTime, NaiveDate, NaiveDateTime, Bytes, User)"),
+            RustType::Tuple(vec![
+                RustType::Primitive(PrimitiveType::I8),
+                RustType::Primitive(PrimitiveType::I16),
+                RustType::Primitive(PrimitiveType::I128),
+                RustType::Primitive(PrimitiveType::Isize),
+                RustType::Primitive(PrimitiveType::U16),
+                RustType::Primitive(PrimitiveType::U64),
+                RustType::Primitive(PrimitiveType::U128),
+                RustType::Primitive(PrimitiveType::Usize),
+                RustType::Primitive(PrimitiveType::F32),
+                RustType::Primitive(PrimitiveType::F64),
+                RustType::DateTime,
+                RustType::NaiveDate,
+                RustType::NaiveDateTime,
+                RustType::Bytes,
+                RustType::Custom(RustIdent::sanitize_pascal("User", "CustomType")),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_runtime_expression_helpers() {
+        let expr = RuntimeExpression::new("$request.body#/id");
+        assert_eq!(expr.as_str(), "$request.body#/id");
+        assert!(expr.is_expression());
+
+        let plain = RuntimeExpression::new("id");
+        assert!(!plain.is_expression());
+    }
+
+    #[test]
+    fn test_runtime_expression_brace_normalization() {
+        let expr = RuntimeExpression::new("{$request.body#/id}");
+        assert_eq!(expr.as_str(), "$request.body#/id");
+        assert!(expr.is_expression());
+    }
+
+    #[test]
+    fn test_runtime_expression_parse_validation() {
+        let expr = RuntimeExpression::parse_expression("$request.path.id")
+            .expect("Failed to parse expression");
+        assert_eq!(expr.as_str(), "$request.path.id");
+
+        let invalid = RuntimeExpression::parse_expression("$request.body#bad");
+        assert!(invalid.is_err());
+    }
+
+    #[test]
+    fn test_runtime_expression_template_parse() {
+        let expr = RuntimeExpression::parse_expression(
+            "http://example.com?foo={$request.path.id}&bar={$response.header.Location}",
+        )
+        .expect("Failed to parse expression");
+        assert!(expr.is_expression());
+
+        let plain = RuntimeExpression::parse("no expressions here").expect("Failed to parse");
+        assert!(!plain.is_expression());
+    }
+
+    #[test]
+    fn test_link_param_value_literal() {
+        let literal = LinkParamValue::Literal(json!(42));
+        assert!(matches!(literal, LinkParamValue::Literal(_)));
+    }
+
+    #[test]
+    fn test_runtime_expression_display_and_debug() {
+        let expr = RuntimeExpression::new("$response.body#/name");
+        let display = format!("{}", expr);
+        assert_eq!(display, "$response.body#/name");
+
+        let debug = format!("{:?}", expr);
+        assert!(debug.contains("RuntimeExpression"));
+        assert!(debug.contains("$response.body#/name"));
+    }
+
+    #[test]
+    fn test_content_media_type_normalization() {
+        assert_eq!(
+            ContentMediaType::from_media_type("application/x-www-form-urlencoded"),
+            ContentMediaType::FormUrlEncoded
+        );
+        assert_eq!(
+            ContentMediaType::from_media_type("application/vnd.api+json; charset=utf-8"),
+            ContentMediaType::Json
+        );
+
+        match ContentMediaType::from_media_type("text/plain") {
+            ContentMediaType::Other(val) => assert_eq!(val, "text/plain"),
+            _ => panic!("Expected Other for text/plain"),
+        }
+    }
 }

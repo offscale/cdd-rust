@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Mock Generation
 //!
@@ -74,5 +73,18 @@ mod tests {
         };
         let code = generate_mock_routes(&[route]).expect("Failed to generate mock routes");
         assert!(code.contains("pub async fn mock_ping() {}"));
+
+        let s = ParsedStruct {
+            name: "Pet".to_string(),
+            description: None,
+            rename: None,
+            rename_all: None,
+            fields: vec![],
+            is_deprecated: false,
+            deny_unknown_fields: false,
+            external_docs: None,
+        };
+        let structs_code = generate_mock_structs(&[s]).expect("Failed to generate mock structs");
+        assert_eq!(structs_code, "pub struct MockPet {}\n");
     }
 }

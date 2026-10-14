@@ -1,10 +1,9 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Actix Strategy Module
 //!
-//! Implementation of `BackendStrategy` for the Actix Web framework.
-//! Relies on submodules for specific generation logic (extractors, routing, testing, etc.).
+//! Implementation of [`CodegenStrategy`], [`HttpServerStrategy`], and [`BackendStrategy`]
+//! for the Actix Web framework.
 
 pub mod extractors;
 pub mod links;
@@ -13,84 +12,149 @@ pub mod scaffolding;
 pub mod testing;
 pub mod utils;
 
+use crate::openapi::parse::models::{ContentMediaType, SecurityRequirementGroup};
 use crate::openapi::parse::ParsedRoute;
-use crate::strategies::BackendStrategy;
+use crate::strategies::{BackendStrategy, CodegenStrategy, HttpServerStrategy, StrategyKind};
 
 /// Strategy for generating Actix Web compatible code.
 pub struct ActixStrategy;
 
-impl BackendStrategy for ActixStrategy {
-    fn is_server(&self) -> bool {
-        true
+impl CodegenStrategy for ActixStrategy {
+    fn kind(&self) -> StrategyKind {
+        StrategyKind::HttpServer
     }
 
-    // --- Scaffolding ---
-
-    fn handler_imports(&self) -> String {
+    fn module_imports(&self) -> String {
         scaffolding::handler_imports()
     }
 
-    fn handler_signature(&self, route: &ParsedRoute, args: &[String]) -> String {
+    fn emit_handler(&self, route: &ParsedRoute, args: &[String]) -> String {
         scaffolding::handler_signature(route, args)
     }
 
-    fn path_extractor(&self, inner_types: &[String]) -> String {
+    fn extra_cargo_dependencies(&self) -> String {
+        r#"actix-multipart = "0.7.2"
+diesel = { version = "2.1", features = ["postgres", "sqlite", "r2d2", "chrono", "uuid"] }
+fake = "2.9"
+actix-cors = "0.7.1"
+"#
+        .to_string()
+    }
+}
+
+impl HttpServerStrategy for ActixStrategy {
+    fn server_path_extractor(&self, inner_types: &[String]) -> String {
         extractors::path_extractor(inner_types)
     }
 
-    fn query_extractor(&self) -> String {
+    fn server_query_extractor(&self) -> String {
         extractors::query_extractor()
     }
 
-    fn typed_query_extractor(&self, inner_type: &str) -> String {
+    fn server_typed_query_extractor(&self, inner_type: &str) -> String {
         extractors::typed_query_extractor(inner_type)
+    }
+
+    fn server_query_string_extractor(
+        &self,
+        inner_type: &str,
+        content_media_type: Option<&ContentMediaType>,
+    ) -> String {
+        extractors::query_string_extractor(inner_type, content_media_type)
+    }
+
+    fn server_header_extractor(&self, inner_type: &str) -> String {
+        extractors::header_extractor(inner_type)
+    }
+
+    fn server_cookie_extractor(&self) -> String {
+        extractors::cookie_extractor()
+    }
+
+    fn server_body_extractor(&self, body_type: &str) -> String {
+        extractors::body_extractor(body_type)
+    }
+
+    fn server_form_extractor(&self, body_type: &str) -> String {
+        extractors::form_extractor(body_type)
+    }
+
+    fn server_multipart_extractor(&self, body_type: &str) -> String {
+        extractors::multipart_extractor(body_type)
+    }
+
+    fn server_text_extractor(&self, body_type: &str) -> String {
+        extractors::text_extractor(body_type)
+    }
+
+    fn server_bytes_extractor(&self, body_type: &str) -> String {
+        extractors::bytes_extractor(body_type)
+    }
+
+    fn server_security_extractor(&self, requirements: &[SecurityRequirementGroup]) -> String {
+        extractors::security_extractor(requirements)
+    }
+
+    fn server_route_registration(&self, route: &ParsedRoute, handler_full_path: &str) -> String {
+        registration::route_registration_statement(route, handler_full_path)
+    }
+}
+
+impl BackendStrategy for ActixStrategy {
+    fn path_extractor(&self, inner_types: &[String]) -> String {
+        self.server_path_extractor(inner_types)
+    }
+
+    fn query_extractor(&self) -> String {
+        self.server_query_extractor()
+    }
+
+    fn typed_query_extractor(&self, inner_type: &str) -> String {
+        self.server_typed_query_extractor(inner_type)
     }
 
     fn query_string_extractor(
         &self,
         inner_type: &str,
-        content_media_type: Option<&crate::openapi::parse::models::ContentMediaType>,
+        content_media_type: Option<&ContentMediaType>,
     ) -> String {
-        extractors::query_string_extractor(inner_type, content_media_type)
+        self.server_query_string_extractor(inner_type, content_media_type)
     }
 
     fn header_extractor(&self, inner_type: &str) -> String {
-        extractors::header_extractor(inner_type)
+        self.server_header_extractor(inner_type)
     }
 
     fn cookie_extractor(&self) -> String {
-        extractors::cookie_extractor()
+        self.server_cookie_extractor()
     }
 
     fn body_extractor(&self, body_type: &str) -> String {
-        extractors::body_extractor(body_type)
+        self.server_body_extractor(body_type)
     }
 
     fn form_extractor(&self, body_type: &str) -> String {
-        extractors::form_extractor(body_type)
+        self.server_form_extractor(body_type)
     }
 
     fn multipart_extractor(&self, body_type: &str) -> String {
-        extractors::multipart_extractor(body_type)
+        self.server_multipart_extractor(body_type)
     }
 
     fn text_extractor(&self, body_type: &str) -> String {
-        extractors::text_extractor(body_type)
+        self.server_text_extractor(body_type)
     }
 
     fn bytes_extractor(&self, body_type: &str) -> String {
-        extractors::bytes_extractor(body_type)
+        self.server_bytes_extractor(body_type)
     }
 
-    fn security_extractor(
-        &self,
-        requirements: &[crate::openapi::parse::models::SecurityRequirementGroup],
-    ) -> String {
-        extractors::security_extractor(requirements)
+    fn security_extractor(&self, requirements: &[SecurityRequirementGroup]) -> String {
+        self.server_security_extractor(requirements)
     }
 
     fn route_registration_statement(&self, route: &ParsedRoute, handler_full_path: &str) -> String {
-        registration::route_registration_statement(route, handler_full_path)
+        self.server_route_registration(route, handler_full_path)
     }
 
     fn test_imports(&self) -> String {
@@ -140,6 +204,8 @@ mod tests {
     #[test]
     fn test_actix_handler_imports() {
         let s = ActixStrategy;
+        assert_eq!(s.kind(), StrategyKind::HttpServer);
+        assert!(s.extra_cargo_dependencies().contains("actix-multipart"));
         let imports = s.handler_imports();
         assert!(imports.contains("use actix_web"));
         assert!(imports.contains("use uuid::Uuid"));
@@ -149,7 +215,6 @@ mod tests {
     fn test_handler_signature_passes_through() {
         let s = ActixStrategy;
 
-        // Use a dummy route just to make it compile
         let route = ParsedRoute {
             path: "/users/{id}".into(),
             summary: None,
@@ -201,28 +266,19 @@ mod tests {
             path: "/path".into(),
             summary: None,
             description: None,
-
             path_summary: None,
-
             path_description: None,
             path_extensions: BTreeMap::new(),
-
             operation_summary: None,
-
             operation_description: None,
-
             base_path: None,
-
             path_servers: None,
-
             servers_override: None,
             method: "QUERY".into(),
             handler_name: "query_handler".into(),
             operation_id: None,
             params: vec![],
-
             path_params: vec![],
-
             request_body: None,
             security: vec![],
             security_defined: false,
@@ -245,7 +301,7 @@ mod tests {
         };
         let code = s.route_registration_statement(&route, "mod::qh");
         assert!(code.contains(
-            "cfg.route(\"/path\", web::method(actix_web::http::Method::from_bytes(b\"QUERY\").expect(\"expected value\")).to(mod::qh));"
+            r#"cfg.route("/path", web::method(actix_web::http::Method::from_bytes(b"QUERY").expect("expected value")).to(mod::qh));"#
         ));
     }
 

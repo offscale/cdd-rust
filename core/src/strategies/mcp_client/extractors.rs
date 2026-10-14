@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Extractors for MCP Client Strategy
 //!
@@ -74,4 +73,29 @@ pub fn bytes_extractor(_body_type: &str) -> String {
 /// Generates the type string for Security extraction.
 pub fn security_extractor(_requirements: &[SecurityRequirementGroup]) -> String {
     "".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mcp_client_extractors() {
+        assert_eq!(path_extractor(&["i64".to_string()]), "i64");
+        assert_eq!(
+            path_extractor(&["i64".to_string(), "String".to_string()]),
+            "(i64, String)"
+        );
+        assert_eq!(query_extractor(), "serde_json::Value");
+        assert_eq!(typed_query_extractor("Q"), "Q");
+        assert_eq!(query_string_extractor("Q", None), "String");
+        assert_eq!(header_extractor("H"), "String");
+        assert_eq!(cookie_extractor(), "String");
+        assert_eq!(body_extractor("B"), "B");
+        assert_eq!(form_extractor("F"), "F");
+        assert_eq!(multipart_extractor("M"), "M");
+        assert_eq!(text_extractor("String"), "String");
+        assert_eq!(bytes_extractor("Vec<u8>"), "Vec<u8>");
+        assert_eq!(security_extractor(&[]), "");
+    }
 }

@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Scaffolding
 //!
@@ -119,8 +118,31 @@ mod tests {
 
     #[test]
     fn test_handler_signature() {
-        let route = dummy_route();
+        let mut route = dummy_route();
         let sig = handler_signature(&route, &["id: Path<i32>".to_string()]);
         assert!(sig.contains("pub async fn my_handler(id: Path<i32>) -> impl IntoResponse"));
+
+        route.response_type = Some("User".to_string());
+        let sig_typed = handler_signature(&route, &[]);
+        assert!(sig_typed.contains("-> Json<User>"));
+
+        route.response_headers = vec![crate::openapi::parse::models::ResponseHeader {
+            name: "X-Rate".to_string(),
+            description: None,
+            required: false,
+            deprecated: false,
+            style: None,
+            explode: None,
+            ty: "String".to_string(),
+            content_media_type: None,
+            example: None,
+            extensions: BTreeMap::new(),
+        }];
+        let sig_hdr_typed = handler_signature(&route, &[]);
+        assert!(sig_hdr_typed.contains("(StatusCode::OK, headers, Json(response)).into_response()"));
+
+        route.response_type = None;
+        let sig_hdr_only = handler_signature(&route, &[]);
+        assert!(sig_hdr_only.contains("(StatusCode::OK, headers).into_response()"));
     }
 }

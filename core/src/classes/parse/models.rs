@@ -1,4 +1,4 @@
-#![cfg(not(tarpaulin_include))]
+#![deny(missing_docs)]
 //! # Data Models
 //!
 //! definition of Intermediate Representation (IR) structures for parsed Rust code.
@@ -297,5 +297,21 @@ mod tests {
         assert_eq!(RenameRule::CamelCase.apply("user_id"), "userId");
         assert_eq!(RenameRule::Lowercase.apply("UserID"), "userid");
         assert_eq!(RenameRule::Uppercase.apply("userId"), "USERID");
+        assert_eq!(RenameRule::CamelCase.apply("___"), "");
+        assert_eq!(capitalize(""), "");
+
+        for (raw, expected) in [
+            ("camelCase", Some(RenameRule::CamelCase)),
+            ("snake_case", Some(RenameRule::SnakeCase)),
+            ("kebab-case", Some(RenameRule::KebabCase)),
+            ("PascalCase", Some(RenameRule::PascalCase)),
+            ("SCREAMING_SNAKE_CASE", Some(RenameRule::ScreamingSnakeCase)),
+            ("SCREAMING-KEBAB-CASE", Some(RenameRule::ScreamingKebabCase)),
+            ("lowercase", Some(RenameRule::Lowercase)),
+            ("UPPERCASE", Some(RenameRule::Uppercase)),
+            ("unknown", None),
+        ] {
+            assert_eq!(RenameRule::parse(raw), expected);
+        }
     }
 }

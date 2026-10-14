@@ -1,46 +1,204 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
-//! # Backend Strategy Trait
+//! # Strategy Trait Hierarchy
 //!
-//! Defines the interface required to generate code for a specific web framework
-//! (e.g. Actix, Axum, Poem, etc.).
+//! Defines the domain-segregated code generation traits:
+//! - [`CodegenStrategy`]: Shared target metadata and module generation hooks.
+//! - [`HttpServerStrategy`]: HTTP server extractors, handler signatures, route registration, and server test harnesses (`ActixStrategy`, `AxumStrategy`).
+//! - [`HttpClientStrategy`]: HTTP client method signatures and mock-server client tests (`ReqwestStrategy`).
+//! - [`CliStrategy`]: `clap::Subcommand` enum generation and CLI execution dispatch (`ClapCliStrategy`).
+//! - [`McpStrategy`]: JSON-RPC / SSE tool registration and schema dispatch (`McpClientStrategy`, `McpServerStrategy`).
+//! - [`BackendStrategy`]: Unified adapter trait used by shared AST emitters (`functions::emit`, `routes::emit`, `tests::emit`).
 
-use crate::openapi::parse::models::ContentMediaType;
+use crate::openapi::parse::models::{ContentMediaType, SecurityRequirementGroup};
 use crate::openapi::parse::ParsedRoute;
 use crate::openapi::parse::RequestBodyDefinition;
 
-/// A strategy trait for decoupling framework-specific code generation.
-///
-/// Implementors define how to generate imports, handler signatures, extractors,
-/// and route registrations for a specific backend.
-/// Also includes methods for generating integration tests.
-pub trait BackendStrategy {
-    /// Indicates if this strategy is generating a server (true) or a client/SDK (false).
-    fn is_server(&self) -> bool {
-        false
-    }
+/// Strongly typed category of code generation strategy, replacing boolean type-checking
+/// methods (`is_server()`, `is_cli()`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StrategyKind {
+    /// HTTP Web Server (`ActixStrategy`, `AxumStrategy`).
+    HttpServer,
+    /// HTTP Client SDK (`ReqwestStrategy`).
+    HttpClient,
+    /// Command-Line Interface (`ClapCliStrategy`).
+    Cli,
+    /// Model Context Protocol Client or Server (`McpClientStrategy`, `McpServerStrategy`).
+    Mcp,
+}
 
-    /// Indicates if this strategy is generating a CLI client.
-    fn is_cli(&self) -> bool {
-        false
-    }
+/// Core code generation trait providing shared target metadata and module generation hooks.
+pub trait CodegenStrategy {
+    /// Returns the [`StrategyKind`] for this strategy.
+    ///
+    /// # Returns
+    /// The [`StrategyKind`] describing the target domain.
+    fn kind(&self) -> StrategyKind;
 
-    // --- Scaffolding & Routing ---
+    /// Returns the standard imports for a generated module in this strategy.
+    ///
+    /// # Returns
+    /// Rust `use` statements as a [`String`].
+    fn module_imports(&self) -> String;
 
-    /// Returns the standard imports for a handler file in this framework.
-    fn handler_imports(&self) -> String;
-
-    /// Generates a handler function signature.
+    /// Generates the primary function or struct+function definition for `route`.
     ///
     /// # Arguments
+    /// * `route` - The parsed OpenAPI route definition.
+    /// * `args` - Extracted parameter declarations (`name: Type`).
     ///
-    /// * `func_name` - The name of the function.
-    /// * `args` - A list of argument declaration strings (e.g. `id: web::Path<Uuid>`).
-    /// * `response_type` - The specific return type if identified (e.g. `UserResponse`).
-    /// * `response_headers` - List of headers the response is expected to include.
-    /// * `response_links` - List of links associated with the response (HATEOAS).
-    fn handler_signature(&self, route: &ParsedRoute, args: &[String]) -> String;
+    /// # Returns
+    /// Generated Rust function/struct code.
+    fn emit_handler(&self, route: &ParsedRoute, args: &[String]) -> String;
+
+    /// Returns extra Cargo.toml dependency lines required by this strategy's generated package.
+    ///
+    /// # Returns
+    /// Additional TOML dependency lines (empty by default).
+    fn extra_cargo_dependencies(&self) -> String {
+        String::new()
+    }
+}
+
+/// Strategy trait for HTTP web server frameworks (`ActixStrategy`, `AxumStrategy`).
+pub trait HttpServerStrategy: CodegenStrategy {
+    /// Generates the type string for path parameter extraction.
+    ///
+    /// # Arguments
+    /// * `inner_types` - The Rust types of the path parameters.
+    fn server_path_extractor(&self, inner_types: &[String]) -> String;
+
+    /// Generates the type string for untyped query parameter extraction.
+    fn server_query_extractor(&self) -> String;
+
+    /// Generates the type string for strongly typed query struct extraction.
+    ///
+    /// # Arguments
+    /// * `inner_type` - The Rust struct type representing query parameters.
+    fn server_typed_query_extractor(&self, inner_type: &str) -> String;
+
+    /// Generates the type string for OAS 3.2 `querystring` extraction.
+    ///
+    /// # Arguments
+    /// * `inner_type` - The Rust type the entire query string maps to.
+    /// * `content_media_type` - Optional media type of the query string.
+    fn server_query_string_extractor(
+        &self,
+        inner_type: &str,
+        content_media_type: Option<&ContentMediaType>,
+    ) -> String;
+
+    /// Generates the type string for header parameter extraction.
+    ///
+    /// # Arguments
+    /// * `inner_type` - The Rust type of the header parameter.
+    fn server_header_extractor(&self, inner_type: &str) -> String;
+
+    /// Generates the type string for cookie parameter extraction.
+    fn server_cookie_extractor(&self) -> String;
+
+    /// Generates the type string for JSON request body extraction.
+    ///
+    /// # Arguments
+    /// * `body_type` - The Rust type of the JSON body.
+    fn server_body_extractor(&self, body_type: &str) -> String;
+
+    /// Generates the type string for URL-encoded form body extraction.
+    ///
+    /// # Arguments
+    /// * `body_type` - The Rust type of the form body.
+    fn server_form_extractor(&self, body_type: &str) -> String;
+
+    /// Generates the type string for multipart body extraction.
+    ///
+    /// # Arguments
+    /// * `body_type` - The Rust type of the multipart body.
+    fn server_multipart_extractor(&self, body_type: &str) -> String;
+
+    /// Generates the type string for plain-text body extraction.
+    ///
+    /// # Arguments
+    /// * `body_type` - The Rust type of the text body.
+    fn server_text_extractor(&self, body_type: &str) -> String;
+
+    /// Generates the type string for binary body extraction.
+    ///
+    /// # Arguments
+    /// * `body_type` - The Rust type of the binary body.
+    fn server_bytes_extractor(&self, body_type: &str) -> String;
+
+    /// Generates the type string for security guard/principal extraction.
+    ///
+    /// # Arguments
+    /// * `requirements` - Security requirement groups for the operation.
+    fn server_security_extractor(&self, requirements: &[SecurityRequirementGroup]) -> String;
+
+    /// Generates the service route registration statement.
+    ///
+    /// # Arguments
+    /// * `route` - The parsed OpenAPI route definition.
+    /// * `handler_full_path` - Qualified path to the handler function.
+    fn server_route_registration(&self, route: &ParsedRoute, handler_full_path: &str) -> String;
+}
+
+/// Strategy trait for HTTP client SDK generators (`ReqwestStrategy`).
+pub trait HttpClientStrategy: CodegenStrategy {
+    /// Generates OpenAPI doc-comment annotations (`@OAS_METHOD`, `@OAS_PATH`) for a client function.
+    ///
+    /// # Arguments
+    /// * `route` - The parsed OpenAPI route definition.
+    fn client_operation_docs(&self, route: &ParsedRoute) -> String;
+
+    /// Generates a mock-server integration test for the client method.
+    ///
+    /// # Arguments
+    /// * `route` - The parsed OpenAPI route definition.
+    /// * `crate_name` - Crate/module identifier for the generated client.
+    fn client_mock_test(&self, route: &ParsedRoute, crate_name: &str) -> String;
+}
+
+/// Strategy trait for CLI binary generators (`ClapCliStrategy`).
+pub trait CliStrategy: CodegenStrategy {
+    /// Generates the complete `src/main.rs` Clap CLI entrypoint dispatching all `module_names`.
+    ///
+    /// # Arguments
+    /// * `module_subdir` - Subdirectory name under `src/` (e.g. `"handlers"`).
+    /// * `module_names` - List of generated command module names.
+    fn generate_cli_main(&self, module_subdir: &str, module_names: &[String]) -> String;
+
+    /// Generates a CLI argument parsing and execution test for `route`.
+    ///
+    /// # Arguments
+    /// * `route` - The parsed OpenAPI route definition.
+    /// * `crate_name` - Crate/module identifier for the generated CLI package.
+    fn cli_command_test(&self, route: &ParsedRoute, crate_name: &str) -> String;
+}
+
+/// Strategy trait for Model Context Protocol generators (`McpClientStrategy`, `McpServerStrategy`).
+pub trait McpStrategy: CodegenStrategy {
+    /// Generates the MCP tool registration statement for `route`.
+    ///
+    /// # Arguments
+    /// * `route` - The parsed OpenAPI route definition.
+    /// * `handler_full_path` - Qualified path to the generated tool handler.
+    fn mcp_tool_registration(&self, route: &ParsedRoute, handler_full_path: &str) -> String;
+}
+
+/// Unified strategy interface used by the shared AST scaffolding and test emitters.
+///
+/// Non-server strategies inherit sensible defaults for server-only extractors and route
+/// registration hooks so they only need to implement methods relevant to their target.
+pub trait BackendStrategy: CodegenStrategy {
+    /// Returns the standard imports for a handler file in this framework.
+    fn handler_imports(&self) -> String {
+        self.module_imports()
+    }
+
+    /// Generates a handler function signature.
+    fn handler_signature(&self, route: &ParsedRoute, args: &[String]) -> String {
+        self.emit_handler(route, args)
+    }
 
     /// Optional extra doc comments to insert above the handler.
     fn extra_handler_docs(&self, _route: &ParsedRoute) -> String {
@@ -48,94 +206,81 @@ pub trait BackendStrategy {
     }
 
     /// Generates the type string for path parameter extraction.
-    ///
-    /// # Arguments
-    ///
-    /// * `inner_types` - The Rust types of the path parameters (e.g. `["Uuid", "i32"]`).
-    fn path_extractor(&self, inner_types: &[String]) -> String;
+    fn path_extractor(&self, inner_types: &[String]) -> String {
+        if inner_types.len() == 1 {
+            inner_types[0].clone()
+        } else {
+            format!("({})", inner_types.join(", "))
+        }
+    }
 
     /// Generates the type string for query parameter extraction.
-    fn query_extractor(&self) -> String;
+    fn query_extractor(&self) -> String {
+        "serde_json::Value".to_string()
+    }
 
     /// Generates the type string for strongly typed query parameter extraction.
-    ///
-    /// # Arguments
-    ///
-    /// * `inner_type` - The Rust struct type representing query parameters.
     fn typed_query_extractor(&self, inner_type: &str) -> String {
-        let _ = inner_type;
-        self.query_extractor()
+        inner_type.to_string()
     }
 
     /// Generates the type string for the entire Query String extraction (OAS 3.2).
-    ///
-    /// # Arguments
-    ///
-    /// * `inner_type` - The specific type the entire query string should map to.
-    /// * `content_media_type` - Media type used to serialize the query string (if known).
     fn query_string_extractor(
         &self,
         inner_type: &str,
-        content_media_type: Option<&ContentMediaType>,
-    ) -> String;
+        _content_media_type: Option<&ContentMediaType>,
+    ) -> String {
+        inner_type.to_string()
+    }
 
     /// Generates the type string for Header parameter extraction.
-    fn header_extractor(&self, inner_type: &str) -> String;
+    fn header_extractor(&self, inner_type: &str) -> String {
+        inner_type.to_string()
+    }
 
     /// Generates the type string for Cookie parameter extraction.
-    fn cookie_extractor(&self) -> String;
+    fn cookie_extractor(&self) -> String {
+        "String".to_string()
+    }
 
     /// Generates the type string for JSON request body extraction.
-    ///
-    /// # Arguments
-    ///
-    /// * `body_type` - The Rust type of the body (e.g. `CreateUserRequest`).
-    fn body_extractor(&self, body_type: &str) -> String;
+    fn body_extractor(&self, body_type: &str) -> String {
+        body_type.to_string()
+    }
 
     /// Generates the type string for Form request body extraction.
-    ///
-    /// # Arguments
-    ///
-    /// * `body_type` - The Rust type of the body (e.g. `SearchForm`).
-    fn form_extractor(&self, body_type: &str) -> String;
+    fn form_extractor(&self, body_type: &str) -> String {
+        body_type.to_string()
+    }
 
     /// Generates the type string for Multipart request body extraction.
-    ///
-    /// # Arguments
-    ///
-    /// * `body_type` - The Rust type of the body (e.g. `UploadForm`).
-    fn multipart_extractor(&self, body_type: &str) -> String;
+    fn multipart_extractor(&self, body_type: &str) -> String {
+        body_type.to_string()
+    }
 
     /// Generates the type string for Text request body extraction.
-    ///
-    /// # Arguments
-    ///
-    /// * `body_type` - The Rust type of the body (e.g. `String`).
-    fn text_extractor(&self, body_type: &str) -> String;
+    fn text_extractor(&self, body_type: &str) -> String {
+        body_type.to_string()
+    }
 
     /// Generates the type string for Binary request body extraction.
-    ///
-    /// # Arguments
-    ///
-    /// * `body_type` - The Rust type of the body (e.g. `Vec<u8>`).
-    fn bytes_extractor(&self, body_type: &str) -> String;
+    fn bytes_extractor(&self, body_type: &str) -> String {
+        body_type.to_string()
+    }
 
     /// Generates the type string for a Security extraction/Guard.
-    /// Used when `security: [{...}]` is present (OR groups).
-    /// Expects a placeholder type name (e.g. `UserPrincipal` or generic `Auth`)
-    /// based on scheme.
-    fn security_extractor(
-        &self,
-        requirements: &[crate::openapi::parse::models::SecurityRequirementGroup],
-    ) -> String;
+    fn security_extractor(&self, _requirements: &[SecurityRequirementGroup]) -> String {
+        "Option<String>".to_string()
+    }
 
-    /// Generates the route registration code statement.
-    ///
-    /// # Arguments
-    ///
-    /// * `route` - The parsed route definition.
-    /// * `handler_full_path` - The fully qualified path to the handler (e.g. `handlers::users::create`).
-    fn route_registration_statement(&self, route: &ParsedRoute, handler_full_path: &str) -> String;
+    /// Generates the route registration code statement (empty for client/CLI targets).
+    fn route_registration_statement(
+        &self,
+        _route: &ParsedRoute,
+        _handler_full_path: &str,
+    ) -> String {
+        String::new()
+    }
 
     // --- Test Generation ---
 
@@ -143,25 +288,15 @@ pub trait BackendStrategy {
     fn test_imports(&self) -> String;
 
     /// Returns the test function signature (including attributes).
-    ///
-    /// Example: `#[actix_web::test]\nasync fn test_foo() {`
     fn test_fn_signature(&self, fn_name: &str) -> String;
 
     /// Returns code to initialize the application for testing.
-    ///
-    /// * `app_factory` - code string for the app factory (e.g. `crate::create_app`).
     fn test_app_init(&self, app_factory: &str) -> String;
 
     /// Returns the code snippet that attaches a dummy body to the request.
-    ///
-    /// * `body` - The parsed request body definition.
     fn test_body_setup_code(&self, body: &RequestBodyDefinition) -> String;
 
     /// Returns code to build the request object.
-    ///
-    /// * `method` - HTTP method (GET, POST).
-    /// * `uri` - Request URI.
-    /// * `body_setup` - Code snippet inserted if body is present.
     fn test_request_builder(&self, method: &str, uri: &str, body_setup: &str) -> String;
 
     /// Returns code to execute the request against the app.
@@ -171,7 +306,9 @@ pub trait BackendStrategy {
     fn test_assertion(&self) -> String;
 
     /// Returns the helper function code for validating responses against OpenAPI.
-    fn test_validation_helper(&self) -> String;
+    fn test_validation_helper(&self) -> String {
+        String::new()
+    }
 
     /// Generates a unit test for a specific handler function to be placed alongside it.
     fn handler_unit_test(&self, route: &ParsedRoute) -> String {
@@ -184,5 +321,122 @@ pub trait BackendStrategy {
         let _ = route;
         let _ = app_factory;
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::openapi::parse::models::RouteKind;
+    use crate::strategies::{
+        ClapCliStrategy, McpClientStrategy, McpServerStrategy, ReqwestStrategy,
+    };
+    use std::collections::BTreeMap;
+
+    fn sample_route() -> ParsedRoute {
+        ParsedRoute {
+            path: "/pets".into(),
+            summary: None,
+            description: None,
+            path_summary: None,
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+            operation_summary: None,
+            operation_description: None,
+            base_path: None,
+            path_servers: None,
+            servers_override: None,
+            method: "GET".into(),
+            handler_name: "list_pets".into(),
+            operation_id: None,
+            params: vec![],
+            path_params: vec![],
+            request_body: None,
+            security: vec![],
+            security_defined: false,
+            response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
+            response_headers: vec![],
+            response_links: None,
+            kind: RouteKind::Path,
+            tags: vec![],
+            callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn test_default_strategy_trait_methods_and_delegation() {
+        let route = sample_route();
+        let body = RequestBodyDefinition {
+            ty: "Pet".to_string(),
+            description: None,
+            media_type: "application/json".to_string(),
+            format: crate::openapi::parse::BodyFormat::Json,
+            required: true,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: None,
+            example: None,
+        };
+
+        for s in [
+            &ReqwestStrategy as &dyn BackendStrategy,
+            &ClapCliStrategy as &dyn BackendStrategy,
+            &McpClientStrategy as &dyn BackendStrategy,
+            &McpServerStrategy as &dyn BackendStrategy,
+        ] {
+            let _ = s.kind();
+            let _ = s.extra_cargo_dependencies();
+            assert!(!s.handler_imports().is_empty());
+            assert!(!s.handler_signature(&route, &[]).is_empty());
+            assert!(!s.extra_handler_docs(&route).is_empty());
+            assert_eq!(s.path_extractor(&["i32".to_string()]), "i32");
+            assert_eq!(
+                s.path_extractor(&["i32".to_string(), "String".to_string()]),
+                "(i32, String)"
+            );
+            assert_eq!(s.query_extractor(), "serde_json::Value");
+            assert_eq!(s.typed_query_extractor("Q"), "Q");
+            assert_eq!(s.query_string_extractor("Q", None), "Q");
+            assert_eq!(s.header_extractor("H"), "H");
+            assert_eq!(s.cookie_extractor(), "String");
+            assert_eq!(s.body_extractor("B"), "B");
+            assert_eq!(s.form_extractor("F"), "F");
+            assert_eq!(s.multipart_extractor("M"), "M");
+            assert_eq!(s.text_extractor("T"), "T");
+            assert_eq!(s.bytes_extractor("Vec<u8>"), "Vec<u8>");
+            assert_eq!(s.security_extractor(&[]), "Option<String>");
+            let _ = s.route_registration_statement(&route, "mod::list_pets");
+            assert!(!s.test_imports().is_empty());
+            assert!(!s.test_fn_signature("pets").is_empty());
+            assert!(!s.test_app_init("app").is_empty());
+            assert!(!s.test_body_setup_code(&body).is_empty());
+            assert!(!s.test_request_builder("GET", "/pets", "").is_empty());
+            assert!(!s.test_api_call().is_empty());
+            assert!(!s.test_assertion().is_empty());
+            let _ = s.test_validation_helper();
+            assert!(s.handler_unit_test(&route).is_empty());
+            let _ = s.generate_custom_test(&route, "app");
+        }
+
+        let cli_main = ClapCliStrategy.generate_cli_main("handlers", &["pet_ops".to_string()]);
+        assert!(cli_main.contains("Commands::PetOps"));
+        assert_eq!(
+            crate::strategies::reqwest::registration::route_registration_statement(&route, "h"),
+            ""
+        );
+        assert_eq!(
+            crate::strategies::clap_cli::registration::route_registration_statement(&route, "h"),
+            ""
+        );
     }
 }

@@ -1,3 +1,5 @@
+#![deny(missing_docs)]
+
 //! User table models.
 
 /// Generated user models and Diesel mappings.
@@ -14,13 +16,15 @@ mod tests {
     #[test]
     fn test_users_struct_integrity() {
         let now = Utc::now().naive_utc();
+        let id = Uuid::new_v4();
         let user = Users {
-            id: Uuid::new_v4(),
+            id,
             email: "test@example.com".to_string(),
             password_hash: "secret".to_string(),
             created_at: now,
             updated_at: now,
         };
-        let _ = user.email;
+        assert_eq!(user.id, id);
+        assert_eq!(user.email, "test@example.com");
     }
 }

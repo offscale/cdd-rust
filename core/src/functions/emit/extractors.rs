@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Extractor Assembly
 //!
@@ -142,43 +141,7 @@ fn escape_rust_string(input: &str) -> String {
 }
 
 fn is_rust_keyword(ident: &str) -> bool {
-    matches!(
-        ident,
-        "as" | "break"
-            | "const"
-            | "continue"
-            | "crate"
-            | "else"
-            | "enum"
-            | "extern"
-            | "false"
-            | "fn"
-            | "for"
-            | "if"
-            | "impl"
-            | "in"
-            | "let"
-            | "loop"
-            | "match"
-            | "mod"
-            | "move"
-            | "mut"
-            | "pub"
-            | "ref"
-            | "return"
-            | "self"
-            | "Self"
-            | "static"
-            | "struct"
-            | "super"
-            | "trait"
-            | "true"
-            | "type"
-            | "unsafe"
-            | "use"
-            | "where"
-            | "while"
-    )
+    crate::openapi::parse::models::RustIdent::is_keyword(ident)
 }
 
 fn build_handler_docs(route: &ParsedRoute) -> String {

@@ -1,3 +1,7 @@
+#![deny(missing_docs)]
+
+//! High-level source patching workflows for OpenAPI attribute injection.
+
 use crate::classes::patcher::files::add_import;
 use crate::classes::patcher::structs::add_derive;
 use crate::error::AppResult;

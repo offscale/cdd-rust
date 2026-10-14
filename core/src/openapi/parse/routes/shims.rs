@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Route Shims
 //!
@@ -191,7 +190,7 @@ pub struct ShimOpenApi {
 ///
 /// We do not derive `Debug` here because `RefOr` in utoipa 5.x dependency tree
 /// may not implement `Debug` for all internal variations, causing build failures.
-#[derive(Deserialize, Serialize, Clone)]
+#[derive(Deserialize, Serialize, Clone, Default)]
 pub struct ShimComponents {
     /// Security Schemes.
     #[serde(rename = "securitySchemes")]
@@ -199,6 +198,10 @@ pub struct ShimComponents {
     /// Reusable Path Item Objects.
     #[serde(rename = "pathItems")]
     pub path_items: Option<BTreeMap<String, RefOr<ShimPathItem>>>,
+
+    /// Document `$self` base URI propagated from the owning OpenAPI root.
+    #[serde(skip)]
+    pub self_uri: Option<String>,
 
     /// Capture other loosely typed component maps (schemas, parameters, etc.)
     /// to maintain compatibility with existing resolvers that expect generic Value lookups.
@@ -789,8 +792,10 @@ fn normalize_encoding_object_headers(value: &mut Value) {
     let Value::Object(obj) = value else {
         return;
     };
-    obj.entry("headers".to_string())
+    let headers_val = obj
+        .entry("headers".to_string())
         .or_insert_with(|| Value::Object(Map::new()));
+    normalize_response_headers(headers_val);
 }
 
 /// A single HTTP Operation definition.

@@ -1,5 +1,4 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # Extractors
 //!
@@ -329,5 +328,73 @@ mod tests {
     fn test_security_extractor_optional_anonymous() {
         let code = security_extractor(&[SecurityRequirementGroup::anonymous()]);
         assert!(code.is_empty());
+        assert!(security_extractor(&[]).is_empty());
+
+        let basic_req = SecurityRequirement {
+            scheme_name: "basic".to_string(),
+            scopes: vec![],
+            scheme: Some(SecuritySchemeInfo {
+                kind: SecuritySchemeKind::Http {
+                    scheme: "basic".into(),
+                    bearer_format: None,
+                },
+                description: None,
+                deprecated: false,
+            }),
+        };
+        assert!(security_extractor(&[SecurityRequirementGroup {
+            schemes: vec![basic_req]
+        }])
+        .contains("BasicAuth"));
+
+        let custom_http_req = SecurityRequirement {
+            scheme_name: "digest".to_string(),
+            scopes: vec!["read".into()],
+            scheme: Some(SecuritySchemeInfo {
+                kind: SecuritySchemeKind::Http {
+                    scheme: "digest".into(),
+                    bearer_format: None,
+                },
+                description: None,
+                deprecated: false,
+            }),
+        };
+        assert_eq!(
+            security_extractor(&[SecurityRequirementGroup {
+                schemes: vec![custom_http_req]
+            }]),
+            "_auth: web::ReqData<security::Authenticated<security::scopes::Read>>"
+        );
+
+        let query_key_req = SecurityRequirement {
+            scheme_name: "qkey".to_string(),
+            scopes: vec![],
+            scheme: Some(SecuritySchemeInfo {
+                kind: SecuritySchemeKind::ApiKey {
+                    name: "key".into(),
+                    in_loc: ParamSource::Query,
+                },
+                description: None,
+                deprecated: false,
+            }),
+        };
+        assert_eq!(
+            security_extractor(&[SecurityRequirementGroup {
+                schemes: vec![query_key_req]
+            }]),
+            "qkey_key: web::Query<serde_json::Value>"
+        );
+
+        let fallback_req = SecurityRequirement {
+            scheme_name: "custom_scheme".to_string(),
+            scopes: vec![],
+            scheme: None,
+        };
+        assert_eq!(
+            security_extractor(&[SecurityRequirementGroup {
+                schemes: vec![fallback_req]
+            }]),
+            "custom_scheme: web::ReqData<security::CustomScheme>"
+        );
     }
 }

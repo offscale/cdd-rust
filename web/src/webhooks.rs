@@ -1,3 +1,5 @@
+#![deny(missing_docs)]
+
 //! Webhooks & Callbacks Support.
 //!
 //! Provides an administrative API to trigger webhooks manually.

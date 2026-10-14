@@ -1,11 +1,9 @@
 #![deny(missing_docs)]
-#![cfg(not(tarpaulin_include))]
 
 //! # MCP Client Strategy Module
 //!
-//! Implementation of `BackendStrategy` for generating native adapters that
-//! allow an MCP Server (or generic programmatic code) to consume the API
-//! locally in memory as MCP tools, rather than going over a network.
+//! Implementation of [`CodegenStrategy`], [`McpStrategy`], and [`BackendStrategy`]
+//! for generating native MCP tool adapters.
 
 pub mod extractors;
 pub mod registration;
@@ -13,85 +11,42 @@ pub mod scaffolding;
 pub mod testing;
 
 use crate::openapi::parse::ParsedRoute;
-use crate::strategies::BackendStrategy;
+use crate::strategies::{BackendStrategy, CodegenStrategy, McpStrategy, StrategyKind};
 
 /// Strategy for generating MCP programmatic tool bindings.
 pub struct McpClientStrategy;
 
-impl BackendStrategy for McpClientStrategy {
-    fn handler_imports(&self) -> String {
+impl CodegenStrategy for McpClientStrategy {
+    fn kind(&self) -> StrategyKind {
+        StrategyKind::Mcp
+    }
+
+    fn module_imports(&self) -> String {
         scaffolding::handler_imports()
     }
 
-    fn handler_signature(
-        &self,
-        route: &crate::openapi::parse::ParsedRoute,
-        args: &[String],
-    ) -> String {
+    fn emit_handler(&self, route: &ParsedRoute, args: &[String]) -> String {
         scaffolding::handler_signature(route, args)
     }
+}
 
+impl McpStrategy for McpClientStrategy {
+    fn mcp_tool_registration(&self, route: &ParsedRoute, handler_full_path: &str) -> String {
+        registration::route_registration_statement(route, handler_full_path)
+    }
+}
+
+impl BackendStrategy for McpClientStrategy {
     fn extra_handler_docs(&self, route: &ParsedRoute) -> String {
-        format!("/// @MCP_TOOL: {}\n", route.handler_name)
-    }
-
-    fn path_extractor(&self, inner_types: &[String]) -> String {
-        extractors::path_extractor(inner_types)
-    }
-
-    fn query_extractor(&self) -> String {
-        extractors::query_extractor()
-    }
-
-    fn typed_query_extractor(&self, inner_type: &str) -> String {
-        extractors::typed_query_extractor(inner_type)
-    }
-
-    fn query_string_extractor(
-        &self,
-        inner_type: &str,
-        content_media_type: Option<&crate::openapi::parse::models::ContentMediaType>,
-    ) -> String {
-        extractors::query_string_extractor(inner_type, content_media_type)
-    }
-
-    fn header_extractor(&self, inner_type: &str) -> String {
-        extractors::header_extractor(inner_type)
-    }
-
-    fn cookie_extractor(&self) -> String {
-        extractors::cookie_extractor()
-    }
-
-    fn body_extractor(&self, body_type: &str) -> String {
-        extractors::body_extractor(body_type)
-    }
-
-    fn form_extractor(&self, body_type: &str) -> String {
-        extractors::form_extractor(body_type)
-    }
-
-    fn multipart_extractor(&self, body_type: &str) -> String {
-        extractors::multipart_extractor(body_type)
-    }
-
-    fn text_extractor(&self, body_type: &str) -> String {
-        extractors::text_extractor(body_type)
-    }
-
-    fn bytes_extractor(&self, body_type: &str) -> String {
-        extractors::bytes_extractor(body_type)
-    }
-
-    fn security_extractor(
-        &self,
-        requirements: &[crate::openapi::parse::models::SecurityRequirementGroup],
-    ) -> String {
-        extractors::security_extractor(requirements)
+        format!(
+            "/// @MCP_TOOL: {}
+",
+            route.handler_name
+        )
     }
 
     fn route_registration_statement(&self, route: &ParsedRoute, handler_full_path: &str) -> String {
-        registration::route_registration_statement(route, handler_full_path)
+        self.mcp_tool_registration(route, handler_full_path)
     }
 
     fn test_imports(&self) -> String {
