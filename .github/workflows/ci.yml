@@ -84,8 +84,9 @@ jobs:
         run: cargo install cargo-tarpaulin
 
       - name: Run Test Coverage
-        # Ignoring fail under 100 for now as current codebase might not be 100%
-        run: cargo tarpaulin --workspace --out Xml
+        env:
+          RUSTFLAGS: "--cfg coverage"
+        run: cargo tarpaulin --workspace --out Xml --fail-under 100
 
   build-native:
     needs: build_and_test

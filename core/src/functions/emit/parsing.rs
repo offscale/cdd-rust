@@ -133,6 +133,8 @@ mod tests {
         assert_eq!(to_snake_case("id"), "id");
         assert_eq!(to_snake_case("camelCaseTemp"), "camel_case_temp");
         assert_eq!(to_snake_case("X-Forwarded-For"), "x_forwarded_for");
+        assert_eq!(to_snake_case("HTTPServer"), "httpserver");
+        assert_eq!(to_snake_case("user_Id"), "user_id");
     }
 
     #[test]
@@ -151,5 +153,7 @@ mod tests {
         assert_eq!(to_pascal_case("get_user"), "GetUser");
         assert_eq!(to_pascal_case("querystring"), "Querystring");
         assert_eq!(to_pascal_case("x-token"), "XToken");
+        assert_eq!(to_pascal_case("---"), "Query");
+        assert_eq!(to_pascal_case("123_items"), "Q123Items");
     }
 }

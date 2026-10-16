@@ -79,6 +79,7 @@ mod tests {
     fn test_extract_doc_comment_present_and_absent() {
         let code = r#"
         /// First line.
+        ///
         /// Second line.
         pub struct DocumentedStruct;
 

@@ -27,41 +27,25 @@ pub fn make_record_field(
 ) -> AppResult<ast::RecordField> {
     let vis = if pub_vis { "pub " } else { "" };
     let indent = " ".repeat(indent_size);
-    // Construct a dummy container to parse the field within a valid context
-    let wrapper_code = format!("struct Wrapper {{\n{}{}{}: {},\n}}", indent, vis, name, ty);
+    let raw_field = format!("{}{}{}: {}", indent, vis, name, ty);
+    let code = format!("struct Wrapper {{\n{},\n}}", raw_field);
 
-    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(&wrapper_code, Edition::Edition2021));
-
+    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(&code, Edition::Edition2021));
     if !parse.errors().is_empty() {
-        let errs: Vec<String> = parse.errors().into_iter().map(|e| e.to_string()).collect();
+        let errs: Vec<String> = parse.errors().iter().map(|e| e.to_string()).collect();
         return Err(AppError::General(format!(
-            "Failed to generate field node: {}",
+            "Invalid field syntax '{}': {}",
+            raw_field,
             errs.join(", ")
         )));
     }
 
     let file = parse.tree();
-    let struct_def = file
+    Ok(file
         .syntax()
         .descendants()
-        .find_map(ast::Struct::cast)
-        .ok_or_else(|| {
-            AppError::General("Internal generation error: Wrapper struct not found".into())
-        })?;
-
-    let field_list = match struct_def.field_list() {
-        Some(ast::FieldList::RecordFieldList(l)) => l,
-        _ => {
-            return Err(AppError::General(
-                "Internal generation error: Wrapper field list mismatch".into(),
-            ))
-        }
-    };
-
-    field_list
-        .fields()
-        .next()
-        .ok_or_else(|| AppError::General("Internal generation error: Field node not found".into()))
+        .find_map(ast::RecordField::cast)
+        .expect("valid wrapper struct contains record field"))
 }
 
 /// Generates a complete Rust source string for multiple Models (Structs or Enums).
@@ -197,39 +181,7 @@ fn generate_dto_body(dto: &ParsedStruct) -> String {
 
         // Field Definition
         let mut escaped_name = field.name.clone();
-        if escaped_name == "type"
-            || escaped_name == "match"
-            || escaped_name == "fn"
-            || escaped_name == "struct"
-            || escaped_name == "enum"
-            || escaped_name == "trait"
-            || escaped_name == "use"
-            || escaped_name == "mod"
-            || escaped_name == "pub"
-            || escaped_name == "mut"
-            || escaped_name == "return"
-            || escaped_name == "break"
-            || escaped_name == "continue"
-            || escaped_name == "if"
-            || escaped_name == "else"
-            || escaped_name == "loop"
-            || escaped_name == "while"
-            || escaped_name == "for"
-            || escaped_name == "in"
-            || escaped_name == "let"
-            || escaped_name == "const"
-            || escaped_name == "static"
-            || escaped_name == "ref"
-            || escaped_name == "impl"
-            || escaped_name == "where"
-            || escaped_name == "as"
-            || escaped_name == "unsafe"
-            || escaped_name == "await"
-            || escaped_name == "async"
-            || escaped_name == "dyn"
-            || escaped_name == "super"
-            || escaped_name == "crate"
-        {
+        if crate::openapi::parse::models::RustIdent::is_keyword(&escaped_name) {
             escaped_name = format!("r#{}", escaped_name);
         }
         code.push_str(&format!("    pub {}: {},\n", escaped_name, field.ty));
@@ -333,10 +285,9 @@ fn collect_imports(model: &ParsedModel, imports: &mut BTreeSet<String>) {
         if ty.contains("Uuid") {
             imports.insert("use uuid::Uuid;".to_string());
         }
-        if ty.contains("DateTime") || ty.contains("NaiveDateTime") {
+        if ty.contains("DateTime") {
             imports.insert("use chrono::{DateTime, NaiveDateTime, Utc};".to_string());
-        }
-        if ty.contains("NaiveDate") && !ty.contains("NaiveDateTime") {
+        } else if ty.contains("NaiveDate") {
             imports.insert("use chrono::NaiveDate;".to_string());
         }
         if ty.contains("Value") || ty.contains("serde_json") {
@@ -627,5 +578,114 @@ mod tests {
         // Should inject flatten attribute
         assert!(code.contains("#[serde(flatten)]"));
         assert!(code.contains("pub additional_properties: std::collections::HashMap<String, i32>"));
+
+        // Test make_record_field with pub_vis=false and error cases
+        let priv_field = make_record_field("count", "usize", false, 2).expect("priv field");
+        assert_eq!(priv_field.to_string(), "count: usize");
+        assert!(make_record_field("bad name", "i32", true, 4).is_err());
+
+        // Test generate_dtos with multiple models, struct/enum rename, skipped/keyword field, NaiveDate/DateTime/Decimal, and unit/deprecated/documented enum variants
+        let s_full = ParsedStruct {
+            name: "FullStruct".into(),
+            description: None,
+            rename: Some("CustomFull".into()),
+            rename_all: None,
+            is_deprecated: false,
+            deny_unknown_fields: false,
+            external_docs: Some(ParsedExternalDocs {
+                url: "https://docs.example.com".into(),
+                description: None,
+            }),
+            fields: vec![
+                ParsedField {
+                    name: "type".into(),
+                    ty: "NaiveDate".into(),
+                    description: Some("Keyword field".into()),
+                    rename: Some("kind".into()),
+                    is_skipped: false,
+                    is_read_only: false,
+                    is_write_only: false,
+                    is_deprecated: false,
+                    external_docs: None,
+                },
+                ParsedField {
+                    name: "secret".into(),
+                    ty: "Decimal".into(),
+                    description: None,
+                    rename: None,
+                    is_skipped: true,
+                    is_read_only: false,
+                    is_write_only: false,
+                    is_deprecated: false,
+                    external_docs: None,
+                },
+                ParsedField {
+                    name: "additional_properties".into(),
+                    ty: "String".into(),
+                    description: None,
+                    rename: None,
+                    is_skipped: false,
+                    is_read_only: false,
+                    is_write_only: false,
+                    is_deprecated: false,
+                    external_docs: None,
+                },
+                field("created", "DateTime<Utc>"),
+                field("updated", "NaiveDateTime"),
+                field("raw", "Value"),
+                field("num", "serde_json::Number"),
+            ],
+        };
+
+        let e_full = ParsedEnum {
+            name: "FullEnum".into(),
+            description: None,
+            rename: Some("CustomEnum".into()),
+            rename_all: None,
+            tag: None,
+            untagged: false,
+            is_deprecated: true,
+            external_docs: None,
+            variants: vec![ParsedVariant {
+                name: "UnitVar".into(),
+                ty: None,
+                description: Some("Unit variant doc".into()),
+                rename: None,
+                aliases: None,
+                is_deprecated: true,
+            }],
+            discriminator_mapping: Some(BTreeMap::new()),
+            discriminator_default_mapping: Some(String::new()),
+        };
+
+        let e_plain = ParsedEnum {
+            name: "PlainEnum".into(),
+            description: None,
+            rename: None,
+            rename_all: None,
+            tag: None,
+            untagged: false,
+            is_deprecated: false,
+            external_docs: None,
+            variants: vec![],
+            discriminator_mapping: None,
+            discriminator_default_mapping: None,
+        };
+
+        let multi_code = generate_dtos(&[
+            ParsedModel::Struct(s_full),
+            ParsedModel::Enum(e_full),
+            ParsedModel::Enum(e_plain),
+        ]);
+        assert!(multi_code.contains("use chrono::NaiveDate;"));
+        assert!(multi_code.contains("use chrono::{DateTime, NaiveDateTime, Utc};"));
+        assert!(multi_code.contains("use rust_decimal::Decimal;"));
+        assert!(multi_code.contains("/// See also: <https://docs.example.com>"));
+        assert!(multi_code.contains("#[serde(rename = \"CustomFull\")]"));
+        assert!(multi_code.contains("pub r#type: NaiveDate,"));
+        assert!(multi_code.contains("#[serde(skip)]"));
+        assert!(multi_code.contains("#[serde(rename = \"CustomEnum\")]"));
+        assert!(multi_code.contains("/// Unit variant doc"));
+        assert!(multi_code.contains("UnitVar,"));
     }
 }

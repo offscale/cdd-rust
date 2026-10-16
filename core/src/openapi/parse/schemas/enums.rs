@@ -40,18 +40,11 @@ pub(crate) fn parse_variants(
                     })
                 );
 
-                match map_schema_to_rust_type(&RefOr::T(s.clone()), true) {
-                    Ok(ty) => {
-                        let simple_name = derive_name_from_type(&ty)
-                            .unwrap_or_else(|| format!("Variant{}", index));
-                        (simple_name, Some(ty), deprecated)
-                    }
-                    Err(_) => (
-                        format!("Variant{}", index),
-                        Some("serde_json::Value".to_string()),
-                        deprecated,
-                    ),
-                }
+                let ty = map_schema_to_rust_type(&RefOr::T(s.clone()), true)
+                    .expect("map_schema_to_rust_type is infallible");
+                let simple_name =
+                    derive_name_from_type(&ty).unwrap_or_else(|| format!("Variant{}", index));
+                (simple_name, Some(ty), deprecated)
             }
         };
 
@@ -146,10 +139,35 @@ mod tests {
     fn test_derive_name_from_type() {
         assert_eq!(derive_name_from_type("String"), Some("String".to_string()));
         assert_eq!(derive_name_from_type("i32"), Some("Integer".to_string()));
+        assert_eq!(derive_name_from_type("f64"), Some("Number".to_string()));
+        assert_eq!(derive_name_from_type("bool"), Some("Boolean".to_string()));
+        assert_eq!(derive_name_from_type("Uuid"), Some("Uuid".to_string()));
+        assert_eq!(derive_name_from_type("NaiveDate"), Some("Date".to_string()));
+        assert_eq!(
+            derive_name_from_type("DateTime"),
+            Some("DateTime".to_string())
+        );
         assert_eq!(
             derive_name_from_type("Vec<User>"),
             Some("Array".to_string())
         );
         assert_eq!(derive_name_from_type("Unknown"), None);
+
+        // Test fallback Variant{idx} on inline Object schema and mapping with inline schema + non-matching ref
+        let inline_obj = Schema::Object(ObjectBuilder::new().schema_type(Type::Object).build());
+        let mut mapping = BTreeMap::new();
+        mapping.insert(
+            "other".to_string(),
+            "#/components/schemas/Other".to_string(),
+        );
+        let items = vec![
+            RefOr::T(inline_obj),
+            RefOr::Ref(Ref::new("#/components/schemas/Cat")),
+        ];
+        let variants = parse_variants(&items, Some(&mapping));
+        assert_eq!(variants.len(), 2);
+        assert_eq!(variants[0].name, "Variant0");
+        assert_eq!(variants[1].name, "Cat");
+        assert!(variants[1].rename.is_none());
     }
 }

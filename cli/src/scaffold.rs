@@ -69,8 +69,7 @@ pub fn run_scaffold(args: &ScaffoldArgs, strategy: &impl BackendStrategy) -> App
     }
 
     // 1. Parse Routes
-    let yaml_content = fs::read_to_string(&args.openapi_path)
-        .map_err(|e| AppError::General(format!("Failed to read OpenAPI: {}", e)))?;
+    let yaml_content = fs::read_to_string(&args.openapi_path)?;
 
     let routes = parse_openapi_routes(&yaml_content)?;
     if routes.is_empty() {
@@ -83,8 +82,7 @@ pub fn run_scaffold(args: &ScaffoldArgs, strategy: &impl BackendStrategy) -> App
 
     // 3. Ensure Output Directory
     if !args.output_dir.exists() {
-        fs::create_dir_all(&args.output_dir)
-            .map_err(|e| AppError::General(format!("Failed to create output directory: {}", e)))?;
+        fs::create_dir_all(&args.output_dir)?;
     }
 
     // 4. Generate/Update Handler Moduels
@@ -99,8 +97,7 @@ pub fn run_scaffold(args: &ScaffoldArgs, strategy: &impl BackendStrategy) -> App
         );
 
         let existing_content = if file_path.exists() {
-            fs::read_to_string(&file_path)
-                .map_err(|e| AppError::General(format!("Failed to read existing file: {}", e)))?
+            fs::read_to_string(&file_path)?
         } else {
             String::new()
         };
@@ -108,9 +105,7 @@ pub fn run_scaffold(args: &ScaffoldArgs, strategy: &impl BackendStrategy) -> App
         let new_content = update_handler_module(&existing_content, module_routes, strategy)?;
 
         if existing_content != new_content {
-            fs::write(&file_path, new_content).map_err(|e| {
-                AppError::General(format!("Failed to write file {:?}: {}", file_path, e))
-            })?;
+            fs::write(&file_path, new_content)?;
         }
     }
 
@@ -119,17 +114,14 @@ pub fn run_scaffold(args: &ScaffoldArgs, strategy: &impl BackendStrategy) -> App
         println!("  -> Injecting route registrations into {:?}", config_path);
 
         // Ensure parent dir exists if creating new config file
-        if let Some(parent) = config_path.parent() {
+        if let Some(parent) = config_path.parent().filter(|p| !p.as_os_str().is_empty()) {
             if !parent.exists() {
-                fs::create_dir_all(parent).map_err(|e| {
-                    AppError::General(format!("Failed to create config directory: {}", e))
-                })?;
+                fs::create_dir_all(parent)?;
             }
         }
 
         let mut config_source = if config_path.exists() {
-            fs::read_to_string(config_path)
-                .map_err(|e| AppError::General(format!("Failed to read config file: {}", e)))?
+            fs::read_to_string(config_path)?
         } else {
             String::new()
         };
@@ -149,8 +141,7 @@ pub fn run_scaffold(args: &ScaffoldArgs, strategy: &impl BackendStrategy) -> App
             config_source = register_routes(&config_source, &module_name, module_routes, strategy)?;
         }
 
-        fs::write(config_path, config_source)
-            .map_err(|e| AppError::General(format!("Failed to update config file: {}", e)))?;
+        fs::write(config_path, config_source)?;
     }
 
     Ok(())
@@ -303,5 +294,34 @@ paths:
 
         let code = fs::read_to_string(default_file).expect("Failed to read file to string");
         assert!(code.contains("pub async fn ping()"));
+
+        // Nested route_config_path where parent directory does not yet exist
+        let nested_cfg = dir.path().join("nested_cfg_dir/routes.rs");
+        let args_nested = ScaffoldArgs {
+            openapi_path: dir.path().join("openapi.yaml"),
+            output_dir: output_dir.clone(),
+            route_config_path: Some(nested_cfg.clone()),
+            force: false,
+        };
+        run_scaffold(&args_nested, &ActixStrategy).expect("nested config");
+        assert!(nested_cfg.exists());
+
+        // Root route_config_path ("/") where parent() is None
+        let args_root_cfg = ScaffoldArgs {
+            openapi_path: dir.path().join("openapi.yaml"),
+            output_dir: output_dir.clone(),
+            route_config_path: Some(PathBuf::from("/")),
+            force: false,
+        };
+        assert!(run_scaffold(&args_root_cfg, &ActixStrategy).is_err());
+
+        // Missing OpenAPI file
+        let args_missing = ScaffoldArgs {
+            openapi_path: dir.path().join("missing.yaml"),
+            output_dir,
+            route_config_path: None,
+            force: false,
+        };
+        assert!(run_scaffold(&args_missing, &ActixStrategy).is_err());
     }
 }

@@ -13,7 +13,6 @@ use crate::schema::*;
     serde::Deserialize,
     diesel::Queryable,
     diesel::Selectable,
-    diesel::QueryableByName,
     diesel::Identifiable,
 )]
 #[diesel(table_name=users, primary_key(id))]

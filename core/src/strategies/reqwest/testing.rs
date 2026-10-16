@@ -229,10 +229,7 @@ pub fn generate_custom_test(
                 code.push_str(
                     "    let body: reqwest::multipart::Form = reqwest::multipart::Form::new();\n",
                 );
-            } else if full_body_type == "serde_json::Value"
-                || full_body_type == "crate::models::serde_json::Value"
-                || full_body_type.contains("serde_json::Value")
-            {
+            } else if full_body_type.contains("serde_json::Value") {
                 code.push_str("    let body: serde_json::Value = serde_json::json!({});\n");
             } else {
                 code.push_str(&format!(
@@ -387,5 +384,224 @@ mod tests {
             "AST errors: {:?}",
             parse_custom.errors()
         );
+
+        let empty_req = test_request_builder("GET", "/pets", "");
+        assert!(!empty_req.contains(".json("));
+
+        // Test login_user, String/u32/Uuid path params, Header (api_key and custom), Cookie, Security, and Vec<Pet> body
+        let mut r2 = route.clone();
+        r2.handler_name = "login_user".to_string();
+        r2.tags.clear();
+        r2.params = vec![
+            RouteParam {
+                name: "username".to_string(),
+                source: ParamSource::Path,
+                ty: "String".to_string(),
+                description: None,
+                example: None,
+                style: None,
+                explode: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                content_media_type: None,
+                raw_schema: None,
+                deprecated: false,
+                extensions: BTreeMap::new(),
+            },
+            RouteParam {
+                name: "count".to_string(),
+                source: ParamSource::Path,
+                ty: "i32".to_string(),
+                description: None,
+                example: None,
+                style: None,
+                explode: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                content_media_type: None,
+                raw_schema: None,
+                deprecated: false,
+                extensions: BTreeMap::new(),
+            },
+            RouteParam {
+                name: "limit".to_string(),
+                source: ParamSource::Path,
+                ty: "u64".to_string(),
+                description: None,
+                example: None,
+                style: None,
+                explode: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                content_media_type: None,
+                raw_schema: None,
+                deprecated: false,
+                extensions: BTreeMap::new(),
+            },
+            RouteParam {
+                name: "page".to_string(),
+                source: ParamSource::Path,
+                ty: "u32".to_string(),
+                description: None,
+                example: None,
+                style: None,
+                explode: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                content_media_type: None,
+                raw_schema: None,
+                deprecated: false,
+                extensions: BTreeMap::new(),
+            },
+            RouteParam {
+                name: "uuid".to_string(),
+                source: ParamSource::Path,
+                ty: "Uuid".to_string(),
+                description: None,
+                example: None,
+                style: None,
+                explode: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                content_media_type: None,
+                raw_schema: None,
+                deprecated: false,
+                extensions: BTreeMap::new(),
+            },
+            RouteParam {
+                name: "q".to_string(),
+                source: ParamSource::Query,
+                ty: "String".to_string(),
+                description: None,
+                example: None,
+                style: None,
+                explode: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                content_media_type: None,
+                raw_schema: None,
+                deprecated: false,
+                extensions: BTreeMap::new(),
+            },
+            RouteParam {
+                name: "api_key".to_string(),
+                source: ParamSource::Header,
+                ty: "String".to_string(),
+                description: None,
+                example: None,
+                style: None,
+                explode: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                content_media_type: None,
+                raw_schema: None,
+                deprecated: false,
+                extensions: BTreeMap::new(),
+            },
+            RouteParam {
+                name: "X-Custom".to_string(),
+                source: ParamSource::Header,
+                ty: "String".to_string(),
+                description: None,
+                example: None,
+                style: None,
+                explode: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                content_media_type: None,
+                raw_schema: None,
+                deprecated: false,
+                extensions: BTreeMap::new(),
+            },
+            RouteParam {
+                name: "sid".to_string(),
+                source: ParamSource::Cookie,
+                ty: "String".to_string(),
+                description: None,
+                example: None,
+                style: None,
+                explode: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                content_media_type: None,
+                raw_schema: None,
+                deprecated: false,
+                extensions: BTreeMap::new(),
+            },
+        ];
+        r2.security = vec![
+            crate::openapi::parse::models::SecurityRequirementGroup { schemes: vec![] },
+            crate::openapi::parse::models::SecurityRequirementGroup {
+                schemes: vec![crate::openapi::parse::models::SecurityRequirement {
+                    scheme_name: "auth".to_string(),
+                    scopes: vec![],
+                    scheme: None,
+                }],
+            },
+        ];
+        {
+            let rb = r2.request_body.as_mut().expect("request_body");
+            rb.ty = "Vec<Pet>".to_string();
+            rb.required = true;
+        }
+        let custom2 = generate_custom_test(&r2, "crate::create_app");
+        assert!(custom2.contains("LoginUserQuery"));
+        assert!(custom2.contains("Vec<crate::models::Pet>"));
+        assert!(custom2.contains("auth_token"));
+
+        // Test QueryString, other handler query default, multipart body, serde_json::Value body, String/Vec<u8> optional body, get_inventory
+        let mut r3 = route.clone();
+        r3.handler_name = "get_inventory".to_string();
+        r3.params = vec![RouteParam {
+            name: "raw_qs".to_string(),
+            source: ParamSource::QueryString,
+            ty: "String".to_string(),
+            description: None,
+            example: None,
+            style: None,
+            explode: false,
+            allow_empty_value: false,
+            allow_reserved: false,
+            content_media_type: None,
+            raw_schema: None,
+            deprecated: false,
+            extensions: BTreeMap::new(),
+        }];
+        {
+            let rb = r3.request_body.as_mut().expect("request_body");
+            rb.ty = "reqwest::multipart::Form".to_string();
+            rb.required = true;
+        }
+        let custom3 = generate_custom_test(&r3, "");
+        assert!(custom3.contains("reqwest::multipart::Form::new()"));
+        assert!(custom3.contains("expected 200 OK and valid JSON parsing"));
+
+        let mut r4 = route.clone();
+        r4.handler_name = "other-op".to_string();
+        {
+            let rb = r4.request_body.as_mut().expect("request_body");
+            rb.ty = "serde_json::Value".to_string();
+            rb.required = true;
+        }
+        let custom4 = generate_custom_test(&r4, "sdk");
+        assert!(custom4.contains("OtherOpQuery = Default::default()"));
+        assert!(custom4.contains("serde_json::json!({})"));
+
+        {
+            let rb = r4.request_body.as_mut().expect("request_body");
+            rb.ty = "Vec<u8>".to_string();
+            rb.required = false;
+        }
+        r4.params.clear();
+        let custom5 = generate_custom_test(&r4, "sdk");
+        assert!(custom5.contains("let body: Option<Vec<u8>> = None;"));
+
+        {
+            let rb = r4.request_body.as_mut().expect("request_body");
+            rb.ty = "String".to_string();
+            rb.required = false;
+        }
+        let custom6 = generate_custom_test(&r4, "sdk");
+        assert!(custom6.contains("let body: Option<String> = None;"));
     }
 }

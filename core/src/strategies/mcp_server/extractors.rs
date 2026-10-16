@@ -71,7 +71,7 @@ pub fn bytes_extractor(_body_type: &str) -> String {
 
 /// Generates the type string for Security extraction.
 pub fn security_extractor(_requirements: &[SecurityRequirementGroup]) -> String {
-    "String".to_string() // HTTP Auth mapping representation
+    "".to_string()
 }
 
 #[cfg(test)]
@@ -95,6 +95,6 @@ mod tests {
         assert_eq!(multipart_extractor("M"), "M");
         assert_eq!(text_extractor("String"), "String");
         assert_eq!(bytes_extractor("Vec<u8>"), "Vec<u8>");
-        assert_eq!(security_extractor(&[]), "String");
+        assert_eq!(security_extractor(&[]), "");
     }
 }

@@ -101,8 +101,7 @@ pub fn run_schema_gen(args: &SchemaGenArgs) -> AppResult<()> {
         )));
     }
 
-    let content = fs::read_to_string(&args.source_path)
-        .map_err(|e| AppError::General(format!("Failed to read source file: {}", e)))?;
+    let content = fs::read_to_string(&args.source_path)?;
 
     // 1. Parse Rust Model using Core Parser
     // This utilizes ra_ap_syntax to find the specific struct/enum definition
@@ -180,28 +179,22 @@ pub fn run_schema_gen(args: &SchemaGenArgs) -> AppResult<()> {
             .and_then(|e| e.to_str())
             .unwrap_or("json");
         match ext {
-            "yaml" | "yml" => serde_yaml::to_string(&output_json)
-                .map_err(|e| AppError::General(format!("YAML serialization failed: {}", e)))?,
-            _ => serde_json::to_string_pretty(&output_json)
-                .map_err(|e| AppError::General(format!("JSON serialization failed: {}", e)))?,
+            "yaml" | "yml" => serde_yaml::to_string(&output_json)?,
+            _ => serde_json::to_string_pretty(&output_json)?,
         }
     } else {
         // Stdout defaults to JSON
-        serde_json::to_string_pretty(&output_json)
-            .map_err(|e| AppError::General(format!("JSON serialization failed: {}", e)))?
+        serde_json::to_string_pretty(&output_json)?
     };
 
     // 4. Write result
     if let Some(out_path) = &args.output {
-        if let Some(parent) = out_path.parent() {
+        if let Some(parent) = out_path.parent().filter(|p| !p.as_os_str().is_empty()) {
             if !parent.exists() {
-                fs::create_dir_all(parent).map_err(|e| {
-                    AppError::General(format!("Failed to create output directory: {}", e))
-                })?;
+                fs::create_dir_all(parent)?;
             }
         }
-        fs::write(out_path, output_str)
-            .map_err(|e| AppError::General(format!("Failed to write output file: {}", e)))?;
+        fs::write(out_path, output_str)?;
         println!("Schema generated at {:?}", out_path);
     } else {
         println!("{}", output_str);
@@ -329,7 +322,7 @@ mod tests {
             .expect("Failed to write to file");
 
         let args = SchemaGenArgs {
-            source_path: src_path,
+            source_path: src_path.clone(),
             name: "Widget".to_string(),
             output: Some(out_path.clone()),
             dialect: None,
@@ -337,15 +330,15 @@ mod tests {
             info_title: Some("Widget API".to_string()),
             info_version: Some("9.9.9".to_string()),
             info_description: Some("Docs".to_string()),
-            info_summary: None,
-            info_terms_of_service: None,
-            info_contact_name: None,
-            info_contact_url: None,
-            info_contact_email: None,
-            info_license_name: None,
+            info_summary: Some("Summary".to_string()),
+            info_terms_of_service: Some("https://example.com/tos".to_string()),
+            info_contact_name: Some("Alice".to_string()),
+            info_contact_url: Some("https://example.com".to_string()),
+            info_contact_email: Some("alice@example.com".to_string()),
+            info_license_name: Some("Apache-2.0".to_string()),
             info_license_url: None,
-            info_license_identifier: None,
-            self_uri: None,
+            info_license_identifier: Some("Apache-2.0".to_string()),
+            self_uri: Some("https://example.com/openapi.json".to_string()),
         };
 
         run_schema_gen(&args).expect("Failed to execute command");
@@ -356,20 +349,84 @@ mod tests {
         assert!(json_content.contains("\"version\": \"9.9.9\""));
         assert!(json_content.contains("\"Widget\""));
         assert!(json_content.contains("\"components\""));
+
+        // Also test default title/version, contact partial fields, license url, stdout output, and nested dir creation
+        let nested_out = dir.path().join("nested_dir/openapi_no_ext");
+        let args_defaults = SchemaGenArgs {
+            source_path: src_path.clone(),
+            name: "Widget".to_string(),
+            output: Some(nested_out.clone()),
+            dialect: None,
+            openapi: true,
+            info_title: None,
+            info_version: None,
+            info_description: None,
+            info_summary: None,
+            info_terms_of_service: None,
+            info_contact_name: None,
+            info_contact_url: None,
+            info_contact_email: Some("support@example.com".to_string()),
+            info_license_name: Some("MIT".to_string()),
+            info_license_url: Some("https://opensource.org/licenses/MIT".to_string()),
+            info_license_identifier: None,
+            self_uri: None,
+        };
+        run_schema_gen(&args_defaults).expect("defaults and nested dir");
+        assert!(nested_out.exists());
+
+        // Contact with url only, and output to stdout (None)
+        let args_stdout = SchemaGenArgs {
+            source_path: src_path.clone(),
+            name: "Widget".to_string(),
+            output: None,
+            dialect: None,
+            openapi: true,
+            info_title: None,
+            info_version: None,
+            info_description: None,
+            info_summary: None,
+            info_terms_of_service: None,
+            info_contact_name: None,
+            info_contact_url: Some("https://contact.example.com".to_string()),
+            info_contact_email: None,
+            info_license_name: None,
+            info_license_url: None,
+            info_license_identifier: None,
+            self_uri: None,
+        };
+        run_schema_gen(&args_stdout).expect("stdout output");
+
+        // Output to "/" (parent is None, write fails)
+        let args_root = SchemaGenArgs {
+            output: Some(PathBuf::from("/")),
+            ..args_stdout.clone()
+        };
+        assert!(run_schema_gen(&args_root).is_err());
+
+        // Setting both license identifier and license url triggers an error in generate_openapi_document
+        let args_both_license = SchemaGenArgs {
+            info_license_name: Some("MIT".to_string()),
+            info_license_identifier: Some("MIT".to_string()),
+            info_license_url: Some("https://opensource.org/licenses/MIT".to_string()),
+            ..args_stdout.clone()
+        };
+        assert!(run_schema_gen(&args_both_license).is_err());
+
+        let args_schema_stdout = SchemaGenArgs {
+            openapi: false,
+            dialect: Some("https://json-schema.org/draft/2020-12/schema".to_string()),
+            ..args_stdout
+        };
+        assert!(run_schema_gen(&args_schema_stdout).is_ok());
     }
 
     #[test]
     fn test_schema_gen_not_found() {
         let dir = tempdir().expect("Failed to create temporary directory");
-        let src_path = dir.path().join("empty.rs");
-        fs::File::create(&src_path)
-            .expect("Failed to create")
-            .write_all(b"")
-            .expect("Failed to write to file");
-
-        let args = SchemaGenArgs {
-            source_path: src_path,
-            name: "NonExistent".to_string(),
+        let missing_src = dir.path().join("missing_file.rs");
+        let missing_args = SchemaGenArgs {
+            source_path: missing_src,
+            name: "User".to_string(),
             output: None,
             dialect: None,
             openapi: false,
@@ -386,13 +443,28 @@ mod tests {
             info_license_identifier: None,
             self_uri: None,
         };
+        assert!(run_schema_gen(&missing_args)
+            .expect_err("missing")
+            .to_string()
+            .contains("Source file not found"));
+
+        let src_path = dir.path().join("empty.rs");
+        fs::File::create(&src_path)
+            .expect("Failed to create")
+            .write_all(b"")
+            .expect("Failed to write to file");
+
+        let args = SchemaGenArgs {
+            source_path: src_path,
+            name: "NonExistent".to_string(),
+            ..missing_args
+        };
 
         let result = run_schema_gen(&args);
-        assert!(result.is_err());
-        match result.expect_err("expected error") {
-            AppError::General(msg) => assert!(msg.contains("Model 'NonExistent' not found")),
-            _ => panic!("Wrong error type"),
-        }
+        assert!(result
+            .expect_err("expected error")
+            .to_string()
+            .contains("Model 'NonExistent' not found"));
     }
 
     #[test]
@@ -405,7 +477,7 @@ mod tests {
             .expect("Failed to write to file");
 
         let args = SchemaGenArgs {
-            source_path: src_path,
+            source_path: src_path.clone(),
             name: "User".to_string(),
             output: None,
             dialect: None,
@@ -428,5 +500,12 @@ mod tests {
         assert!(result.is_err());
         let msg = format!("{}", result.expect_err("expected error"));
         assert!(msg.contains("info_license_name"));
+
+        let args_id_only = SchemaGenArgs {
+            info_license_url: None,
+            info_license_identifier: Some("MIT".to_string()),
+            ..args
+        };
+        assert!(run_schema_gen(&args_id_only).is_err());
     }
 }

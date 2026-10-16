@@ -94,18 +94,18 @@ pub fn create_jwt_with_config(sub: &str, config: &SecurityConfig) -> Result<Stri
             "JWT secret must not be empty".to_string(),
         ));
     }
-    let expiration = chrono::Utc::now()
-        .checked_add_signed(chrono::Duration::hours(24))
-        .ok_or_else(|| ServerError::ConfigError("Invalid timestamp overflow".to_string()))?
-        .timestamp() as usize;
+    let expiration = (chrono::Utc::now().timestamp() as usize).saturating_add(86400);
 
     let claims = Claims {
         sub: sub.to_owned(),
         exp: expiration,
     };
 
-    let payload =
-        serde_json::to_string(&claims).map_err(|e| ServerError::ConfigError(e.to_string()))?;
+    let payload = serde_json::json!({
+        "sub": claims.sub,
+        "exp": claims.exp,
+    })
+    .to_string();
     Ok(format!("cdd.{}.{}", config.jwt_secret.len(), payload))
 }
 
@@ -187,6 +187,24 @@ pub struct HybridAuthMiddleware<S> {
     user_dao: Arc<dyn UserDao>,
 }
 
+async fn validate_request_token(
+    token_opt: Option<String>,
+    is_mock_mode: bool,
+    user_dao: Arc<dyn UserDao>,
+) -> bool {
+    let Some(token) = token_opt else {
+        return false;
+    };
+    if is_mock_mode {
+        return token == "mock-token-123" || verify_jwt(&token).is_ok();
+    }
+    user_dao
+        .get_user_by_name(&token)
+        .await
+        .unwrap_or(None)
+        .is_some()
+}
+
 impl<S, B> Service<ServiceRequest> for HybridAuthMiddleware<S>
 where
     S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
@@ -221,41 +239,24 @@ where
         if enforce_auth {
             let fut = self.service.call(req);
             Box::pin(async move {
-                let mut is_valid = false;
-                if let Some(token) = token_opt {
-                    if is_mock_mode {
-                        if token == "mock-token-123" || verify_jwt(&token).is_ok() {
-                            is_valid = true;
-                        }
-                    } else if user_dao
-                        .get_user_by_name(&token)
-                        .await
-                        .unwrap_or(None)
-                        .is_some()
-                    {
-                        is_valid = true;
-                    }
-                }
-
+                let is_valid = validate_request_token(token_opt, is_mock_mode, user_dao).await;
+                let res = fut.await.map(|r| r.map_into_boxed_body());
                 if !is_valid {
-                    let res = fut.await?;
                     let unauthorized = HttpResponse::Unauthorized()
                         .body("Unauthorized: Invalid token")
                         .map_into_boxed_body();
 
-                    let (req_ext, _) = res.into_parts();
-                    return Ok(ServiceResponse::new(req_ext, unauthorized));
+                    return res.map(|r| {
+                        let (req_ext, _) = r.into_parts();
+                        ServiceResponse::new(req_ext, unauthorized)
+                    });
                 }
 
-                let res = fut.await?;
-                Ok(res.map_into_boxed_body())
+                res
             })
         } else {
             let fut = self.service.call(req);
-            Box::pin(async move {
-                let res = fut.await?;
-                Ok(res.map_into_boxed_body())
-            })
+            Box::pin(async move { fut.await.map(|res| res.map_into_boxed_body()) })
         }
     }
 }
@@ -311,6 +312,9 @@ mod tests {
         };
         assert!(create_jwt_with_config("user-123", &empty_cfg).is_err());
         assert!(verify_jwt("invalid.token.here").is_err());
+        let default_cfg = SecurityConfig::default();
+        let bad_payload = format!("cdd.{}.not-json", default_cfg.jwt_secret.len());
+        assert!(verify_jwt_with_config(&bad_payload, &default_cfg).is_err());
     }
 
     #[actix_web::test]
@@ -321,9 +325,17 @@ mod tests {
                 .wrap(HybridAuth {
                     enforce_auth: true,
                     is_mock_mode: true,
-                    user_dao: dao,
+                    user_dao: dao.clone(),
                 })
-                .route("/", web::get().to(|| async { HttpResponse::Ok().finish() })),
+                .route("/", web::get().to(|| async { HttpResponse::Ok().finish() }))
+                .route(
+                    "/err",
+                    web::get().to(|| async {
+                        Err::<HttpResponse, actix_web::Error>(
+                            actix_web::error::ErrorInternalServerError("boom"),
+                        )
+                    }),
+                ),
         )
         .await;
 
@@ -337,10 +349,57 @@ mod tests {
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());
+
+        let valid_jwt = create_jwt("jwt-user").expect("jwt");
+        let req = test::TestRequest::get()
+            .uri("/")
+            .insert_header(("Authorization", format!("Bearer {valid_jwt}")))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
+        let req = test::TestRequest::get()
+            .uri("/")
+            .insert_header(("Authorization", "Bearer invalid-jwt"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::UNAUTHORIZED);
+
+        let req = test::TestRequest::get().uri("/err").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::UNAUTHORIZED);
+
+        let req = test::TestRequest::get()
+            .uri("/err")
+            .insert_header(("Authorization", "Bearer mock-token-123"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(
+            resp.status(),
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 
     #[actix_web::test]
     async fn test_auth_bypassed_and_db_mode() {
+        let fake = FakeUserDao;
+        assert!(fake.get_user(Uuid::nil()).await.expect("ok").is_none());
+        assert!(fake
+            .create_user(CreateUsers {
+                id: Uuid::nil(),
+                email: "e".to_string(),
+                password_hash: "p".to_string(),
+                created_at: chrono::Utc::now().naive_utc(),
+                updated_at: chrono::Utc::now().naive_utc(),
+            })
+            .await
+            .is_err());
+        assert!(fake
+            .update_user(Uuid::nil(), UpdateUsers::default())
+            .await
+            .is_err());
+        assert!(fake.delete_user(Uuid::nil()).await.is_err());
+
         let dao: Arc<dyn UserDao> = Arc::new(StubUserDao);
         let app = test::init_service(
             App::new()
@@ -349,13 +408,28 @@ mod tests {
                     is_mock_mode: true,
                     user_dao: dao,
                 })
-                .route("/", web::get().to(|| async { HttpResponse::Ok().finish() })),
+                .route("/", web::get().to(|| async { HttpResponse::Ok().finish() }))
+                .route(
+                    "/err",
+                    web::get().to(|| async {
+                        Err::<HttpResponse, actix_web::Error>(
+                            actix_web::error::ErrorInternalServerError("boom"),
+                        )
+                    }),
+                ),
         )
         .await;
 
         let req = test::TestRequest::get().uri("/").to_request();
         let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());
+
+        let req = test::TestRequest::get().uri("/err").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(
+            resp.status(),
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
 
         let db_dao: Arc<dyn UserDao> = Arc::new(FakeUserDao);
         let db_app = test::init_service(

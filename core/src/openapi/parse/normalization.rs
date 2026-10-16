@@ -72,9 +72,8 @@ pub(crate) fn normalize_const_schemas(value: &mut Value) {
                     map.insert("enum".to_string(), Value::Array(vec![const_val.clone()]));
                 }
                 if !map.contains_key("type") {
-                    if let Some(type_name) = infer_schema_type(&const_val) {
-                        map.insert("type".to_string(), Value::String(type_name));
-                    }
+                    let type_name = infer_schema_type(&const_val);
+                    map.insert("type".to_string(), Value::String(type_name.to_string()));
                 }
             }
 
@@ -94,20 +93,20 @@ pub(crate) fn normalize_const_schemas(value: &mut Value) {
     }
 }
 
-fn infer_schema_type(value: &Value) -> Option<String> {
+fn infer_schema_type(value: &Value) -> &'static str {
     match value {
-        Value::String(_) => Some("string".to_string()),
-        Value::Bool(_) => Some("boolean".to_string()),
+        Value::String(_) => "string",
+        Value::Bool(_) => "boolean",
         Value::Number(num) => {
             if num.is_i64() || num.is_u64() {
-                Some("integer".to_string())
+                "integer"
             } else {
-                Some("number".to_string())
+                "number"
             }
         }
-        Value::Array(_) => Some("array".to_string()),
-        Value::Object(_) => Some("object".to_string()),
-        Value::Null => Some("null".to_string()),
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+        Value::Null => "null",
     }
 }
 
@@ -334,5 +333,92 @@ mod tests {
                 ["schema"]
                 .is_object()
         );
+
+        // Cover normalize_nullable_schemas, normalize_const_schemas, and remaining branches of normalize_boolean_schemas
+        let mut nullable_val = json!({
+            "s1": { "nullable": true, "type": "string" },
+            "s2": { "nullable": true, "type": ["string", "null"] },
+            "s3": { "nullable": true, "type": ["integer"] },
+            "s4": { "nullable": true, "type": 123 },
+            "s5": { "nullable": true },
+            "s6": { "nullable": false, "type": "boolean" },
+            "s7": { "nullable": "not_a_bool", "type": "string" },
+            "arr": [ { "nullable": true, "type": "number" }, "prim" ]
+        });
+        normalize_nullable_schemas(&mut nullable_val);
+        assert_eq!(nullable_val["s1"]["type"], json!(["string", "null"]));
+        assert_eq!(nullable_val["s2"]["type"], json!(["string", "null"]));
+        assert_eq!(nullable_val["s3"]["type"], json!(["integer", "null"]));
+        assert!(nullable_val["s5"].get("nullable").is_none());
+
+        let mut const_val = json!({
+            "c_str": { "const": "hello" },
+            "c_int": { "const": 42 },
+            "c_u64": { "const": 18446744073709551615u64 },
+            "c_flt": { "const": 3.5 },
+            "c_bool": { "const": true },
+            "c_arr": { "const": [1, 2] },
+            "c_obj": { "const": {"a": 1} },
+            "c_null": { "const": null },
+            "c_with_enum": { "const": "x", "enum": ["x"] },
+            "c_with_type": { "const": "y", "type": "string" },
+            "example": { "const": "skip" },
+            "arr": [ { "const": 1 }, 99 ]
+        });
+        normalize_const_schemas(&mut const_val);
+        assert_eq!(const_val["c_str"]["enum"], json!(["hello"]));
+        assert_eq!(const_val["c_str"]["type"], json!("string"));
+        assert_eq!(const_val["c_int"]["type"], json!("integer"));
+        assert_eq!(const_val["c_flt"]["type"], json!("number"));
+        assert_eq!(const_val["c_bool"]["type"], json!("boolean"));
+        assert_eq!(const_val["c_arr"]["type"], json!("array"));
+        assert_eq!(const_val["c_obj"]["type"], json!("object"));
+        assert_eq!(const_val["c_null"]["type"], json!("null"));
+
+        let mut bool_edge = json!({
+            "arr": [
+                {
+                    "itemSchema": {
+                        "properties": { "p": true },
+                        "items": [true, "prim"],
+                        "prefixItems": [false],
+                        "allOf": [true],
+                        "anyOf": [false],
+                        "oneOf": [true],
+                        "not": false,
+                        "contains": true,
+                        "propertyNames": true,
+                        "if": true,
+                        "then": true,
+                        "else": false,
+                        "dependentSchemas": { "d": true },
+                        "additionalProperties": true,
+                        "unevaluatedProperties": false,
+                        "unevaluatedItems": false
+                    },
+                    "contentSchema": {
+                        "additionalProperties": { "not": true },
+                        "unevaluatedProperties": { "not": true },
+                        "unevaluatedItems": { "not": true }
+                    },
+                    "schema": {
+                        "additionalProperties": false,
+                        "unevaluatedProperties": false,
+                        "unevaluatedItems": false
+                    }
+                },
+                "prim"
+            ]
+        });
+        normalize_boolean_schemas(&mut bool_edge);
+        assert_eq!(bool_edge["arr"][0]["itemSchema"]["type"], json!("object"));
+        assert!(bool_edge["arr"][0]["contentSchema"]["additionalProperties"]["not"].is_object());
+
+        let mut x_null = json!({
+            "x-nullable": true,
+            "type": "null"
+        });
+        normalize_nullable_schemas(&mut x_null);
+        assert_eq!(x_null["type"], json!("null"));
     }
 }

@@ -94,17 +94,19 @@ fn ref_doc_matches_self(ref_doc: &str, self_uri: &str) -> bool {
 
     // Fallback: compare raw relative paths.
     if !self_uri.contains("://") && !ref_doc.contains("://") {
-        let self_norm = normalize_relative_path(self_uri).unwrap_or_else(|| self_uri.to_string());
-        let ref_norm = normalize_relative_path(ref_doc).unwrap_or_else(|| ref_doc.to_string());
+        let base = Url::parse(DUMMY_BASE).expect("valid dummy base");
+        let self_norm = base
+            .join(self_uri)
+            .map(|url| url.path().to_string())
+            .unwrap_or_else(|_| self_uri.to_string());
+        let ref_norm = base
+            .join(ref_doc)
+            .map(|url| url.path().to_string())
+            .unwrap_or_else(|_| ref_doc.to_string());
         return Path::new(&ref_norm) == Path::new(&self_norm);
     }
 
     false
-}
-
-fn normalize_relative_path(path: &str) -> Option<String> {
-    let base = Url::parse(DUMMY_BASE).ok()?;
-    base.join(path).ok().map(|url| url.path().to_string())
 }
 
 #[cfg(test)]
@@ -176,5 +178,111 @@ mod tests {
         let ref_str = "https://example.com/openapi.yaml#/components/responses/Limit";
         let name = extract_component_name(ref_str, self_uri, "parameters");
         assert!(name.is_none());
+
+        // Cover all branches of normalize_ref_to_local, extract_component_name, and ref_doc_matches_self
+        assert_eq!(normalize_ref_to_local("#", self_uri), Some("#".to_string()));
+        assert_eq!(
+            normalize_ref_to_local("#Anchor", self_uri),
+            Some("#Anchor".to_string())
+        );
+        assert_eq!(normalize_ref_to_local("other.yaml", self_uri), None);
+        assert_eq!(
+            normalize_ref_to_local("other.yaml#/components/schemas/A", None),
+            None
+        );
+        assert_eq!(
+            normalize_ref_to_local(
+                "https://other.com/openapi.yaml#/components/schemas/A",
+                self_uri
+            ),
+            None
+        );
+        assert_eq!(
+            normalize_ref_to_local(
+                "http://example.com/openapi.yaml#/components/schemas/A",
+                self_uri
+            ),
+            None
+        );
+        assert_eq!(
+            normalize_ref_to_local(
+                "https://example.com:8443/openapi.yaml#/components/schemas/A",
+                self_uri
+            ),
+            None
+        );
+        assert_eq!(
+            normalize_ref_to_local(
+                "https://example.com/other.yaml#/components/schemas/A",
+                self_uri
+            ),
+            None
+        );
+        assert_eq!(
+            normalize_ref_to_local("openapi.yaml#/components/schemas/A", Some("openapi.yaml")),
+            Some("#/components/schemas/A".to_string())
+        );
+        assert_eq!(
+            normalize_ref_to_local(
+                "/api/openapi.yaml#/components/schemas/A",
+                Some("/api/other.yaml")
+            ),
+            None
+        );
+        assert_eq!(
+            normalize_ref_to_local(
+                "rel.yaml#/components/schemas/A",
+                Some("https://example.com/openapi.yaml")
+            ),
+            None
+        );
+        assert_eq!(
+            normalize_ref_to_local(
+                "https://example.com/openapi.yaml#/components/schemas/A",
+                Some("rel.yaml")
+            ),
+            None
+        );
+        assert_eq!(
+            normalize_ref_to_local("http://[::1#/components/schemas/A", Some("http://[::1")),
+            Some("#/components/schemas/A".to_string())
+        );
+        assert_eq!(
+            normalize_ref_to_local("http://[::1#/components/schemas/A", Some("http://[::2")),
+            None
+        );
+        assert_eq!(
+            normalize_ref_to_local("http://[::1#/components/schemas/A", Some("rel.yaml")),
+            None
+        );
+        assert_eq!(
+            normalize_ref_to_local("rel.yaml#/components/schemas/A", Some("http://[::1")),
+            None
+        );
+        assert_eq!(
+            normalize_ref_to_local("//[::1#/components/schemas/A", Some("//[::2")),
+            None
+        );
+        assert_eq!(decode_pointer_segment("a%ZZb%2~0"), "a%ZZb%2~");
+        assert_eq!(
+            extract_component_name("https://example.com/openapi.yaml#", self_uri, "schemas"),
+            None
+        );
+        assert_eq!(
+            extract_component_name(
+                "https://example.com/openapi.yaml#/other/schemas/A",
+                self_uri,
+                "schemas"
+            ),
+            None
+        );
+        assert_eq!(
+            extract_component_name(
+                "https://example.com/openapi.yaml#/components/schemas/",
+                self_uri,
+                "schemas"
+            ),
+            None
+        );
     }
 }

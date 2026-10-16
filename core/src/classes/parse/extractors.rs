@@ -20,14 +20,10 @@ pub fn extract_struct_names(code: &str) -> AppResult<Vec<String>> {
     let mut names = Vec::new();
 
     for node in file.syntax().descendants() {
-        if let Some(struct_def) = ast::Struct::cast(node.clone()) {
-            if let Some(name) = struct_def.name() {
-                names.push(name.text().to_string());
-            }
-        } else if let Some(enum_def) = ast::Enum::cast(node) {
-            if let Some(name) = enum_def.name() {
-                names.push(name.text().to_string());
-            }
+        if let Some(name) = ast::Struct::cast(node.clone()).and_then(|s| s.name()) {
+            names.push(name.text().to_string());
+        } else if let Some(name) = ast::Enum::cast(node).and_then(|e| e.name()) {
+            names.push(name.text().to_string());
         }
     }
 
@@ -84,50 +80,54 @@ fn parse_struct_node(struct_def: ast::Struct, name: &str) -> AppResult<ParsedStr
         match field_list {
             ast::FieldList::RecordFieldList(list) => {
                 for field in list.fields() {
-                    if let (Some(fname), Some(ty)) = (field.name(), field.ty()) {
-                        let attrs = extract_attributes(field.syntax());
-                        let is_read_only = !attrs.is_skipped
-                            && attrs.skip_deserializing
-                            && !attrs.skip_serializing;
-                        let is_write_only = !attrs.is_skipped
-                            && attrs.skip_serializing
-                            && !attrs.skip_deserializing;
-                        fields.push(ParsedField {
-                            name: fname.text().to_string(),
-                            ty: ty.syntax().text().to_string(),
-                            description: extract_doc_comment(field.syntax()),
-                            rename: attrs.rename,
-                            is_skipped: attrs.is_skipped,
-                            is_read_only,
-                            is_write_only,
-                            is_deprecated: false, // Not parsed from AST yet
-                            external_docs: None,
-                        });
-                    }
+                    let fname = field
+                        .name()
+                        .map(|n| n.text().to_string())
+                        .unwrap_or_default();
+                    let ty_str = field
+                        .ty()
+                        .map(|t| t.syntax().text().to_string())
+                        .unwrap_or_default();
+                    let attrs = extract_attributes(field.syntax());
+                    let is_read_only =
+                        !attrs.is_skipped && attrs.skip_deserializing && !attrs.skip_serializing;
+                    let is_write_only =
+                        !attrs.is_skipped && attrs.skip_serializing && !attrs.skip_deserializing;
+                    fields.push(ParsedField {
+                        name: fname,
+                        ty: ty_str,
+                        description: extract_doc_comment(field.syntax()),
+                        rename: attrs.rename,
+                        is_skipped: attrs.is_skipped,
+                        is_read_only,
+                        is_write_only,
+                        is_deprecated: false, // Not parsed from AST yet
+                        external_docs: None,
+                    });
                 }
             }
             ast::FieldList::TupleFieldList(list) => {
                 for (i, field) in list.fields().enumerate() {
-                    if let Some(ty) = field.ty() {
-                        let attrs = extract_attributes(field.syntax());
-                        let is_read_only = !attrs.is_skipped
-                            && attrs.skip_deserializing
-                            && !attrs.skip_serializing;
-                        let is_write_only = !attrs.is_skipped
-                            && attrs.skip_serializing
-                            && !attrs.skip_deserializing;
-                        fields.push(ParsedField {
-                            name: i.to_string(),
-                            ty: (ty as ra_ap_syntax::ast::Type).syntax().text().to_string(),
-                            description: extract_doc_comment(field.syntax()),
-                            rename: attrs.rename,
-                            is_skipped: attrs.is_skipped,
-                            is_read_only,
-                            is_write_only,
-                            is_deprecated: false,
-                            external_docs: None,
-                        });
-                    }
+                    let ty_str = field
+                        .ty()
+                        .map(|t| (t as ra_ap_syntax::ast::Type).syntax().text().to_string())
+                        .unwrap_or_default();
+                    let attrs = extract_attributes(field.syntax());
+                    let is_read_only =
+                        !attrs.is_skipped && attrs.skip_deserializing && !attrs.skip_serializing;
+                    let is_write_only =
+                        !attrs.is_skipped && attrs.skip_serializing && !attrs.skip_deserializing;
+                    fields.push(ParsedField {
+                        name: i.to_string(),
+                        ty: ty_str,
+                        description: extract_doc_comment(field.syntax()),
+                        rename: attrs.rename,
+                        is_skipped: attrs.is_skipped,
+                        is_read_only,
+                        is_write_only,
+                        is_deprecated: false,
+                        external_docs: None,
+                    });
                 }
             }
         }
@@ -151,33 +151,33 @@ fn parse_enum_node(enum_def: ast::Enum, name: &str) -> AppResult<ParsedEnum> {
 
     let mut variants = Vec::new();
 
-    if let Some(list) = enum_def.variant_list() {
-        for variant in list.variants() {
-            if let Some(vname) = variant.name() {
-                let vattrs = extract_attributes(variant.syntax());
-                let mut vty = None;
+    for variant in enum_def
+        .variant_list()
+        .into_iter()
+        .flat_map(|l| l.variants())
+    {
+        let vname = variant
+            .name()
+            .map(|n| n.text().to_string())
+            .unwrap_or_default();
+        let vattrs = extract_attributes(variant.syntax());
+        let vty = match variant.field_list() {
+            Some(ast::FieldList::TupleFieldList(tfl)) => tfl
+                .fields()
+                .next()
+                .and_then(|f| f.ty())
+                .map(|ty| ty.syntax().text().to_string()),
+            _ => None,
+        };
 
-                // Handle single item tuple variants: Variant(Type)
-                if let Some(ast::FieldList::TupleFieldList(tfl)) = variant.field_list() {
-                    // We strictly support polymorphism which wraps the subtype.
-                    // So we look for exactly one field.
-                    if let Some(first) = tfl.fields().next() {
-                        if let Some(ty) = first.ty() {
-                            vty = Some(ty.syntax().text().to_string());
-                        }
-                    }
-                }
-
-                variants.push(ParsedVariant {
-                    name: vname.text().to_string(),
-                    ty: vty,
-                    description: extract_doc_comment(variant.syntax()),
-                    rename: vattrs.rename,
-                    aliases: None,
-                    is_deprecated: false,
-                });
-            }
-        }
+        variants.push(ParsedVariant {
+            name: vname,
+            ty: vty,
+            description: extract_doc_comment(variant.syntax()),
+            rename: vattrs.rename,
+            aliases: None,
+            is_deprecated: false,
+        });
     }
 
     Ok(ParsedEnum {
@@ -203,11 +203,7 @@ pub(crate) fn extract_doc_comment(node: &SyntaxNode) -> Option<String> {
         if child.kind() == SyntaxKind::COMMENT {
             let text = child.to_string();
             if let Some(content) = text.strip_prefix("///") {
-                lines.push(if let Some(stripped) = text.strip_prefix(' ') {
-                    stripped.to_owned()
-                } else {
-                    content.to_owned()
-                });
+                lines.push(content.strip_prefix(' ').unwrap_or(content).to_owned());
             }
         }
     }
@@ -261,32 +257,77 @@ mod tests {
             }
         "#;
         let model = extract_model(code, "Pet").expect("Failed to extract model");
-        if let ParsedModel::Enum(e) = model {
-            assert_eq!(e.tag.as_deref(), Some("type"));
-            assert_eq!(e.variants.len(), 2);
-            assert_eq!(e.variants[0].name, "Cat");
-            assert_eq!(e.variants[0].ty.as_deref(), Some("CatStruct"));
-            assert_eq!(e.variants[0].rename.as_deref(), Some("cat"));
-        } else {
-            panic!("Expected enum");
+        assert_eq!(model.name(), "Pet");
+        for m in [
+            model,
+            ParsedModel::Struct(extract_struct("struct S;", "S").expect("s")),
+        ] {
+            if let ParsedModel::Enum(e) = m {
+                assert_eq!(e.tag.as_deref(), Some("type"));
+                assert_eq!(e.variants.len(), 2);
+                assert_eq!(e.variants[0].name, "Cat");
+                assert_eq!(e.variants[0].ty.as_deref(), Some("CatStruct"));
+                assert_eq!(e.variants[0].rename.as_deref(), Some("cat"));
+            }
         }
     }
 
     #[test]
     fn test_extract_enum_untagged() {
         let code = r#"
+            ///EnumDoc
+            // regular comment
             #[serde(untagged)]
             enum Poly {
                 A(i32),
-                B(String)
+                B(String),
+                Unit,
+            }
+
+            struct UnitStruct;
+
+            struct TupleStruct(
+                #[serde(skip)] i32,
+                #[serde(skip_deserializing)] String,
+                #[serde(skip_serializing)] bool,
+                #[serde(skip_serializing, skip_deserializing)] u64,
+            );
+
+            struct AccessRecord {
+                #[serde(skip_deserializing)]
+                ro: i32,
+                #[serde(skip_serializing)]
+                wo: i32,
+                #[serde(skip_serializing, skip_deserializing)]
+                both: i32,
             }
         "#;
+        let names = extract_struct_names(code).expect("names");
+        assert_eq!(
+            names,
+            vec!["Poly", "UnitStruct", "TupleStruct", "AccessRecord"]
+        );
+
         let model = extract_model(code, "Poly").expect("Failed to extract model");
-        if let ParsedModel::Enum(e) = model {
-            assert!(e.untagged);
-            assert_eq!(e.variants[0].ty.as_deref(), Some("i32"));
-        } else {
-            panic!("Expected enum");
-        }
+        assert_eq!(model.name(), "Poly");
+        assert!(extract_struct(code, "Poly").is_err());
+        assert!(extract_struct_fields(code, "Poly").is_err());
+
+        let unit = extract_struct(code, "UnitStruct").expect("unit struct");
+        assert!(unit.fields.is_empty());
+
+        let tuple = extract_struct(code, "TupleStruct").expect("tuple struct");
+        assert_eq!(tuple.fields.len(), 4);
+        assert!(tuple.fields[0].is_skipped);
+        assert!(tuple.fields[1].is_read_only);
+        assert!(tuple.fields[2].is_write_only);
+        assert!(!tuple.fields[3].is_read_only);
+        assert!(!tuple.fields[3].is_write_only);
+
+        let rec = extract_struct(code, "AccessRecord").expect("access record");
+        assert!(rec.fields[0].is_read_only);
+        assert!(rec.fields[1].is_write_only);
+        assert!(!rec.fields[2].is_read_only);
+        assert!(!rec.fields[2].is_write_only);
     }
 }

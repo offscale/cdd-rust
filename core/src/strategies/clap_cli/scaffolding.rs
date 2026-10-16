@@ -231,10 +231,12 @@ pub struct {} {{
         "    let resp = req.send().await?.error_for_status()?;
 ",
     );
-    if !response_headers.is_empty() || response_type.is_none() {
+    if !response_headers.is_empty() {
         body.push_str("    Ok(resp)");
     } else if let Some(rt) = response_type {
         body.push_str(&format!("    resp.json::<{}>().await", rt));
+    } else {
+        body.push_str("    Ok(resp)");
     }
 
     let func_def = format!(
@@ -415,7 +417,8 @@ mod tests {
             deprecated: false,
             extensions: BTreeMap::new(),
         }];
-        if let Some(ref mut rb) = custom_route.request_body {
+        {
+            let rb = custom_route.request_body.as_mut().expect("request_body");
             rb.required = false;
             rb.format = BodyFormat::Form;
         }
@@ -428,5 +431,80 @@ mod tests {
         assert!(parse_custom.errors().is_empty());
         assert!(sig_custom.contains("Method::from_bytes"));
         assert!(sig_custom.contains("req = req.form(payload);"));
+
+        // Cover double-underscore handler name, required Form/Text body, optional Json/Text body,
+        // QueryString source, missing placeholder in path, and no response_headers with None response_type
+        let mut route2 = dummy_route("send__raw", None);
+        route2.method = "PUT".to_string();
+        route2.params = vec![
+            RouteParam {
+                name: "other".to_string(),
+                source: ParamSource::Path,
+                ty: "String".to_string(),
+                description: None,
+                example: None,
+                style: None,
+                explode: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                content_media_type: None,
+                raw_schema: None,
+                deprecated: false,
+                extensions: BTreeMap::new(),
+            },
+            RouteParam {
+                name: "qs".to_string(),
+                source: ParamSource::QueryString,
+                ty: "String".to_string(),
+                description: None,
+                example: None,
+                style: None,
+                explode: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                content_media_type: None,
+                raw_schema: None,
+                deprecated: false,
+                extensions: BTreeMap::new(),
+            },
+        ];
+        let sig_no_body_arg = handler_signature(&route2, &[]);
+        assert!(sig_no_body_arg.contains("Ok(resp)"));
+
+        {
+            let rb = route2.request_body.as_mut().expect("request_body");
+            rb.required = true;
+            rb.format = BodyFormat::Form;
+        }
+        let sig_form_req = handler_signature(&route2, &["body: Value".to_string()]);
+        assert!(sig_form_req.contains("req = req.form(&args.body);"));
+
+        {
+            let rb = route2.request_body.as_mut().expect("request_body");
+            rb.required = true;
+            rb.format = BodyFormat::Text;
+        }
+        let sig_text_req = handler_signature(&route2, &["body: String".to_string()]);
+        assert!(sig_text_req.contains("req = req.body(args.body);"));
+
+        {
+            let rb = route2.request_body.as_mut().expect("request_body");
+            rb.required = false;
+            rb.format = BodyFormat::Json;
+        }
+        let sig_json_opt = handler_signature(&route2, &["body: Option<Value>".to_string()]);
+        assert!(sig_json_opt.contains("req = req.json(payload);"));
+
+        {
+            let rb = route2.request_body.as_mut().expect("request_body");
+            rb.required = false;
+            rb.format = BodyFormat::Text;
+        }
+        let sig_text_opt = handler_signature(&route2, &["body: Option<String>".to_string()]);
+        assert!(sig_text_opt.contains("req = req.body(payload.clone());"));
+
+        route2.request_body = None;
+        let sig_no_body = handler_signature(&route2, &[]);
+        assert!(sig_no_body.contains("Ok(resp)"));
     }
 }

@@ -89,7 +89,14 @@ pub fn extract_response_details_with_registry(
     // 2. Fallback: Search for any concrete 2xx code
     if chosen_response.is_none() {
         for (key, resp) in &responses.inner.responses {
-            if key.starts_with('2') && key.len() == 3 && key.chars().all(char::is_numeric) {
+            if [
+                key.len() == 3,
+                key.starts_with('2'),
+                key.chars().all(char::is_numeric),
+            ]
+            .into_iter()
+            .all(|b| b)
+            {
                 chosen_response = Some(resp);
                 chosen_key = Some(key.as_str());
                 break;
@@ -416,7 +423,7 @@ fn extract_headers_from_raw(
         let has_content = obj.get("content").is_some();
         let style = parse_header_style(name, obj.get("style").and_then(|v| v.as_str()))?;
         let explode = obj.get("explode").and_then(|v| v.as_bool());
-        if has_content && (style.is_some() || explode.is_some()) {
+        if has_content && [style.is_some(), explode.is_some()].into_iter().any(|b| b) {
             return Err(AppError::General(format!(
                 "Header '{}' uses 'content' and must not define style or explode",
                 name
@@ -596,14 +603,16 @@ fn resolve_header_value(
                 ref_str
             ))
         })?;
+    resolved = resolve_header_value(&resolved, components, registry, base_uri, visited)?;
 
-    if let Some(desc) = obj.get("description").and_then(|v| v.as_str()) {
-        if let Some(resolved_obj) = resolved.as_object_mut() {
-            resolved_obj.insert(
-                "description".to_string(),
-                JsonValue::String(desc.to_string()),
-            );
-        }
+    if let (Some(desc), Some(resolved_obj)) = (
+        obj.get("description").and_then(|v| v.as_str()),
+        resolved.as_object_mut(),
+    ) {
+        resolved_obj.insert(
+            "description".to_string(),
+            JsonValue::String(desc.to_string()),
+        );
     }
 
     visited.remove(ref_str);
@@ -655,17 +664,11 @@ fn resolve_header_from_components(
     registry: Option<&DocumentRegistry>,
     base_uri: Option<&Url>,
 ) -> Option<JsonValue> {
-    if let Some((comps, self_uri)) = components.map(|c| (c, c.self_uri.as_deref())) {
-        if let Some(name) = extract_component_name(ref_str, self_uri, "headers") {
-            if let Some(header) = comps
-                .extra
-                .get("headers")
-                .and_then(|h| h.get(&name))
-                .cloned()
-            {
-                return Some(header);
-            }
-        }
+    if let Some(header) = components.and_then(|c| {
+        let name = extract_component_name(ref_str, c.self_uri.as_deref(), "headers")?;
+        c.extra.get("headers")?.get(&name).cloned()
+    }) {
+        return Some(header);
     }
 
     registry
@@ -682,19 +685,9 @@ fn raw_media_for_type(
     registry: Option<&DocumentRegistry>,
     base_uri: Option<&Url>,
 ) -> Option<serde_json::Value> {
-    let media = raw_response
-        .get("content")
-        .and_then(|content| content.as_object())
-        .and_then(|content| content.get(media_type))?;
-    resolve_media_type_ref(media, components, registry, base_uri, &mut HashSet::new()).or_else(
-        || {
-            if media.as_object().is_some() {
-                Some(media.clone())
-            } else {
-                None
-            }
-        },
-    )
+    let media = raw_response.get("content")?.as_object()?.get(media_type)?;
+    resolve_media_type_ref(media, components, registry, base_uri, &mut HashSet::new())
+        .or_else(|| media.as_object().map(|_| media.clone()))
 }
 
 fn extract_item_schema(raw_media: &serde_json::Value) -> Option<RefOr<Schema>> {
@@ -714,43 +707,31 @@ fn resolve_media_type_ref(
     base_uri: Option<&Url>,
     visiting: &mut HashSet<String>,
 ) -> Option<serde_json::Value> {
-    let obj = raw_media.as_object()?;
-    let ref_str = obj.get("$ref")?.as_str()?;
+    let ref_str = raw_media.as_object()?.get("$ref")?.as_str()?;
     if !visiting.insert(ref_str.to_string()) {
         return None;
     }
 
-    if let Some((comps, self_uri)) = components.map(|c| (c, c.self_uri.as_deref())) {
-        if let Some(name) = extract_component_name(ref_str, self_uri, "mediaTypes") {
-            if let Some(media_types) = comps.extra.get("mediaTypes").and_then(|v| v.as_object()) {
-                if let Some(resolved) = media_types.get(&name) {
-                    let value =
-                        resolve_media_type_ref(resolved, components, registry, base_uri, visiting)
-                            .unwrap_or_else(|| resolved.clone());
-                    visiting.remove(ref_str);
-                    return Some(value);
-                }
-            }
-        }
+    if let Some(resolved) = components.and_then(|c| {
+        let name = extract_component_name(ref_str, c.self_uri.as_deref(), "mediaTypes")?;
+        c.extra.get("mediaTypes")?.as_object()?.get(&name)
+    }) {
+        let value = resolve_media_type_ref(resolved, components, registry, base_uri, visiting)
+            .unwrap_or_else(|| resolved.clone());
+        visiting.remove(ref_str);
+        return Some(value);
     }
 
-    if let Some(registry) = registry {
-        if let Some((resolved, comps_override, base_override)) =
-            registry.resolve_component_ref_with_components(ref_str, base_uri, "mediaTypes")
-        {
-            let next_components = comps_override.as_ref().or(components);
-            let next_base = base_override.as_ref().or(base_uri);
-            let value = resolve_media_type_ref(
-                &resolved,
-                next_components,
-                Some(registry),
-                next_base,
-                visiting,
-            )
-            .unwrap_or_else(|| resolved.clone());
-            visiting.remove(ref_str);
-            return Some(value);
-        }
+    if let Some((resolved, comps_override, base_override)) = registry
+        .and_then(|r| r.resolve_component_ref_with_components(ref_str, base_uri, "mediaTypes"))
+    {
+        let next_components = comps_override.as_ref().or(components);
+        let next_base = base_override.as_ref().or(base_uri);
+        let value =
+            resolve_media_type_ref(&resolved, next_components, registry, next_base, visiting)
+                .unwrap_or_else(|| resolved.clone());
+        visiting.remove(ref_str);
+        return Some(value);
     }
 
     visiting.remove(ref_str);
@@ -824,7 +805,7 @@ fn infer_body_type_from_media_type(media_type: &str) -> Option<String> {
         return Some("Vec<serde_json::Value>".to_string());
     }
 
-    if media == "application/json" || media.ends_with("+json") || media == "application/*+json" {
+    if is_json_media_type(&media) {
         return Some("serde_json::Value".to_string());
     }
 
@@ -877,39 +858,33 @@ fn resolve_response_from_components(
     registry: Option<&DocumentRegistry>,
     base_uri: Option<&Url>,
 ) -> Option<ResolvedResponse> {
-    if let Some((comps, self_uri)) = components.map(|c| (c, c.self_uri.as_deref())) {
-        if let Some(ref_name) = extract_component_name(&r.ref_location, self_uri, "responses") {
-            if let Some(resp_json) = comps.extra.get("responses").and_then(|r| r.get(&ref_name)) {
-                if let Ok(resp) =
-                    serde_json::from_value::<utoipa::openapi::Response>(resp_json.clone())
-                {
-                    return Some(ResolvedResponse {
-                        response: resp,
-                        raw: Some(resp_json.clone()),
-                        components: None,
-                        base_uri: None,
-                    });
-                }
-            }
-        }
+    if let Some((resp, raw)) = components.and_then(|c| {
+        let name = extract_component_name(&r.ref_location, c.self_uri.as_deref(), "responses")?;
+        let resp_json = c.extra.get("responses")?.get(&name)?;
+        let resp = serde_json::from_value::<utoipa::openapi::Response>(resp_json.clone()).ok()?;
+        Some((resp, resp_json.clone()))
+    }) {
+        return Some(ResolvedResponse {
+            response: resp,
+            raw: Some(raw),
+            components: None,
+            base_uri: None,
+        });
     }
 
-    if let Some(registry) = registry {
-        if let Some((raw, comps_override, base_override)) =
-            registry.resolve_component_ref_with_components(&r.ref_location, base_uri, "responses")
-        {
-            if let Ok(resp) = serde_json::from_value::<utoipa::openapi::Response>(raw.clone()) {
-                return Some(ResolvedResponse {
-                    response: resp,
-                    raw: Some(raw),
-                    components: comps_override,
-                    base_uri: base_override,
-                });
-            }
-        }
-    }
-
-    None
+    registry
+        .and_then(|reg| {
+            reg.resolve_component_ref_with_components(&r.ref_location, base_uri, "responses")
+        })
+        .and_then(|(raw, comps_override, base_override)| {
+            let resp = serde_json::from_value::<utoipa::openapi::Response>(raw.clone()).ok()?;
+            Some(ResolvedResponse {
+                response: resp,
+                raw: Some(raw),
+                components: comps_override,
+                base_uri: base_override,
+            })
+        })
 }
 
 fn resolve_link_from_ref(
@@ -918,23 +893,8 @@ fn resolve_link_from_ref(
     registry: Option<&DocumentRegistry>,
     base_uri: Option<&Url>,
 ) -> Option<utoipa::openapi::link::Link> {
-    if let Some((comps, self_uri)) = components.map(|c| (c, c.self_uri.as_deref())) {
-        if let Some(ref_name) = extract_component_name(&r.ref_location, self_uri, "links") {
-            if let Some(link_json) = comps.extra.get("links").and_then(|l| l.get(&ref_name)) {
-                return link_from_component_json(link_json, &r.description);
-            }
-        }
-    }
-
-    if let Some(registry) = registry {
-        if let Some((raw, _, _)) =
-            registry.resolve_component_ref_with_components(&r.ref_location, base_uri, "links")
-        {
-            return link_from_component_json(&raw, &r.description);
-        }
-    }
-
-    None
+    let raw = resolve_link_raw_from_components(&r.ref_location, components, registry, base_uri)?;
+    link_from_component_json(&raw, &r.description)
 }
 
 fn normalize_link_object(value: &mut JsonValue) {
@@ -942,19 +902,15 @@ fn normalize_link_object(value: &mut JsonValue) {
         return;
     };
 
-    if !link_obj.contains_key("operation_id") {
-        if let Some(op_id) = link_obj.remove("operationId") {
-            link_obj.insert("operation_id".to_string(), op_id);
-        }
-    }
-    if !link_obj.contains_key("operation_ref") {
-        if let Some(op_ref) = link_obj.remove("operationRef") {
-            link_obj.insert("operation_ref".to_string(), op_ref);
-        }
-    }
-    if !link_obj.contains_key("request_body") {
-        if let Some(body) = link_obj.remove("requestBody") {
-            link_obj.insert("request_body".to_string(), body);
+    for (snake, camel) in [
+        ("operation_id", "operationId"),
+        ("operation_ref", "operationRef"),
+        ("request_body", "requestBody"),
+    ] {
+        if !link_obj.contains_key(snake) {
+            if let Some(val) = link_obj.remove(camel) {
+                link_obj.insert(snake.to_string(), val);
+            }
         }
     }
 }
@@ -967,7 +923,8 @@ fn link_from_component_json(
     normalize_link_object(&mut normalized);
     let mut link = serde_json::from_value::<utoipa::openapi::link::Link>(normalized.clone())
         .ok()
-        .or_else(|| link_from_raw(&normalized))?;
+        .or_else(|| link_from_raw(&normalized))
+        .expect("normalized object produces Link");
     if !description_override.is_empty() {
         link.description = description_override.to_string();
     }
@@ -1023,12 +980,11 @@ fn resolve_link_raw_from_components(
     registry: Option<&DocumentRegistry>,
     base_uri: Option<&Url>,
 ) -> Option<JsonValue> {
-    if let Some((comps, self_uri)) = components.map(|c| (c, c.self_uri.as_deref())) {
-        if let Some(name) = extract_component_name(ref_str, self_uri, "links") {
-            if let Some(link) = comps.extra.get("links").and_then(|l| l.get(&name)) {
-                return Some(link.clone());
-            }
-        }
+    if let Some(link) = components.and_then(|c| {
+        let name = extract_component_name(ref_str, c.self_uri.as_deref(), "links")?;
+        c.extra.get("links")?.get(&name).cloned()
+    }) {
+        return Some(link);
     }
 
     registry
@@ -1067,15 +1023,11 @@ fn resolve_link_value(
                 ref_str
             ))
         })?;
+    resolved = resolve_link_value(&resolved, components, registry, base_uri, visited)?;
 
-    if let Some(desc) = obj.get("description") {
-        if let Some(resolved_obj) = resolved.as_object_mut() {
-            resolved_obj.insert("description".to_string(), desc.clone());
-        }
-    }
-    if let Some(summary) = obj.get("summary") {
-        if let Some(resolved_obj) = resolved.as_object_mut() {
-            resolved_obj.insert("summary".to_string(), summary.clone());
+    for key in ["description", "summary"] {
+        if let (Some(val), Some(resolved_obj)) = (obj.get(key), resolved.as_object_mut()) {
+            resolved_obj.insert(key.to_string(), val.clone());
         }
     }
 
@@ -1096,32 +1048,35 @@ fn parse_server_from_raw(server: &JsonValue) -> Option<ParsedServer> {
         .map(|s| s.to_string());
 
     let mut variables = BTreeMap::new();
-    if let Some(vars) = obj.get("variables").and_then(|v| v.as_object()) {
-        for (var_name, var) in vars {
-            let Some(var_obj) = var.as_object() else {
-                continue;
-            };
-            let Some(default) = var_obj.get("default").and_then(|v| v.as_str()) else {
-                continue;
-            };
-            let enum_values = var_obj.get("enum").and_then(|v| v.as_array()).map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect::<Vec<_>>()
-            });
-            let description = var_obj
-                .get("description")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            variables.insert(
-                var_name.clone(),
-                ParsedServerVariable {
-                    enum_values,
-                    default: default.to_string(),
-                    description,
-                },
-            );
-        }
+    for (var_name, var) in obj
+        .get("variables")
+        .and_then(|v| v.as_object())
+        .into_iter()
+        .flatten()
+    {
+        let Some(var_obj) = var.as_object() else {
+            continue;
+        };
+        let Some(default) = var_obj.get("default").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let enum_values = var_obj.get("enum").and_then(|v| v.as_array()).map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect::<Vec<_>>()
+        });
+        let description = var_obj
+            .get("description")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        variables.insert(
+            var_name.clone(),
+            ParsedServerVariable {
+                enum_values,
+                default: default.to_string(),
+                description,
+            },
+        );
     }
 
     Some(ParsedServer {
@@ -1671,13 +1626,10 @@ mod tests {
         let l = &details.links[0];
         let expr = l.parameters.get("userId").expect("Failed to get");
 
-        match expr {
-            LinkParamValue::Expression(expr) => {
-                assert_eq!(expr.as_str(), "$request.path.id");
-                assert!(expr.is_expression());
-            }
-            _ => panic!("Expected runtime expression"),
-        }
+        assert_eq!(
+            expr,
+            &LinkParamValue::Expression(RuntimeExpression::new("$request.path.id"))
+        );
     }
 
     #[test]
@@ -1702,13 +1654,10 @@ mod tests {
         let l = &details.links[0];
         let expr = l.parameters.get("userId").expect("Failed to get");
 
-        match expr {
-            LinkParamValue::Expression(expr) => {
-                assert!(expr.as_str().contains("$request.path.id"));
-                assert!(expr.is_expression());
-            }
-            _ => panic!("Expected runtime expression template"),
-        }
+        assert_eq!(
+            expr,
+            &LinkParamValue::Expression(RuntimeExpression::new("id={$request.path.id}"))
+        );
     }
 
     #[test]
@@ -1731,12 +1680,12 @@ mod tests {
             .expect("Missing value");
         let link = &details.links[0];
         assert_eq!(link.operation_id.as_deref(), Some("getUser"));
-        match link.request_body.as_ref() {
-            Some(LinkRequestBody::Expression(expr)) => {
-                assert_eq!(expr.as_str(), "$response.body#/id");
-            }
-            _ => panic!("expected runtime expression request body"),
-        }
+        assert_eq!(
+            link.request_body,
+            Some(LinkRequestBody::Expression(RuntimeExpression::new(
+                "$response.body#/id"
+            )))
+        );
     }
 
     #[test]
@@ -2333,10 +2282,10 @@ mod tests {
             link.request_body,
             Some(LinkRequestBody::Literal(_))
         ));
-        match link.parameters.get("id").expect("Failed to get") {
-            LinkParamValue::Literal(v) => assert_eq!(v, &json!(42)),
-            _ => panic!("Expected literal parameter"),
-        }
+        assert_eq!(
+            link.parameters.get("id"),
+            Some(&LinkParamValue::Literal(json!(42)))
+        );
     }
 
     #[test]
@@ -2374,5 +2323,446 @@ mod tests {
             details.links[0].description.as_deref(),
             Some("Override description")
         );
+
+        // Comprehensive tests for remaining branches in responses.rs:
+        // 1. Concrete 2xx fallback (e.g. 202), no matching response (e.g. 404, 2a, 20a), unresolved Ref, Ref with summary/description, empty description
+        let mut r_202 = Responses::new();
+        r_202.responses.insert(
+            "10".into(),
+            RefOr::T(ResponseBuilder::new().description("short").build()),
+        );
+        r_202.responses.insert(
+            "100".into(),
+            RefOr::T(ResponseBuilder::new().description("info").build()),
+        );
+        r_202.responses.insert(
+            "2a".into(),
+            RefOr::T(ResponseBuilder::new().description("bad").build()),
+        );
+        r_202.responses.insert(
+            "20a".into(),
+            RefOr::T(ResponseBuilder::new().description("bad").build()),
+        );
+        r_202.responses.insert(
+            "202".into(),
+            RefOr::T(ResponseBuilder::new().description("   ").build()),
+        );
+        let d_202 = extract_response_details(&wrap(r_202), None)
+            .expect("202")
+            .expect("some");
+        assert_eq!(d_202.status_code.as_deref(), Some("202"));
+        assert!(d_202.description.is_none());
+
+        let item_false_raw = json!({
+            "200": {
+                "description": "ok",
+                "content": {
+                    "application/json": { "itemSchema": false }
+                }
+            }
+        });
+        let item_false_shim = ShimResponses::from_raw(item_false_raw).expect("item_false");
+        assert!(extract_response_details(&item_false_shim, None)
+            .expect("ok")
+            .expect("some")
+            .body_type
+            .is_none());
+
+        let resp_typed_hdrs = ResponseBuilder::new()
+            .description("ok")
+            .header(
+                "Content-Type",
+                HeaderBuilder::new()
+                    .schema(RefOr::Ref(utoipa::openapi::Ref::new(
+                        "#/components/schemas/S",
+                    )))
+                    .build(),
+            )
+            .header(
+                "X-Typed",
+                HeaderBuilder::new()
+                    .schema(RefOr::Ref(utoipa::openapi::Ref::new(
+                        "#/components/schemas/S",
+                    )))
+                    .build(),
+            )
+            .build();
+        let typed_hdrs =
+            extract_response_headers(&resp_typed_hdrs, None, None, None, None).expect("typed_hdrs");
+        assert_eq!(typed_hdrs.len(), 1);
+
+        let mut r_404 = Responses::new();
+        r_404.responses.insert(
+            "404".into(),
+            RefOr::T(ResponseBuilder::new().description("Not Found").build()),
+        );
+        assert!(extract_response_details(&wrap(r_404), None)
+            .expect("404")
+            .is_none());
+
+        let mut r_unres = Responses::new();
+        r_unres.responses.insert(
+            "200".into(),
+            RefOr::Ref(utoipa::openapi::Ref::new("#/components/responses/Missing")),
+        );
+        assert!(extract_response_details(&wrap(r_unres), Some(&components))
+            .expect("unres")
+            .is_none());
+
+        // 2. External registry response, mediaTypes, headers, and links resolution
+        let mut reg = DocumentRegistry::new();
+        reg.register_openapi_yaml(
+            "https://example.com/ext.yaml",
+            r#"
+openapi: 3.2.0
+info: { title: Ext, version: "1.0" }
+paths: {}
+components:
+  responses:
+    ExtResp:
+      description: ExtDesc
+      content:
+        application/json:
+          $ref: '#/components/mediaTypes/ExtMedia'
+  mediaTypes:
+    ExtMedia:
+      itemSchema:
+        type: integer
+  headers:
+    ExtHdr:
+      schema:
+        type: string
+  links:
+    ExtLink:
+      operationId: extOp
+"#,
+        )
+        .expect("reg");
+        let mut ref_ext =
+            utoipa::openapi::Ref::new("https://example.com/ext.yaml#/components/responses/ExtResp");
+        ref_ext.summary = "SumOvr".to_string();
+        ref_ext.description = "DescOvr".to_string();
+        let mut r_ext = Responses::new();
+        r_ext.responses.insert("200".into(), RefOr::Ref(ref_ext));
+        let d_ext = extract_response_details_with_registry(&wrap(r_ext), None, Some(&reg), None)
+            .expect("ext")
+            .expect("some");
+        assert_eq!(d_ext.summary.as_deref(), Some("SumOvr"));
+        assert_eq!(d_ext.description.as_deref(), Some("DescOvr"));
+        assert_eq!(d_ext.body_type.as_deref(), Some("i32"));
+
+        // 3. Server with variables on typed Link
+        let srv = ServerBuilder::new()
+            .url("https://{env}.example.com")
+            .parameter(
+                "env",
+                ServerVariableBuilder::new()
+                    .default_value("prod")
+                    .enum_values(Some(["prod", "staging"]))
+                    .description(Some("env"))
+                    .build(),
+            )
+            .build();
+        let link_with_vars = LinkBuilder::new()
+            .operation_id("opWithSrv")
+            .server(Some(srv))
+            .build();
+        let resp_srv = ResponseBuilder::new()
+            .description("ok")
+            .link("L", link_with_vars)
+            .build();
+        let mut r_srv = Responses::new();
+        r_srv.responses.insert("200".into(), RefOr::T(resp_srv));
+        let d_srv = extract_response_details(&wrap(r_srv), None)
+            .expect("srv")
+            .expect("some");
+        assert_eq!(
+            d_srv.links[0].server_url.as_deref(),
+            Some("https://prod.example.com")
+        );
+
+        // 4. Headers: Content-Type ignored in raw, non-object header, no schema/content, content with itemSchema (sequential & non-sequential),
+        // content without schema/itemSchema, schema example & examples map, media example & examples map, cycle in header ref, unresolved header ref, invalid schema
+        let mut rich_comps = ShimComponents::default();
+        rich_comps.extra.insert(
+            "headers".to_string(),
+            json!({
+                "CycleH": { "$ref": "#/components/headers/CycleH" }
+            }),
+        );
+        rich_comps.extra.insert(
+            "mediaTypes".to_string(),
+            json!({
+                "CycleM": { "$ref": "#/components/mediaTypes/CycleM" }
+            }),
+        );
+        rich_comps.extra.insert(
+            "links".to_string(),
+            json!({
+                "CycleL": { "$ref": "#/components/links/CycleL" },
+                "RawCustomLink": {
+                    "operationRef": "/items/{id}",
+                    "description": "CustomDesc",
+                    "parameters": { "id": "$response.body#/id" },
+                    "requestBody": "$response.body",
+                    "server": {
+                        "url": "https://{host}/v1",
+                        "description": "SrvDesc",
+                        "name": "SrvName",
+                        "variables": {
+                            "host": {
+                                "default": "api.local",
+                                "enum": ["api.local"],
+                                "description": "HostVar"
+                            },
+                            "bad_var": "not_an_obj",
+                            "no_default": {}
+                        }
+                    }
+                }
+            }),
+        );
+
+        let raw_headers_rich = json!({
+            "Content-Type": { "schema": { "type": "string" } },
+            "X-No-Schema": { "x-ext": 1 },
+            "X-Schema-Ex": {
+                "schema": { "type": "string" },
+                "example": "h_ex"
+            },
+            "X-Schema-Examples": {
+                "schema": { "type": "string" },
+                "examples": {
+                    "empty": {},
+                    "valid": { "value": "h_exs" }
+                }
+            },
+            "X-Schema-Examples-Empty": {
+                "schema": { "type": "string" },
+                "examples": {
+                    "empty": {}
+                }
+            },
+            "X-Content-Item-Seq": {
+                "content": {
+                    "application/jsonl": {
+                        "itemSchema": { "type": "string" },
+                        "example": "m_ex"
+                    }
+                }
+            },
+            "X-Content-Item-NonSeq": {
+                "content": {
+                    "application/json": {
+                        "itemSchema": { "type": "string" },
+                        "examples": {
+                            "empty": {}
+                        }
+                    }
+                }
+            },
+            "X-Content-No-Schema": {
+                "content": {
+                    "custom/unknown": {}
+                }
+            },
+            "X-Ext-Ref": {
+                "$ref": "https://example.com/ext.yaml#/components/headers/ExtHdr"
+            }
+        });
+        let extracted_hdrs = extract_headers_from_raw(
+            raw_headers_rich.as_object().expect("obj"),
+            Some(&rich_comps),
+            Some(&reg),
+            None,
+        )
+        .expect("rich hdrs");
+        assert!(!extracted_hdrs.is_empty());
+
+        for bad_hdr_map in [
+            json!({ "H": "not_an_obj" }),
+            json!({ "H": { "content": "not_an_obj" } }),
+            json!({ "H": { "content": { "text/plain": "not_an_obj" } } }),
+            json!({ "H": { "content": { "text/plain": { "itemSchema": 123 } } } }),
+            json!({ "H": { "schema": 123 } }),
+            json!({ "H": { "$ref": "#/components/headers/CycleH" } }),
+            json!({ "H": { "$ref": "#/components/headers/MissingH" } }),
+        ] {
+            assert!(extract_headers_from_raw(
+                bad_hdr_map.as_object().expect("obj"),
+                Some(&rich_comps),
+                None,
+                None
+            )
+            .is_err());
+        }
+        assert!(extract_header_example_from_media(&json!("not_obj"), None, "text/plain").is_none());
+
+        // 5. Media types: raw_media_for_type cycle, external ref, missing ref, non-object; infer_body_type_from_media_type variants
+        assert!(raw_media_for_type(
+            &json!({ "content": { "application/json": { "$ref": "https://example.com/ext.yaml#/components/mediaTypes/ExtMedia" } } }),
+            "application/json",
+            None,
+            Some(&reg),
+            None
+        )
+        .is_some());
+        assert!(raw_media_for_type(
+            &json!({ "content": { "application/json": { "$ref": "#/components/mediaTypes/CycleM" } } }),
+            "application/json",
+            Some(&rich_comps),
+            None,
+            None
+        )
+        .is_some());
+        assert!(raw_media_for_type(
+            &json!({ "content": { "application/json": { "$ref": "#/components/mediaTypes/MissingM" } } }),
+            "application/json",
+            Some(&rich_comps),
+            Some(&reg),
+            None
+        )
+        .is_some());
+        assert!(raw_media_for_type(
+            &json!({ "content": { "application/json": "not_an_obj" } }),
+            "application/json",
+            None,
+            None,
+            None
+        )
+        .is_none());
+
+        for (mt, expected) in [
+            ("application/jsonl", Some("Vec<serde_json::Value>")),
+            ("application/pdf", Some("Vec<u8>")),
+            ("image/png", Some("Vec<u8>")),
+            ("audio/mp3", Some("Vec<u8>")),
+            ("video/mp4", Some("Vec<u8>")),
+            ("application/*", None),
+            ("*/*", None),
+            ("custom/unknown", None),
+        ] {
+            let resp = ResponseBuilder::new()
+                .description("ok")
+                .content(mt, Content::new::<RefOr<Schema>>(None))
+                .build();
+            let mut rs = Responses::new();
+            rs.responses.insert("200".into(), RefOr::T(resp));
+            let d = extract_response_details(&wrap(rs), None)
+                .expect("ok")
+                .expect("some");
+            assert_eq!(d.body_type.as_deref(), expected);
+        }
+
+        // 6. Links: link_from_raw, normalize_link_object non-object, extract_links_from_raw (non-object root, non-object link, cycle, missing ref,
+        // both/neither operationId and operationRef, invalid parameters, server with variables, summary & description override on ref)
+        let mut non_obj_link = json!("not_an_obj");
+        normalize_link_object(&mut non_obj_link);
+        let mut already_snake_link = json!({ "operation_id": "op1" });
+        normalize_link_object(&mut already_snake_link);
+        assert!(link_from_raw(&json!("not_an_obj")).is_none());
+        let mut raw_custom = rich_comps.extra["links"]["RawCustomLink"].clone();
+        normalize_link_object(&mut raw_custom);
+        let raw_built = link_from_raw(&raw_custom).expect("raw link");
+        assert_eq!(raw_built.operation_ref, "/items/{id}");
+
+        let mut ext_link_ref =
+            utoipa::openapi::Ref::new("https://example.com/ext.yaml#/components/links/ExtLink");
+        assert!(resolve_link_from_ref(&ext_link_ref, None, Some(&reg), None).is_some());
+        ext_link_ref.description = "ExtLinkDesc".to_string();
+        assert!(resolve_link_from_ref(&ext_link_ref, None, Some(&reg), None).is_some());
+        let mut resp_unres_link = ResponseBuilder::new().description("ok").build();
+        resp_unres_link.links.insert(
+            "MissingL".to_string(),
+            RefOr::Ref(utoipa::openapi::Ref::new("#/components/links/MissingL")),
+        );
+        let mut rs_unres_link = Responses::new();
+        rs_unres_link
+            .responses
+            .insert("200".into(), RefOr::T(resp_unres_link));
+        let _ =
+            extract_response_details(&wrap(rs_unres_link), Some(&rich_comps)).expect("unres link");
+
+        assert!(
+            extract_links_from_raw(&json!("not_an_obj"), None, None, None)
+                .expect("empty")
+                .is_empty()
+        );
+
+        let valid_raw_links = json!({
+            "L1": {
+                "$ref": "#/components/links/RawCustomLink",
+                "description": "OvrDesc",
+                "summary": "OvrSum"
+            },
+            "L2": {
+                "$ref": "https://example.com/ext.yaml#/components/links/ExtLink"
+            },
+            "L3": {
+                "operationId": "op3",
+                "parameters": {
+                    "literal_str": "hello",
+                    "literal_num": 123,
+                    "path.id": "ok",
+                    "other.param": "ok"
+                },
+                "requestBody": "plain_str_body",
+                "server": "not_a_server_obj"
+            },
+            "L4": {
+                "operationId": "op4"
+            }
+        });
+        let parsed_raw_links =
+            extract_links_from_raw(&valid_raw_links, Some(&rich_comps), Some(&reg), None)
+                .expect("valid_raw_links");
+        assert_eq!(parsed_raw_links.len(), 4);
+        assert_eq!(
+            parsed_raw_links[0].server_url.as_deref(),
+            Some("https://api.local/v1")
+        );
+
+        for bad_raw_links in [
+            json!({ "L": "not_an_obj" }),
+            json!({ "L": { "$ref": "#/components/links/CycleL" } }),
+            json!({ "L": { "$ref": "#/components/links/MissingL" } }),
+            json!({ "L": {} }),
+            json!({ "L": { "operationId": "a", "operationRef": "/b" } }),
+            json!({ "L": { "operationId": "a", "parameters": "not_an_obj" } }),
+            json!({ "L": { "operationId": "a", "parameters": { "path.": "val" } } }),
+            json!({ "L": { "operationId": "a", "parameters": { "p": "$invalid_expr" } } }),
+            json!({ "L": { "operationId": "a", "requestBody": "$invalid_expr" } }),
+        ] {
+            assert!(extract_links_from_raw(&bad_raw_links, Some(&rich_comps), None, None).is_err());
+        }
+        assert!(resolve_response_from_components(
+            &utoipa::openapi::Ref::new("#/components/responses/Missing"),
+            Some(&ShimComponents::default()),
+            None,
+            None
+        )
+        .is_none());
+        assert!(resolve_link_raw_from_components(
+            "#/components/links/Missing",
+            Some(&ShimComponents::default()),
+            None,
+            None
+        )
+        .is_none());
+        assert!(resolve_header_from_components(
+            "#/components/headers/Missing",
+            Some(&ShimComponents::default()),
+            None,
+            None
+        )
+        .is_none());
+        assert!(raw_media_for_type(
+            &json!({ "content": { "application/json": { "$ref": "https://example.com/ext.yaml#/components/mediaTypes/ExtMedia" } } }),
+            "application/json",
+            Some(&ShimComponents::default()),
+            Some(&reg),
+            None
+        )
+        .is_some());
     }
 }

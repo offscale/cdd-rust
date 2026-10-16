@@ -45,6 +45,61 @@ impl BackendStrategy for McpClientStrategy {
         )
     }
 
+    fn path_extractor(&self, inner_types: &[String]) -> String {
+        extractors::path_extractor(inner_types)
+    }
+
+    fn query_extractor(&self) -> String {
+        extractors::query_extractor()
+    }
+
+    fn typed_query_extractor(&self, inner_type: &str) -> String {
+        extractors::typed_query_extractor(inner_type)
+    }
+
+    fn query_string_extractor(
+        &self,
+        inner_type: &str,
+        content_media_type: Option<&crate::openapi::parse::models::ContentMediaType>,
+    ) -> String {
+        extractors::query_string_extractor(inner_type, content_media_type)
+    }
+
+    fn header_extractor(&self, inner_type: &str) -> String {
+        extractors::header_extractor(inner_type)
+    }
+
+    fn cookie_extractor(&self) -> String {
+        extractors::cookie_extractor()
+    }
+
+    fn body_extractor(&self, body_type: &str) -> String {
+        extractors::body_extractor(body_type)
+    }
+
+    fn form_extractor(&self, body_type: &str) -> String {
+        extractors::form_extractor(body_type)
+    }
+
+    fn multipart_extractor(&self, body_type: &str) -> String {
+        extractors::multipart_extractor(body_type)
+    }
+
+    fn text_extractor(&self, body_type: &str) -> String {
+        extractors::text_extractor(body_type)
+    }
+
+    fn bytes_extractor(&self, body_type: &str) -> String {
+        extractors::bytes_extractor(body_type)
+    }
+
+    fn security_extractor(
+        &self,
+        requirements: &[crate::openapi::parse::models::SecurityRequirementGroup],
+    ) -> String {
+        extractors::security_extractor(requirements)
+    }
+
     fn route_registration_statement(&self, route: &ParsedRoute, handler_full_path: &str) -> String {
         self.mcp_tool_registration(route, handler_full_path)
     }

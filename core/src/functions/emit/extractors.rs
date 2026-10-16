@@ -176,7 +176,7 @@ fn build_handler_docs(route: &ParsedRoute) -> String {
 /// Generates a single async handler function string.
 pub(crate) fn generate_function(
     route: &ParsedRoute,
-    strategy: &impl BackendStrategy,
+    strategy: &dyn BackendStrategy,
 ) -> AppResult<String> {
     let mut args = Vec::new();
 
@@ -262,11 +262,7 @@ pub(crate) fn generate_function(
         args.push(format!("body: {}", extractor));
     }
 
-    let mut code = String::new();
-    let docs = build_handler_docs(route);
-    if !docs.is_empty() {
-        code.push_str(&docs);
-    }
+    let mut code = build_handler_docs(route);
     let extra_docs = strategy.extra_handler_docs(route);
     if !extra_docs.is_empty() {
         code.push_str(&extra_docs);
@@ -1005,12 +1001,57 @@ mod tests {
         };
 
         let strategy = ActixStrategy;
-        let code = update_handler_module("", &[route], &strategy)
+        let code = update_handler_module("", std::slice::from_ref(&route), &strategy)
             .expect("Failed to update handler module");
         assert!(code.contains("/// Short summary"));
         assert!(code.contains("/// Longer description."));
         assert!(code.contains("/// Docs: <https://example.com/docs>"));
         assert!(code.contains("#[deprecated]"));
+
+        // Multi-path params (one declared, one undeclared fallback to String), Form body, external_docs without description/summary
+        let mut form_route = route;
+        form_route.path = "/orgs/{org_id}/users/{user_id}".into();
+        form_route.handler_name = "form_multi_path".into();
+        form_route.summary = None;
+        form_route.description = None;
+        form_route.external_docs = Some(ParsedExternalDocs {
+            url: "https://example.com/ref".into(),
+            description: None,
+        });
+        form_route.params = vec![RouteParam {
+            name: "org_id".into(),
+            description: None,
+            source: ParamSource::Path,
+            ty: "i64".into(),
+            content_media_type: None,
+            style: None,
+            explode: false,
+            deprecated: false,
+            allow_empty_value: false,
+            allow_reserved: false,
+            example: None,
+            raw_schema: None,
+            extensions: BTreeMap::new(),
+        }];
+        form_route.request_body = Some(RequestBodyDefinition {
+            ty: "FormInput".into(),
+            description: None,
+            media_type: "application/x-www-form-urlencoded".into(),
+            format: BodyFormat::Form,
+            required: true,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: None,
+            example: None,
+        });
+        let mut desc_only_route = form_route.clone();
+        desc_only_route.handler_name = "desc_only".into();
+        desc_only_route.description = Some("Only description".into());
+        let form_code = update_handler_module("", &[form_route, desc_only_route], &strategy)
+            .expect("form route");
+        assert!(form_code.contains("path: web::Path<(i64, String)>"));
+        assert!(form_code.contains("body: web::Form<FormInput>"));
+        assert!(form_code.contains("/// See also: <https://example.com/ref>"));
     }
 
     #[test]
@@ -1162,5 +1203,241 @@ mod tests {
         let generated = generate_query_struct(&route).expect("Failed to generate query struct");
         assert!(generated.code.contains("/// Filter results by status."));
         assert!(generated.code.contains("pub status: String"));
+
+        let mut edge_route = route.clone();
+        edge_route.params = vec![
+            RouteParam {
+                name: "---".into(),
+                description: Some("First line\n\nSecond line".into()),
+                source: ParamSource::Query,
+                ty: "String".into(),
+                content_media_type: None,
+                style: None,
+                explode: false,
+                deprecated: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                example: None,
+                raw_schema: None,
+                extensions: BTreeMap::new(),
+            },
+            RouteParam {
+                name: "123field".into(),
+                description: None,
+                source: ParamSource::Query,
+                ty: "i32".into(),
+                content_media_type: None,
+                style: None,
+                explode: false,
+                deprecated: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                example: None,
+                raw_schema: None,
+                extensions: BTreeMap::new(),
+            },
+            RouteParam {
+                name: "type".into(),
+                description: None,
+                source: ParamSource::Query,
+                ty: "String".into(),
+                content_media_type: None,
+                style: None,
+                explode: false,
+                deprecated: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                example: None,
+                raw_schema: None,
+                extensions: BTreeMap::new(),
+            },
+            RouteParam {
+                name: "type-1".into(),
+                description: None,
+                source: ParamSource::Query,
+                ty: "String".into(),
+                content_media_type: None,
+                style: None,
+                explode: false,
+                deprecated: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                example: None,
+                raw_schema: None,
+                extensions: BTreeMap::new(),
+            },
+            RouteParam {
+                name: "type_1".into(),
+                description: None,
+                source: ParamSource::Query,
+                ty: "String".into(),
+                content_media_type: None,
+                style: None,
+                explode: false,
+                deprecated: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                example: None,
+                raw_schema: None,
+                extensions: BTreeMap::new(),
+            },
+            RouteParam {
+                name: "type.1".into(),
+                description: None,
+                source: ParamSource::Query,
+                ty: "String".into(),
+                content_media_type: None,
+                style: None,
+                explode: false,
+                deprecated: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                example: None,
+                raw_schema: None,
+                extensions: BTreeMap::new(),
+            },
+        ];
+        let edge_gen = generate_query_struct(&edge_route).expect("edge query struct");
+        assert!(edge_gen.code.contains("pub _123field: i32"));
+        assert!(edge_gen.code.contains("pub type_: String"));
+        assert!(edge_gen.code.contains("pub type_1_3: String"));
+        assert_eq!(sanitize_query_field_name(""), "param");
+    }
+
+    #[test]
+    fn test_generate_function_all_strategies_with_security_and_params_valid_ast() {
+        use crate::strategies::{
+            AxumStrategy, ClapCliStrategy, McpClientStrategy, McpServerStrategy, ReqwestStrategy,
+        };
+        use ra_ap_edition::Edition;
+        use ra_ap_syntax::SourceFile;
+
+        let route = ParsedRoute {
+            path: "/users/{username}".into(),
+            summary: Some("Update user".into()),
+            description: None,
+            path_summary: None,
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+            operation_summary: None,
+            operation_description: None,
+            base_path: None,
+            path_servers: None,
+            servers_override: None,
+            method: "PUT".into(),
+            handler_name: "update_user".into(),
+            operation_id: None,
+            params: vec![
+                RouteParam {
+                    name: "username".into(),
+                    description: None,
+                    source: ParamSource::Path,
+                    ty: "String".into(),
+                    content_media_type: None,
+                    style: None,
+                    explode: false,
+                    deprecated: false,
+                    allow_empty_value: false,
+                    allow_reserved: false,
+                    example: None,
+                    raw_schema: None,
+                    extensions: BTreeMap::new(),
+                },
+                RouteParam {
+                    name: "X-Trace".into(),
+                    description: None,
+                    source: ParamSource::Header,
+                    ty: "HeaderValue".into(),
+                    content_media_type: None,
+                    style: None,
+                    explode: false,
+                    deprecated: false,
+                    allow_empty_value: false,
+                    allow_reserved: false,
+                    example: None,
+                    raw_schema: None,
+                    extensions: BTreeMap::new(),
+                },
+                RouteParam {
+                    name: "session".into(),
+                    description: None,
+                    source: ParamSource::Cookie,
+                    ty: "String".into(),
+                    content_media_type: None,
+                    style: None,
+                    explode: false,
+                    deprecated: false,
+                    allow_empty_value: false,
+                    allow_reserved: false,
+                    example: None,
+                    raw_schema: None,
+                    extensions: BTreeMap::new(),
+                },
+            ],
+            path_params: vec![],
+            request_body: Some(RequestBodyDefinition {
+                ty: "User".into(),
+                description: None,
+                media_type: "application/json".into(),
+                format: BodyFormat::Json,
+                required: true,
+                encoding: None,
+                prefix_encoding: None,
+                item_encoding: None,
+                example: None,
+            }),
+            security: vec![SecurityRequirementGroup {
+                schemes: vec![SecurityRequirement {
+                    scheme_name: "api_key".into(),
+                    scopes: vec![],
+                    scheme: None,
+                }],
+            }],
+            security_defined: true,
+            response_type: Some("User".into()),
+            response_status: Some("200".into()),
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
+            response_headers: vec![],
+            response_links: None,
+            kind: RouteKind::Path,
+            tags: vec!["user".into()],
+            callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
+            extensions: BTreeMap::new(),
+        };
+
+        let reqwest_code =
+            update_handler_module("", std::slice::from_ref(&route), &ReqwestStrategy)
+                .expect("ReqwestStrategy module");
+        assert!(reqwest_code.contains("auth_token: Option<&str>"));
+        assert!(!reqwest_code.contains(", Option<String>"));
+
+        for code in [
+            reqwest_code,
+            update_handler_module("", std::slice::from_ref(&route), &ActixStrategy)
+                .expect("ActixStrategy module"),
+            update_handler_module("", std::slice::from_ref(&route), &AxumStrategy)
+                .expect("AxumStrategy module"),
+            update_handler_module("", std::slice::from_ref(&route), &ClapCliStrategy)
+                .expect("ClapCliStrategy module"),
+            update_handler_module("", std::slice::from_ref(&route), &McpClientStrategy)
+                .expect("McpClientStrategy module"),
+            update_handler_module("", std::slice::from_ref(&route), &McpServerStrategy)
+                .expect("McpServerStrategy module"),
+        ] {
+            let parse = std::mem::ManuallyDrop::new(SourceFile::parse(&code, Edition::Edition2021));
+            assert!(
+                parse.errors().is_empty(),
+                "Generated invalid Rust AST:\n{}\nErrors: {:?}",
+                code,
+                parse.errors()
+            );
+        }
     }
 }

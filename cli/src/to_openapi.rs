@@ -51,28 +51,16 @@ fn resolve_package_metadata(
         input
     };
 
-    let candidates = [
-        search_dir.join("Cargo.toml"),
-        search_dir
-            .parent()
-            .map(|p| p.join("Cargo.toml"))
-            .unwrap_or_else(|| search_dir.join("Cargo.toml")),
-    ];
+    let mut candidates = vec![search_dir.join("Cargo.toml")];
+    if let Some(p) = search_dir.parent() {
+        candidates.push(p.join("Cargo.toml"));
+    }
 
     for candidate in &candidates {
-        if candidate.is_file() {
-            if let Ok(content) = fs::read_to_string(candidate) {
-                let (n, v) = parse_cargo_toml_metadata(&content);
-                if parsed_name.is_none() {
-                    parsed_name = n;
-                }
-                if parsed_version.is_none() {
-                    parsed_version = v;
-                }
-                if parsed_name.is_some() && parsed_version.is_some() {
-                    break;
-                }
-            }
+        if let Ok(content) = fs::read_to_string(candidate) {
+            let (n, v) = parse_cargo_toml_metadata(&content);
+            parsed_name = parsed_name.or(n);
+            parsed_version = parsed_version.or(v);
         }
     }
 
@@ -98,18 +86,16 @@ fn parse_cargo_toml_metadata(content: &str) -> (Option<String>, Option<String>) 
         let line = raw_line.trim();
         if line.starts_with('[') {
             in_package = line == "[package]";
-            continue;
-        }
-        if !in_package {
-            continue;
-        }
-        if let Some((k, v)) = line.split_once('=') {
-            let key = k.trim();
-            let val = v.trim().trim_matches('"').trim_matches(char::from(39u8));
-            if key == "name" && !val.is_empty() {
-                name = Some(val.to_string());
-            } else if key == "version" && !val.is_empty() && !val.starts_with('{') {
-                version = Some(val.to_string());
+        } else if in_package {
+            if let Some((k, v)) = line.split_once('=') {
+                let key = k.trim();
+                let val = v.trim().trim_matches('"').trim_matches(char::from(39u8));
+                let is_valid = !val.is_empty() && !val.starts_with('{');
+                if key == "name" && is_valid {
+                    name = Some(val.to_string());
+                } else if key == "version" && is_valid {
+                    version = Some(val.to_string());
+                }
             }
         }
     }
@@ -128,19 +114,13 @@ fn parse_routes_for_target(code: &str, target: &TargetMode) -> AppResult<Vec<Par
     };
 
     if routes.is_empty() {
-        if let Ok(req_routes) = parse_reqwest_routes(code) {
-            routes.extend(req_routes);
-        }
+        routes.extend(parse_reqwest_routes(code)?);
     }
     if routes.is_empty() {
-        if let Ok(actix_routes) = parse_actix_routes(code) {
-            routes.extend(actix_routes);
-        }
+        routes.extend(parse_actix_routes(code)?);
     }
     if routes.is_empty() {
-        if let Ok(mcp_routes) = parse_mcp_routes(code) {
-            routes.extend(mcp_routes);
-        }
+        routes.extend(parse_mcp_routes(code)?);
     }
 
     Ok(routes)
@@ -173,12 +153,8 @@ pub fn run_to_openapi(args: &ToOpenApiArgs, target: &TargetMode) -> AppResult<()
     } else {
         for entry in WalkDir::new(&args.input).into_iter().flatten() {
             let path = entry.path();
-            if path.is_file() {
-                if let Some(ext) = path.extension() {
-                    if ext == "rs" {
-                        rust_files.push(path.to_path_buf());
-                    }
-                }
+            if path.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
+                rust_files.push(path.to_path_buf());
             }
         }
     }
@@ -189,21 +165,11 @@ pub fn run_to_openapi(args: &ToOpenApiArgs, target: &TargetMode) -> AppResult<()
     let mut parsed_routes = Vec::new();
 
     for file in rust_files {
-        if let Ok(code) = fs::read_to_string(&file) {
-            // 1. Try to extract structs (models)
-            if let Ok(struct_names) = extract_struct_names(&code) {
-                for name in struct_names {
-                    if let Ok(model) = extract_model(&code, &name) {
-                        parsed_models.push(model);
-                    }
-                }
-            }
-
-            // 2. Extract routes using target-aware parser
-            if let Ok(routes) = parse_routes_for_target(&code, target) {
-                parsed_routes.extend(routes);
-            }
+        let code = fs::read_to_string(&file)?;
+        for name in extract_struct_names(&code)? {
+            parsed_models.push(extract_model(&code, &name)?);
         }
+        parsed_routes.extend(parse_routes_for_target(&code, target)?);
     }
 
     let info = OpenApiInfo::new(title, version);
@@ -222,13 +188,11 @@ pub fn run_to_openapi(args: &ToOpenApiArgs, target: &TargetMode) -> AppResult<()
         .to_string_lossy();
     let content = serialize_doc(&doc, &ext)?;
 
-    if let Some(parent) = args.output.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).map_err(|e| AppError::General(e.to_string()))?;
-        }
+    if let Some(parent) = args.output.parent().filter(|p| !p.as_os_str().is_empty()) {
+        fs::create_dir_all(parent)?;
     }
 
-    fs::write(&args.output, content).map_err(|e| AppError::General(e.to_string()))?;
+    fs::write(&args.output, content)?;
     println!(
         "Successfully wrote OpenAPI specification to {:?}",
         args.output
@@ -425,5 +389,54 @@ pub async fn create_user() {}
         };
         assert!(to_openapi(&config).is_ok());
         assert!(out_json.exists());
+
+        let (root_t, root_v) = resolve_package_metadata(Path::new("/"), None, None);
+        assert_eq!(root_t, "Generated API");
+        assert_eq!(root_v, "0.1.0");
+
+        // Test parent Cargo.toml providing version while child Cargo.toml provides name
+        fs::write(
+            dir.path().join("Cargo.toml"),
+            r#"# comment without equals
+[package]
+# comment inside package section
+name = ""
+version = ""
+version = "4.5.6"
+edition = "2021"
+"#,
+        )
+        .expect("write parent Cargo.toml");
+        fs::write(
+            src_dir.join("Cargo.toml"),
+            r#"[package]
+name = "sub-pkg"
+version = { workspace = true }
+"#,
+        )
+        .expect("write child Cargo.toml");
+
+        let (sub_t, sub_v) = resolve_package_metadata(&rust_file, None, None);
+        assert_eq!(sub_t, "sub-pkg");
+        assert_eq!(sub_v, "4.5.6");
+
+        // Test fallback to actix routes when target is ClientReqwest
+        let actix_only = r#"
+        #[get("/only_actix")]
+        pub async fn only_actix() {}
+        "#;
+        let fallback_routes =
+            parse_routes_for_target(actix_only, &TargetMode::ClientReqwest).expect("routes");
+        assert_eq!(fallback_routes.len(), 1);
+        assert_eq!(fallback_routes[0].path, "/only_actix");
+
+        // Test bare output filename Err
+        let bare_err = ToOpenApiArgs {
+            input: rust_file,
+            output: PathBuf::from("/"),
+            title: None,
+            version: None,
+        };
+        assert!(run_to_openapi(&bare_err, &TargetMode::ServerActix).is_err());
     }
 }

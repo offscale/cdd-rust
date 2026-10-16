@@ -109,5 +109,11 @@ mod tests {
             let s = route_registration_statement(&r, "h");
             assert!(s.contains("/api/p"));
         }
+
+        let mut r_prefixed = route.clone();
+        r_prefixed.path = "/api/p".to_string();
+        r_prefixed.base_path = Some("/api".to_string());
+        let s_prefixed = route_registration_statement(&r_prefixed, "h");
+        assert!(s_prefixed.contains("\"/api/p\""));
     }
 }

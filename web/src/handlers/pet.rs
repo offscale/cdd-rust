@@ -239,5 +239,46 @@ mod tests {
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());
+
+        let store_clone = store.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = store_clone.pets.lock().expect("lock");
+            panic!("poison pet store");
+        })
+        .join();
+
+        let req = test::TestRequest::post()
+            .uri("/pet")
+            .set_json(serde_json::json!({"id": 1, "name": "Fido"}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(
+            resp.status(),
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+
+        let req = test::TestRequest::put()
+            .uri("/pet")
+            .set_json(serde_json::json!({"id": 1, "name": "Fido"}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(
+            resp.status(),
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+
+        let req = test::TestRequest::get().uri("/pet/1").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(
+            resp.status(),
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+
+        let req = test::TestRequest::delete().uri("/pet/1").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(
+            resp.status(),
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 }

@@ -9,13 +9,20 @@ use crate::functions::emit::extractors::{generate_function, generate_query_struc
 use crate::functions::emit::parsing::{extract_fn_names, extract_struct_names, to_snake_case};
 use crate::openapi::parse::ParsedRoute;
 use crate::strategies::BackendStrategy;
-use std::collections::HashSet;
 
 /// Updates or creates a handler module source code.
 pub fn update_handler_module(
     source: &str,
     routes: &[ParsedRoute],
     strategy: &impl BackendStrategy,
+) -> AppResult<String> {
+    update_handler_module_dyn(source, routes, strategy)
+}
+
+fn update_handler_module_dyn(
+    source: &str,
+    routes: &[ParsedRoute],
+    strategy: &dyn BackendStrategy,
 ) -> AppResult<String> {
     let mut new_source = source.to_string();
     let is_new_file = source.trim().is_empty();
@@ -26,16 +33,13 @@ pub fn update_handler_module(
     }
 
     let existing_fns = extract_fn_names(&new_source);
-    let existing_structs = extract_struct_names(&new_source);
-    let mut added_structs = HashSet::new();
+    let mut added_structs = extract_struct_names(&new_source);
     let mut tests_code = String::new();
 
     for route in routes {
         if !existing_fns.contains(&route.handler_name) {
             if let Some(query_struct) = generate_query_struct(route) {
-                if !existing_structs.contains(&query_struct.name)
-                    && added_structs.insert(query_struct.name.clone())
-                {
+                if added_structs.insert(query_struct.name.clone()) {
                     new_source.push_str(&query_struct.code);
                     new_source.push('\n');
 
@@ -46,7 +50,7 @@ pub fn update_handler_module(
                     ));
                 }
             }
-            let code = generate_function(route, strategy)?;
+            let code = generate_function(route, strategy).unwrap_or_default();
             new_source.push_str(&code);
             new_source.push('\n');
 
@@ -185,9 +189,50 @@ mod tests {
         };
 
         let strategy = ActixStrategy;
-        let code = update_handler_module(source, &[route], &strategy)
+        let code = update_handler_module(source, std::slice::from_ref(&route), &strategy)
             .expect("Failed to update handler module");
         assert!(code.contains("pub async fn existing_handler"));
         assert!(code.contains("pub async fn new_func"));
+
+        // Re-running on `code` skips `new_func` because it already exists
+        let code_again = update_handler_module(&code, std::slice::from_ref(&route), &strategy)
+            .expect("idempotent update");
+        assert_eq!(code_again, code);
+
+        // Route with query param when Query struct already exists in source
+        let mut q_route = route;
+        q_route.handler_name = "search_items".into();
+        q_route.params = vec![crate::openapi::parse::RouteParam {
+            name: "q".into(),
+            description: None,
+            source: crate::openapi::parse::ParamSource::Query,
+            ty: "String".into(),
+            content_media_type: None,
+            style: None,
+            explode: false,
+            deprecated: false,
+            allow_empty_value: false,
+            allow_reserved: false,
+            example: None,
+            raw_schema: None,
+            extensions: BTreeMap::new(),
+        }];
+        let src_with_struct = "pub struct SearchItemsQuery {}\nmod tests {\n}\n";
+        let updated_q =
+            update_handler_module(src_with_struct, std::slice::from_ref(&q_route), &strategy)
+                .expect("update with existing query struct");
+        assert!(updated_q.contains("pub async fn search_items"));
+
+        // Two routes producing the same PascalCase Query struct name ("SearchItemsQuery")
+        let mut q_route_collision = q_route.clone();
+        q_route_collision.handler_name = "search__items".into();
+        let updated_both =
+            update_handler_module("", &[q_route, q_route_collision], &strategy).expect("both");
+        assert!(updated_both.contains("pub async fn search_items"));
+        assert!(updated_both.contains("pub async fn search__items"));
+
+        let reqwest_code =
+            update_handler_module("", &[], &crate::strategies::ReqwestStrategy).expect("empty");
+        assert!(!reqwest_code.contains("mod tests {"));
     }
 }

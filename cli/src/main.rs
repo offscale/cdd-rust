@@ -87,33 +87,19 @@ pub fn dispatch_cli(cli: &Cli) -> AppResult<()> {
     match &cli.command {
         Commands::Sync(args) => {
             let mapper = DieselMapper;
-            cdd_cli::sync::run_sync(args, &mapper)?;
+            cdd_cli::sync::run_sync(args, &mapper)
         }
-        Commands::ToDocsJson(args) => {
-            cdd_cli::to_docs_json::run_to_docs_json(args)?;
-        }
-        Commands::FromOpenApi(args) => {
-            cdd_cli::from_openapi::run_from_openapi(args)?;
-        }
-        Commands::ToOpenApi(args) => {
-            cdd_cli::to_openapi::run_to_openapi(args, &cli.target)?;
-        }
+        Commands::ToDocsJson(args) => cdd_cli::to_docs_json::run_to_docs_json(args),
+        Commands::FromOpenApi(args) => cdd_cli::from_openapi::run_from_openapi(args),
+        Commands::ToOpenApi(args) => cdd_cli::to_openapi::run_to_openapi(args, &cli.target),
         #[cfg(all(feature = "server", not(target_os = "wasi")))]
-        Commands::ServeJsonRpc(args) => {
-            cdd_cli::serve_json_rpc::run_serve_json_rpc(args)?;
-        }
+        Commands::ServeJsonRpc(args) => cdd_cli::serve_json_rpc::run_serve_json_rpc(args),
         #[cfg(any(not(feature = "server"), target_os = "wasi"))]
-        Commands::ServeJsonRpc => {
-            return Err(cdd_core::error::AppError::General(
-                "Server feature is not compiled or not supported on this platform".to_string(),
-            ));
-        }
-        Commands::Mcp(args) => {
-            cdd_cli::mcp::run_mcp_server(args)?;
-        }
+        Commands::ServeJsonRpc => Err(cdd_core::error::AppError::General(
+            "Server feature is not compiled or not supported on this platform".to_string(),
+        )),
+        Commands::Mcp(args) => cdd_cli::mcp::run_mcp_server(args),
     }
-
-    Ok(())
 }
 
 /// The main entry point of the CLI application.
@@ -151,5 +137,22 @@ mod tests {
             "/nonexistent_spec.yaml",
         ]);
         assert!(dispatch_cli(&from_oa_err).is_err());
+
+        let rpc_err = Cli::parse_from([
+            "cdd-rust",
+            "serve_json_rpc",
+            "-l",
+            "invalid.host.address.local",
+            "-p",
+            "80",
+        ]);
+        assert!(dispatch_cli(&rpc_err).is_err());
+
+        std::env::set_var("CDD_MCP_TEST_EOF", "1");
+        let rpc_ok = Cli::parse_from(["cdd-rust", "serve_json_rpc", "-l", "127.0.0.1", "-p", "0"]);
+        assert!(dispatch_cli(&rpc_ok).is_ok());
+
+        let mcp_cli = Cli::parse_from(["cdd-rust", "mcp"]);
+        assert!(dispatch_cli(&mcp_cli).is_ok());
     }
 }

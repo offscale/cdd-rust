@@ -54,8 +54,7 @@ pub fn run_test_gen(args: &TestGenArgs, strategy: &impl BackendStrategy) -> AppR
     }
 
     // 1. Read Schema
-    let yaml_content = fs::read_to_string(&args.openapi_path)
-        .map_err(|e| AppError::General(format!("Failed to read OpenAPI: {}", e)))?;
+    let yaml_content = fs::read_to_string(&args.openapi_path)?;
 
     // 2. Parse Routes
     let routes = parse_openapi_routes(&yaml_content)?;
@@ -67,13 +66,15 @@ pub fn run_test_gen(args: &TestGenArgs, strategy: &impl BackendStrategy) -> AppR
     let code = generate_contract_tests_file(&routes, &openapi_str, &args.app_factory, strategy)?;
 
     // 4. Write File
-    if let Some(parent) = args.output_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| AppError::General(format!("Failed to create output dir: {}", e)))?;
+    if let Some(parent) = args
+        .output_path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)?;
     }
 
-    fs::write(&args.output_path, code)
-        .map_err(|e| AppError::General(format!("Failed to write test file: {}", e)))?;
+    fs::write(&args.output_path, code)?;
 
     println!("Generated integration tests at {:?}", args.output_path);
 
@@ -133,5 +134,27 @@ paths:
 
         let err = run_test_gen(&args, &ActixStrategy).expect_err("expected error");
         assert!(format!("{}", err).contains("OpenAPI file not found"));
+
+        let bad_openapi = dir.path().join("bad.yaml");
+        fs::write(&bad_openapi, "not valid openapi: [").expect("write");
+        let bad_args = TestGenArgs {
+            openapi_path: bad_openapi,
+            output_path: PathBuf::from("/"),
+            app_factory: "crate::create_app".to_string(),
+        };
+        assert!(run_test_gen(&bad_args, &ActixStrategy).is_err());
+
+        let ok_openapi = dir.path().join("ok.yaml");
+        fs::write(
+            &ok_openapi,
+            "openapi: 3.1.0\ninfo: {title: T, version: 1.0}\npaths: {}\n",
+        )
+        .expect("write");
+        let root_args = TestGenArgs {
+            openapi_path: ok_openapi,
+            output_path: PathBuf::from("/"),
+            app_factory: "crate::create_app".to_string(),
+        };
+        assert!(run_test_gen(&root_args, &ActixStrategy).is_err());
     }
 }

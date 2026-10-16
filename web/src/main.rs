@@ -58,8 +58,7 @@ pub fn build_dao_config(cli: &Cli) -> Result<DaoConfig, cdd_web::error::ServerEr
         if cli.ephemeral_db {
             db_config.is_ephemeral = true;
         }
-        let pool = create_pool(&db_config)?;
-        Ok(DaoConfig::Concrete(pool))
+        create_pool(&db_config).map(DaoConfig::Concrete)
     }
 }
 
@@ -142,6 +141,8 @@ mod tests {
         env::set_var("DATABASE_URL", "invalid_url");
         let cli_concrete = Cli::parse_from(["cdd-web", "--ephemeral-db"]);
         assert!(build_dao_config(&cli_concrete).is_err());
+        let cli_non_ephemeral = Cli::parse_from(["cdd-web"]);
+        assert!(build_dao_config(&cli_non_ephemeral).is_err());
         env::remove_var("DATABASE_URL");
 
         env::remove_var("HOST");

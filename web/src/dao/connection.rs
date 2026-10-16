@@ -104,14 +104,12 @@ fn run_ephemeral_setup(db_url: &str) -> Result<(), ServerError> {
     use diesel::Connection;
 
     let (base_url, db_name) = parse_ephemeral_db_url(db_url)?;
+    let query = format!("CREATE DATABASE {db_name}");
 
     let mut conn = PgConnection::establish(&base_url).map_err(|e| {
         ServerError::ConfigError(format!("Failed to connect to postgres for setup: {e}"))
     })?;
-
-    let query = format!("CREATE DATABASE {db_name}");
     let _ = diesel::sql_query(query).execute(&mut conn);
-
     Ok(())
 }
 
@@ -180,5 +178,11 @@ mod tests {
         };
         let pool_res = create_pool(&config);
         assert!(matches!(pool_res, Err(ServerError::ConfigError(_))));
+
+        let local_cfg = DbConfig {
+            database_url: "postgres://localhost/postgres".to_string(),
+            is_ephemeral: true,
+        };
+        let _ = create_pool(&local_cfg);
     }
 }

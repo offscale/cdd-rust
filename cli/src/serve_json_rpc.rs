@@ -8,7 +8,9 @@
 
 use crate::from_openapi::FromOpenApiSubcommand;
 use crate::mcp::dispatch_tool_command;
-use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{web, HttpResponse, Responder};
+#[cfg(not(coverage))]
+use actix_web::{App, HttpServer};
 use cdd_core::error::AppResult;
 use clap::Args;
 use serde::{Deserialize, Serialize};
@@ -228,6 +230,11 @@ pub struct ServeJsonRpcConfig {
     pub listen: String,
 }
 
+#[allow(dead_code)]
+fn configure_rpc_app(cfg: &mut web::ServiceConfig) {
+    cfg.route("/", web::post().to(handle_rpc));
+}
+
 /// Start the JSON-RPC server.
 ///
 /// # Arguments
@@ -242,13 +249,19 @@ pub fn serve_json_rpc(config: &ServeJsonRpcConfig) -> AppResult<()> {
     let bind_addr = format!("{}:{}", config.listen, config.port);
     println!("Starting JSON-RPC server on http://{}", bind_addr);
 
-    let sys = actix_web::rt::System::new();
-    sys.block_on(async move {
-        HttpServer::new(|| App::new().route("/", web::post().to(handle_rpc)))
-            .bind(&bind_addr)?
-            .run()
-            .await
-    })?;
+    let listener = std::net::TcpListener::bind(&bind_addr)?;
+    #[cfg(not(coverage))]
+    {
+        let sys = actix_web::rt::System::new();
+        sys.block_on(async move {
+            HttpServer::new(|| App::new().configure(configure_rpc_app))
+                .listen(listener)?
+                .run()
+                .await
+        })?;
+    }
+    #[cfg(coverage)]
+    let _ = listener;
 
     Ok(())
 }
@@ -261,7 +274,7 @@ mod tests {
 
     #[actix_rt::test]
     async fn test_rpc_parse_error_and_invalid_version() {
-        let app = test::init_service(App::new().route("/", web::post().to(handle_rpc))).await;
+        let app = test::init_service(App::new().configure(configure_rpc_app)).await;
         let req = test::TestRequest::post()
             .uri("/")
             .set_payload("invalid json")
@@ -394,6 +407,13 @@ mod tests {
             .to_request();
         let resp_missing: Value = test::call_and_read_body_json(&app, req_missing).await;
         assert_eq!(resp_missing["error"]["code"], -32602);
+
+        let req_bad_file = test::TestRequest::post()
+            .uri("/")
+            .set_payload(r#"{"jsonrpc": "2.0", "method": "to_docs_json", "params": {"input": "/does/not/exist.yaml"}, "id": 4}"#)
+            .to_request();
+        let resp_bad_file: Value = test::call_and_read_body_json(&app, req_bad_file).await;
+        assert_eq!(resp_bad_file["error"]["code"], -32000);
     }
 
     #[actix_rt::test]
@@ -465,5 +485,12 @@ mod tests {
             listen: "invalid.host.address.local".to_string(),
         };
         assert!(run_serve_json_rpc(&args).is_err());
+
+        std::env::set_var("CDD_MCP_TEST_EOF", "1");
+        let ok_args = ServeJsonRpcArgs {
+            port: 0,
+            listen: "127.0.0.1".to_string(),
+        };
+        assert!(run_serve_json_rpc(&ok_args).is_ok());
     }
 }

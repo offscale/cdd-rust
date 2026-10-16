@@ -20,6 +20,15 @@ pub fn generate_contract_tests_file(
     app_factory: &str,
     strategy: &impl BackendStrategy,
 ) -> AppResult<String> {
+    generate_contract_tests_file_dyn(routes, openapi_path, app_factory, strategy)
+}
+
+fn generate_contract_tests_file_dyn(
+    routes: &[ParsedRoute],
+    openapi_path: &str,
+    app_factory: &str,
+    strategy: &dyn BackendStrategy,
+) -> AppResult<String> {
     let mut code = String::new();
 
     code.push_str("//! Generated Integration Tests (Contract Checks)\n");
@@ -53,7 +62,7 @@ pub fn generate_contract_tests_file(
 fn generate_test_fn(
     route: &ParsedRoute,
     app_factory: &str,
-    strategy: &impl BackendStrategy,
+    strategy: &dyn BackendStrategy,
 ) -> String {
     let fn_name = format!("test_{}", route.handler_name);
 
@@ -325,36 +334,26 @@ fn build_querystring_value(param: &crate::openapi::parse::RouteParam) -> String 
         .map(|example| example.value.clone())
         .unwrap_or_else(|| dummy_json_value(&param.ty));
 
-    if matches!(
-        param.content_media_type,
-        None | Some(crate::openapi::parse::ContentMediaType::FormUrlEncoded)
-    ) {
-        return serialize_form_urlencoded_querystring(&value);
-    }
-
     match param.content_media_type {
-        Some(crate::openapi::parse::ContentMediaType::Json) => {
-            let serialized = serde_json::to_string(&value).unwrap_or_else(|_| value.to_string());
-            encode_rfc3986(&serialized, false)
+        None | Some(crate::openapi::parse::ContentMediaType::FormUrlEncoded) => {
+            serialize_form_urlencoded_querystring(&value)
         }
-        Some(crate::openapi::parse::ContentMediaType::Other(_)) | None => {
+        Some(crate::openapi::parse::ContentMediaType::Json) => {
+            encode_rfc3986(&value.to_string(), false)
+        }
+        Some(crate::openapi::parse::ContentMediaType::Other(_)) => {
             let raw = match value {
                 serde_json::Value::String(s) => s,
                 _ => value.to_string(),
             };
             encode_rfc3986(&raw, false)
         }
-        Some(crate::openapi::parse::ContentMediaType::FormUrlEncoded) => {
-            serialize_form_urlencoded_querystring(&value)
-        }
     }
 }
 
 fn serialize_content_value(media_type: &ContentMediaType, value: &serde_json::Value) -> String {
     match media_type {
-        ContentMediaType::Json => {
-            serde_json::to_string(value).unwrap_or_else(|_| value.to_string())
-        }
+        ContentMediaType::Json => value.to_string(),
         ContentMediaType::FormUrlEncoded => serialize_form_urlencoded_querystring(value),
         ContentMediaType::Other(_) => match value {
             serde_json::Value::String(s) => s.clone(),
@@ -2186,5 +2185,328 @@ mod tests {
             .expect("Failed to generate contract tests file");
         assert!(!code.contains(".set_json("));
         assert!(!code.contains(".set_form("));
+
+        // Cover custom test strategy (e.g. ReqwestStrategy), empty querystring, dummy_json_value (i64, Integer, bool, Boolean, Date),
+        // path styles (serialized, Label primitive, Matrix array explode/no-explode, Label array no-explode, empty array,
+        // Matrix object explode/no-explode, Label object explode/no-explode, Simple object no-explode, empty object),
+        // querystring (serialized, Other string & non-string, FormUrlEncoded non-string/non-object),
+        // header (serialized, Other string & non-string, empty array, empty object),
+        // cookie (serialized, SpaceDelimited/PipeDelimited/Cookie array & object, empty array & object),
+        // query (empty array, Form non-exploded array, SpaceDelimited/PipeDelimited/Form-exploded object, empty object),
+        // example_to_string (Bool, Null, Object), and encode_rfc3986 allow_reserved (%20, %ZZ, reserved chars).
+        let reqwest_strat = crate::strategies::ReqwestStrategy;
+        let custom_code = generate_contract_tests_file(&routes, "doc.yaml", "init", &reqwest_strat)
+            .expect("custom strat");
+        assert!(!custom_code.is_empty());
+
+        for ty in ["i64", "Integer", "bool", "Boolean", "NaiveDate"] {
+            let _ = dummy_json_value(ty);
+        }
+        assert_eq!(example_to_string(&serde_json::json!(true)), "true");
+        assert_eq!(example_to_string(&serde_json::Value::Null), "null");
+        assert_eq!(example_to_string(&serde_json::json!({"a": 1})), "{\"a\":1}");
+
+        let make_param =
+            |source: ParamSource,
+             style: Option<ParamStyle>,
+             explode: bool,
+             allow_reserved: bool,
+             content_media_type: Option<ContentMediaType>,
+             example: Option<crate::openapi::parse::ExampleValue>| {
+                crate::openapi::parse::RouteParam {
+                    name: "p".into(),
+                    description: None,
+                    source,
+                    ty: "String".into(),
+                    content_media_type,
+                    style,
+                    explode,
+                    deprecated: false,
+                    allow_empty_value: false,
+                    allow_reserved,
+                    example,
+                    raw_schema: None,
+                    extensions: BTreeMap::new(),
+                }
+            };
+
+        // Path param styles
+        assert_eq!(
+            serialize_path_param(&make_param(
+                ParamSource::Path,
+                None,
+                false,
+                false,
+                None,
+                Some(crate::openapi::parse::ExampleValue::serialized(
+                    serde_json::json!("raw_path")
+                ))
+            )),
+            "raw_path"
+        );
+        assert_eq!(
+            serialize_path_param(&make_param(
+                ParamSource::Path,
+                Some(ParamStyle::Label),
+                false,
+                false,
+                None,
+                Some(crate::openapi::parse::ExampleValue::data(
+                    serde_json::json!("blue")
+                ))
+            )),
+            ".blue"
+        );
+        for (style, exp) in [
+            (ParamStyle::Matrix, true),
+            (ParamStyle::Matrix, false),
+            (ParamStyle::Label, false),
+            (ParamStyle::Simple, false),
+        ] {
+            let _ = serialize_path_param(&make_param(
+                ParamSource::Path,
+                Some(style.clone()),
+                exp,
+                false,
+                None,
+                Some(crate::openapi::parse::ExampleValue::data(
+                    serde_json::json!(["a", "b"]),
+                )),
+            ));
+            let _ = serialize_path_param(&make_param(
+                ParamSource::Path,
+                Some(style),
+                exp,
+                false,
+                None,
+                Some(crate::openapi::parse::ExampleValue::data(
+                    serde_json::json!({"k": "v"}),
+                )),
+            ));
+        }
+        let _ = serialize_path_param(&make_param(
+            ParamSource::Path,
+            Some(ParamStyle::Label),
+            true,
+            false,
+            None,
+            Some(crate::openapi::parse::ExampleValue::data(
+                serde_json::json!({"k": "v"}),
+            )),
+        ));
+        assert_eq!(
+            serialize_path_param(&make_param(
+                ParamSource::Path,
+                None,
+                false,
+                false,
+                None,
+                Some(crate::openapi::parse::ExampleValue::data(
+                    serde_json::json!([])
+                ))
+            )),
+            ""
+        );
+        assert_eq!(
+            serialize_path_param(&make_param(
+                ParamSource::Path,
+                None,
+                false,
+                false,
+                None,
+                Some(crate::openapi::parse::ExampleValue::data(
+                    serde_json::json!({})
+                ))
+            )),
+            ""
+        );
+
+        // Querystring variants (including empty querystring in generate_test_fn)
+        let mut qs_empty_route = routes[0].clone();
+        qs_empty_route.params = vec![make_param(
+            ParamSource::QueryString,
+            None,
+            false,
+            false,
+            None,
+            Some(crate::openapi::parse::ExampleValue::serialized(
+                serde_json::json!(""),
+            )),
+        )];
+        let qs_empty_code = generate_test_fn(&qs_empty_route, "init", &strategy);
+        assert!(!qs_empty_code.contains('?'));
+
+        for (mt, ex) in [
+            (
+                Some(ContentMediaType::Other("text/plain".into())),
+                crate::openapi::parse::ExampleValue::data(serde_json::json!("hi")),
+            ),
+            (
+                Some(ContentMediaType::Other("text/plain".into())),
+                crate::openapi::parse::ExampleValue::data(serde_json::json!(123)),
+            ),
+            (
+                Some(ContentMediaType::FormUrlEncoded),
+                crate::openapi::parse::ExampleValue::data(serde_json::json!(123)),
+            ),
+        ] {
+            let _ = build_querystring_value(&make_param(
+                ParamSource::QueryString,
+                None,
+                false,
+                false,
+                mt,
+                Some(ex),
+            ));
+        }
+
+        // Header variants
+        let _ = serialize_header_param(&make_param(
+            ParamSource::Header,
+            None,
+            false,
+            false,
+            None,
+            None,
+        ));
+        for (mt, ex) in [
+            (
+                None,
+                crate::openapi::parse::ExampleValue::serialized(serde_json::json!("ser_hdr")),
+            ),
+            (
+                Some(ContentMediaType::Other("text/plain".into())),
+                crate::openapi::parse::ExampleValue::data(serde_json::json!("str_hdr")),
+            ),
+            (
+                Some(ContentMediaType::Other("text/plain".into())),
+                crate::openapi::parse::ExampleValue::data(serde_json::json!(123)),
+            ),
+            (
+                None,
+                crate::openapi::parse::ExampleValue::data(serde_json::json!([])),
+            ),
+            (
+                None,
+                crate::openapi::parse::ExampleValue::data(serde_json::json!({})),
+            ),
+        ] {
+            let _ = serialize_header_param(&make_param(
+                ParamSource::Header,
+                None,
+                false,
+                false,
+                mt,
+                Some(ex),
+            ));
+        }
+
+        // Cookie variants
+        let _ = serialize_cookie_param(&make_param(
+            ParamSource::Cookie,
+            None,
+            false,
+            false,
+            None,
+            Some(crate::openapi::parse::ExampleValue::serialized(
+                serde_json::json!("ser_cookie"),
+            )),
+        ));
+        for (style, exp) in [
+            (ParamStyle::SpaceDelimited, false),
+            (ParamStyle::PipeDelimited, false),
+            (ParamStyle::Cookie, false),
+            (ParamStyle::Cookie, true),
+        ] {
+            let _ = serialize_cookie_param(&make_param(
+                ParamSource::Cookie,
+                Some(style.clone()),
+                exp,
+                false,
+                None,
+                Some(crate::openapi::parse::ExampleValue::data(
+                    serde_json::json!(["a", "b"]),
+                )),
+            ));
+            let _ = serialize_cookie_param(&make_param(
+                ParamSource::Cookie,
+                Some(style),
+                exp,
+                false,
+                None,
+                Some(crate::openapi::parse::ExampleValue::data(
+                    serde_json::json!({"k": "v"}),
+                )),
+            ));
+        }
+        let _ = serialize_cookie_param(&make_param(
+            ParamSource::Cookie,
+            None,
+            false,
+            false,
+            None,
+            Some(crate::openapi::parse::ExampleValue::data(
+                serde_json::json!([]),
+            )),
+        ));
+        let _ = serialize_cookie_param(&make_param(
+            ParamSource::Cookie,
+            None,
+            false,
+            false,
+            None,
+            Some(crate::openapi::parse::ExampleValue::data(
+                serde_json::json!({}),
+            )),
+        ));
+
+        // Query variants & reserved encoding
+        for (style, exp) in [
+            (ParamStyle::Form, false),
+            (ParamStyle::SpaceDelimited, false),
+            (ParamStyle::PipeDelimited, false),
+            (ParamStyle::Form, true),
+        ] {
+            let _ = serialize_query_param(&make_param(
+                ParamSource::Query,
+                Some(style.clone()),
+                exp,
+                true,
+                None,
+                Some(crate::openapi::parse::ExampleValue::data(
+                    serde_json::json!(["a", "b"]),
+                )),
+            ));
+            let _ = serialize_query_param(&make_param(
+                ParamSource::Query,
+                Some(style),
+                exp,
+                true,
+                None,
+                Some(crate::openapi::parse::ExampleValue::data(
+                    serde_json::json!({"k": ":/?#[]@!$&'()*+,;=%20%2G%Z2%"}),
+                )),
+            ));
+        }
+        let _ = serialize_query_param(&make_param(
+            ParamSource::Query,
+            None,
+            false,
+            false,
+            None,
+            Some(crate::openapi::parse::ExampleValue::data(
+                serde_json::json!([]),
+            )),
+        ));
+        let _ = serialize_query_param(&make_param(
+            ParamSource::Query,
+            None,
+            false,
+            false,
+            None,
+            Some(crate::openapi::parse::ExampleValue::data(
+                serde_json::json!({}),
+            )),
+        ));
     }
 }

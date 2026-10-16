@@ -82,9 +82,9 @@ pub fn map_schema_to_rust_type(schema: &RefOr<Schema>, is_required: bool) -> App
                         },
                         SchemaType::Type(Type::Array) => "Vec<serde_json::Value>".to_string(),
                         SchemaType::Type(Type::Object)
+                        | SchemaType::Type(Type::Null)
                         | SchemaType::AnyValue
                         | SchemaType::Array(_) => "serde_json::Value".to_string(),
-                        SchemaType::Type(Type::Null) => "serde_json::Value".to_string(),
                     };
                     (type_str, nullable)
                 }
@@ -94,12 +94,9 @@ pub fn map_schema_to_rust_type(schema: &RefOr<Schema>, is_required: bool) -> App
                     let inner_type = map_schema_to_rust_type(boxed_schema, true)?;
                     (format!("Vec<{}>", inner_type), false)
                 }
-                _ => ("Vec<serde_json::Value>".to_string(), false),
+                ArrayItems::False => ("Vec<serde_json::Value>".to_string(), false),
             },
             // Polymorphic types map to generic JSON Value without a discriminator strategy handler elsewhere
-            Schema::OneOf(_) | Schema::AnyOf(_) | Schema::AllOf(_) => {
-                ("serde_json::Value".to_string(), false)
-            }
             _ => ("serde_json::Value".to_string(), false),
         },
     };
@@ -124,9 +121,7 @@ pub fn map_schema_to_rust_type_with_raw(
     if let Some(raw) = raw_schema {
         if should_use_content_schema(raw) {
             if let Some(content_schema) = content_schema_from_raw(raw) {
-                if let Ok(mapped) = map_schema_to_rust_type(&content_schema, is_required) {
-                    return Ok(mapped);
-                }
+                return map_schema_to_rust_type(&content_schema, is_required);
             }
         }
     }
@@ -135,8 +130,7 @@ pub fn map_schema_to_rust_type_with_raw(
 }
 
 fn content_schema_from_raw(raw: &JsonValue) -> Option<RefOr<Schema>> {
-    let obj = raw.as_object()?;
-    let content_schema = obj.get("contentSchema")?;
+    let content_schema = raw.get("contentSchema")?;
     serde_json::from_value::<RefOr<Schema>>(content_schema.clone()).ok()
 }
 
@@ -494,5 +488,141 @@ mod tests {
         let mapped = map_schema_to_rust_type_with_raw(&RefOr::T(schema), true, Some(&raw))
             .expect("Failed to map schema to rust type with raw");
         assert_eq!(mapped, "String");
+
+        // Cover Type::Array in Object, SchemaType::Array variants, AnyValue, ArrayItems::False, Schema::OneOf, and KnownFormat::Custom
+        for st in [
+            SchemaType::Type(Type::Array),
+            SchemaType::Type(Type::Null),
+            SchemaType::AnyValue,
+            SchemaType::Array(vec![Type::Null]),
+            SchemaType::Array(vec![Type::Integer, Type::Null]),
+            SchemaType::Array(vec![Type::Number, Type::Null]),
+            SchemaType::Array(vec![Type::Boolean, Type::Null]),
+            SchemaType::Array(vec![Type::Object, Type::Null]),
+            SchemaType::Array(vec![Type::String, Type::Integer]),
+        ] {
+            let s = Schema::Object(ObjectBuilder::new().schema_type(st).build());
+            let _ = map_schema_to_rust_type(&RefOr::T(s), true).expect("map");
+        }
+
+        for mt in [
+            "application/octet-stream",
+            "application/pdf",
+            "image/png",
+            "audio/mpeg",
+            "video/mp4",
+            "text/plain",
+        ] {
+            let s = Schema::Object(ObjectBuilder::new().content_media_type(mt).build());
+            let _ = map_schema_to_rust_type(&RefOr::T(s), true).expect("mt");
+        }
+
+        let base64_s = Schema::Object(ObjectBuilder::new().content_encoding("base64").build());
+        assert_eq!(
+            map_schema_to_rust_type(&RefOr::T(base64_s), true).expect("b64"),
+            "Vec<u8>"
+        );
+
+        let known_byte = Schema::Object(
+            ObjectBuilder::new()
+                .schema_type(Type::String)
+                .format(Some(SchemaFormat::KnownFormat(KnownFormat::Byte)))
+                .build(),
+        );
+        assert_eq!(
+            map_schema_to_rust_type(&RefOr::T(known_byte), true).expect("known byte"),
+            "Vec<u8>"
+        );
+
+        let custom_byte = Schema::Object(
+            ObjectBuilder::new()
+                .schema_type(Type::String)
+                .format(Some(SchemaFormat::Custom("byte".to_string())))
+                .build(),
+        );
+        assert_eq!(
+            map_schema_to_rust_type(&RefOr::T(custom_byte), true).expect("custom byte"),
+            "Vec<u8>"
+        );
+
+        let dt_s = Schema::Object(
+            ObjectBuilder::new()
+                .schema_type(Type::String)
+                .format(Some(SchemaFormat::KnownFormat(KnownFormat::DateTime)))
+                .build(),
+        );
+        assert_eq!(
+            map_schema_to_rust_type(&RefOr::T(dt_s), true).expect("datetime"),
+            "DateTime<Utc>"
+        );
+
+        let date_s = Schema::Object(
+            ObjectBuilder::new()
+                .schema_type(Type::String)
+                .format(Some(SchemaFormat::KnownFormat(KnownFormat::Date)))
+                .build(),
+        );
+        assert_eq!(
+            map_schema_to_rust_type(&RefOr::T(date_s), true).expect("date"),
+            "NaiveDate"
+        );
+
+        let pass_s = Schema::Object(
+            ObjectBuilder::new()
+                .schema_type(Type::String)
+                .format(Some(SchemaFormat::KnownFormat(KnownFormat::Password)))
+                .build(),
+        );
+        assert_eq!(
+            map_schema_to_rust_type(&RefOr::T(pass_s), true).expect("pass"),
+            "Secret<String>"
+        );
+
+        let custom_str = Schema::Object(
+            ObjectBuilder::new()
+                .schema_type(Type::String)
+                .format(Some(SchemaFormat::Custom("email".to_string())))
+                .build(),
+        );
+        assert_eq!(
+            map_schema_to_rust_type(&RefOr::T(custom_str.clone()), true).expect("custom str"),
+            "String"
+        );
+
+        // Cover should_use_content_schema and schema_allows_string branches
+        for raw_case in [
+            json!("not_an_object"),
+            json!({"type": "integer", "contentSchema": {"type": "boolean"}}),
+            json!({"type": 123, "contentSchema": {"type": "boolean"}}),
+            json!({"type": ["integer", 123], "contentSchema": {"type": "boolean"}}),
+            json!({"type": ["string", "null"], "contentMediaType": "application/vnd.api+json; charset=utf-8", "contentSchema": {"type": "boolean"}}),
+            json!({"contentSchema": "invalid_schema_value"}),
+            json!({}),
+        ] {
+            let _ = map_schema_to_rust_type_with_raw(
+                &RefOr::T(custom_str.clone()),
+                true,
+                Some(&raw_case),
+            )
+            .expect("raw case");
+        }
+        let _ =
+            map_schema_to_rust_type_with_raw(&RefOr::T(custom_str), true, None).expect("none raw");
+
+        let false_arr: Schema = serde_json::from_value(serde_json::json!({
+            "type": "array",
+            "items": false
+        }))
+        .expect("false items array");
+        assert_eq!(
+            map_schema_to_rust_type(&RefOr::T(false_arr), true).expect("false arr"),
+            "Vec<serde_json::Value>"
+        );
+
+        let one_of_schema = Schema::OneOf(utoipa::openapi::schema::OneOf::new());
+        assert_eq!(
+            map_schema_to_rust_type(&RefOr::T(one_of_schema), true).expect("oneof"),
+            "serde_json::Value"
+        );
     }
 }

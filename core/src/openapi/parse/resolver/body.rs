@@ -371,40 +371,32 @@ fn resolve_request_body_from_components(
     registry: Option<&DocumentRegistry>,
     base_uri: Option<&Url>,
 ) -> Option<ResolvedRequestBody> {
-    if let Some(components) = components {
-        let self_uri = components.self_uri.as_deref();
-        if let Some(ref_name) = extract_component_name(&r.ref_location, self_uri, "requestBodies") {
-            if let Some(body_json) = components
-                .extra
-                .get("requestBodies")
-                .and_then(|m| m.get(&ref_name))
-            {
-                if let Ok(body) = serde_json::from_value::<ShimRequestBody>(body_json.clone()) {
-                    return Some(ResolvedRequestBody {
-                        body,
-                        components: None,
-                        base_uri: None,
-                    });
-                }
-            }
-        }
+    if let Some(body) = components
+        .and_then(|c| {
+            let name =
+                extract_component_name(&r.ref_location, c.self_uri.as_deref(), "requestBodies")?;
+            c.extra.get("requestBodies")?.get(&name)
+        })
+        .and_then(|v| serde_json::from_value::<ShimRequestBody>(v.clone()).ok())
+    {
+        return Some(ResolvedRequestBody {
+            body,
+            components: None,
+            base_uri: None,
+        });
     }
 
-    if let Some(registry) = registry {
-        if let Some((raw, comps_override, base_override)) = registry
-            .resolve_component_ref_with_components(&r.ref_location, base_uri, "requestBodies")
-        {
-            if let Ok(body) = serde_json::from_value::<ShimRequestBody>(raw) {
-                return Some(ResolvedRequestBody {
-                    body,
-                    components: comps_override,
-                    base_uri: base_override,
-                });
-            }
-        }
-    }
-
-    None
+    let (raw, comps_override, base_override) = registry?.resolve_component_ref_with_components(
+        &r.ref_location,
+        base_uri,
+        "requestBodies",
+    )?;
+    let body = serde_json::from_value::<ShimRequestBody>(raw).ok()?;
+    Some(ResolvedRequestBody {
+        body,
+        components: comps_override,
+        base_uri: base_override,
+    })
 }
 
 /// Extracts a single example value for a media type, respecting OAS 3.2 example fields.
@@ -452,29 +444,28 @@ pub(crate) fn extract_media_example(
     None
 }
 
+fn extract_example_from_utoipa(example: &Example) -> Option<ExampleValue> {
+    let summary = (!example.summary.is_empty()).then(|| example.summary.clone());
+    let description = (!example.description.is_empty()).then(|| example.description.clone());
+    if let Some(val) = example.value.clone() {
+        return Some(ExampleValue::data_with_meta(val, summary, description));
+    }
+    if !example.external_value.is_empty() {
+        return Some(ExampleValue::external_with_meta(
+            json!(example.external_value.clone()),
+            summary,
+            description,
+        ));
+    }
+    None
+}
+
 fn extract_example_from_ref_or(
     example_ref: &RefOr<Example>,
     components: Option<&ShimComponents>,
 ) -> Option<ExampleValue> {
     match example_ref {
-        RefOr::T(example) => {
-            let summary = (!example.summary.is_empty()).then(|| example.summary.clone());
-            let description =
-                (!example.description.is_empty()).then(|| example.description.clone());
-            example
-                .value
-                .clone()
-                .map(|val| ExampleValue::data_with_meta(val, summary.clone(), description.clone()))
-                .or_else(|| {
-                    (!example.external_value.is_empty()).then(|| {
-                        ExampleValue::external_with_meta(
-                            json!(example.external_value.clone()),
-                            summary.clone(),
-                            description.clone(),
-                        )
-                    })
-                })
-        }
+        RefOr::T(example) => extract_example_from_utoipa(example),
         RefOr::Ref(r) => {
             let summary = (!r.summary.is_empty()).then(|| r.summary.clone());
             let description = (!r.description.is_empty()).then(|| r.description.clone());
@@ -580,21 +571,7 @@ fn resolve_example_from_components(
     let ref_name = extract_component_name(&r.ref_location, self_uri, "examples")?;
     let example_json = comps.extra.get("examples").and_then(|e| e.get(&ref_name))?;
     let example = serde_json::from_value::<Example>(example_json.clone()).ok()?;
-    let summary = (!example.summary.is_empty()).then(|| example.summary.clone());
-    let description = (!example.description.is_empty()).then(|| example.description.clone());
-    example
-        .value
-        .clone()
-        .map(|val| ExampleValue::data_with_meta(val, summary.clone(), description.clone()))
-        .or_else(|| {
-            (!example.external_value.is_empty()).then(|| {
-                ExampleValue::external_with_meta(
-                    json!(example.external_value.clone()),
-                    summary.clone(),
-                    description.clone(),
-                )
-            })
-        })
+    extract_example_from_utoipa(&example)
 }
 
 fn extract_schema_example(
@@ -608,29 +585,14 @@ fn extract_schema_example(
 }
 
 fn extract_example_from_schema(schema: &Schema) -> Option<serde_json::Value> {
-    match schema {
-        Schema::Object(obj) => obj
-            .example
-            .clone()
-            .or_else(|| obj.examples.first().cloned()),
-        Schema::Array(arr) => arr
-            .example
-            .clone()
-            .or_else(|| arr.examples.first().cloned()),
-        Schema::OneOf(one_of) => one_of
-            .example
-            .clone()
-            .or_else(|| one_of.examples.first().cloned()),
-        Schema::AnyOf(any_of) => any_of
-            .example
-            .clone()
-            .or_else(|| any_of.examples.first().cloned()),
-        Schema::AllOf(all_of) => all_of
-            .example
-            .clone()
-            .or_else(|| all_of.examples.first().cloned()),
-        _ => None,
-    }
+    let (example, examples) = match schema {
+        Schema::Object(obj) => (&obj.example, &obj.examples),
+        Schema::Array(arr) => (&arr.example, &arr.examples),
+        Schema::OneOf(one_of) => (&one_of.example, &one_of.examples),
+        Schema::AnyOf(any_of) => (&any_of.example, &any_of.examples),
+        _ => return None,
+    };
+    example.clone().or_else(|| examples.first().cloned())
 }
 
 fn resolve_schema_example_ref(
@@ -651,15 +613,8 @@ fn raw_media_for_type(
     base_uri: Option<&Url>,
 ) -> Option<serde_json::Value> {
     let media = raw_body.get("content")?.get(media_type)?;
-    resolve_media_type_ref(media, components, registry, base_uri, &mut HashSet::new()).or_else(
-        || {
-            if media.as_object().is_some() {
-                Some(media.clone())
-            } else {
-                None
-            }
-        },
-    )
+    resolve_media_type_ref(media, components, registry, base_uri, &mut HashSet::new())
+        .or_else(|| media.as_object().map(|_| media.clone()))
 }
 
 fn resolve_media_type_ref(
@@ -669,43 +624,31 @@ fn resolve_media_type_ref(
     base_uri: Option<&Url>,
     visiting: &mut HashSet<String>,
 ) -> Option<serde_json::Value> {
-    let obj = raw_media.as_object()?;
-    let ref_str = obj.get("$ref")?.as_str()?;
+    let ref_str = raw_media.as_object()?.get("$ref")?.as_str()?;
     if !visiting.insert(ref_str.to_string()) {
         return None;
     }
 
-    if let Some((comps, self_uri)) = components.map(|c| (c, c.self_uri.as_deref())) {
-        if let Some(name) = extract_component_name(ref_str, self_uri, "mediaTypes") {
-            if let Some(media_types) = comps.extra.get("mediaTypes").and_then(|v| v.as_object()) {
-                if let Some(resolved) = media_types.get(&name) {
-                    let value =
-                        resolve_media_type_ref(resolved, components, registry, base_uri, visiting)
-                            .unwrap_or_else(|| resolved.clone());
-                    visiting.remove(ref_str);
-                    return Some(value);
-                }
-            }
-        }
+    if let Some(resolved) = components.and_then(|c| {
+        let name = extract_component_name(ref_str, c.self_uri.as_deref(), "mediaTypes")?;
+        c.extra.get("mediaTypes")?.as_object()?.get(&name)
+    }) {
+        let value = resolve_media_type_ref(resolved, components, registry, base_uri, visiting)
+            .unwrap_or_else(|| resolved.clone());
+        visiting.remove(ref_str);
+        return Some(value);
     }
 
-    if let Some(registry) = registry {
-        if let Some((resolved, comps_override, base_override)) =
-            registry.resolve_component_ref_with_components(ref_str, base_uri, "mediaTypes")
-        {
-            let next_components = comps_override.as_ref().or(components);
-            let next_base = base_override.as_ref().or(base_uri);
-            let value = resolve_media_type_ref(
-                &resolved,
-                next_components,
-                Some(registry),
-                next_base,
-                visiting,
-            )
-            .unwrap_or_else(|| resolved.clone());
-            visiting.remove(ref_str);
-            return Some(value);
-        }
+    if let Some((resolved, comps_override, base_override)) = registry
+        .and_then(|r| r.resolve_component_ref_with_components(ref_str, base_uri, "mediaTypes"))
+    {
+        let next_components = comps_override.as_ref().or(components);
+        let next_base = base_override.as_ref().or(base_uri);
+        let value =
+            resolve_media_type_ref(&resolved, next_components, registry, next_base, visiting)
+                .unwrap_or_else(|| resolved.clone());
+        visiting.remove(ref_str);
+        return Some(value);
     }
 
     visiting.remove(ref_str);
@@ -784,8 +727,10 @@ fn parse_encoding_value(
 ) -> AppResult<EncodingInfo> {
     let mut normalized = value.clone();
     if let serde_json::Value::Object(obj) = &mut normalized {
-        obj.entry("headers".to_string())
-            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+        obj.insert(
+            "headers".to_string(),
+            serde_json::Value::Object(serde_json::Map::new()),
+        );
     }
     let enc = serde_json::from_value::<Encoding>(normalized).map_err(|e| {
         AppError::General(format!(
@@ -795,75 +740,51 @@ fn parse_encoding_value(
     })?;
 
     let mut info = encoding_to_info(&enc)?;
+    let obj = value.as_object().expect("Encoding must be an object");
 
-    if let Some(obj) = value.as_object() {
-        if let Some(headers_obj) = obj.get("headers").and_then(|h| h.as_object()) {
-            let mut resolved_headers = HashMap::new();
-            for (name, header_val) in headers_obj {
-                if name.eq_ignore_ascii_case("content-type") {
-                    continue;
-                }
-                if let Some(ty) =
-                    resolve_encoding_header_type(header_val, components, registry, base_uri)?
-                {
-                    resolved_headers.insert(name.clone(), ty);
-                }
+    if let Some(headers_obj) = obj.get("headers").and_then(|h| h.as_object()) {
+        let mut resolved_headers = HashMap::new();
+        for (name, header_val) in headers_obj {
+            if name.eq_ignore_ascii_case("content-type") {
+                continue;
             }
-            if !resolved_headers.is_empty() {
-                info.headers = resolved_headers;
-            }
+            let ty = resolve_encoding_header_type(header_val, components, registry, base_uri)?;
+            resolved_headers.insert(name.clone(), ty);
         }
+        if !resolved_headers.is_empty() {
+            info.headers = resolved_headers;
+        }
+    }
 
-        if let Some(nested) = obj.get("encoding").and_then(|v| v.as_object()) {
-            let mut nested_map = HashMap::new();
-            for (prop, enc_val) in nested {
-                nested_map.insert(
-                    prop.clone(),
-                    parse_encoding_value(enc_val, components, registry, base_uri)?,
-                );
-            }
-            if !nested_map.is_empty() {
-                info.encoding = Some(nested_map);
-            }
+    if let Some(nested) = obj.get("encoding").and_then(|v| v.as_object()) {
+        let mut nested_map = HashMap::new();
+        for (prop, enc_val) in nested {
+            nested_map.insert(
+                prop.clone(),
+                parse_encoding_value(enc_val, components, registry, base_uri)?,
+            );
         }
+        if !nested_map.is_empty() {
+            info.encoding = Some(nested_map);
+        }
+    }
 
-        if let Some(prefix_val) = obj.get("prefixEncoding").and_then(|v| v.as_array()) {
-            let mut parsed = Vec::new();
-            for item in prefix_val {
-                parsed.push(parse_encoding_value(item, components, registry, base_uri)?);
-            }
-            if !parsed.is_empty() {
-                info.prefix_encoding = Some(parsed);
-            }
+    if let Some(prefix_val) = obj.get("prefixEncoding").and_then(|v| v.as_array()) {
+        let mut parsed = Vec::new();
+        for item in prefix_val {
+            parsed.push(parse_encoding_value(item, components, registry, base_uri)?);
         }
+        if !parsed.is_empty() {
+            info.prefix_encoding = Some(parsed);
+        }
+    }
 
-        if let Some(item_val) = obj.get("itemEncoding") {
-            let parsed = parse_encoding_value(item_val, components, registry, base_uri)?;
-            info.item_encoding = Some(Box::new(parsed));
-        }
+    if let Some(item_val) = obj.get("itemEncoding") {
+        let parsed = parse_encoding_value(item_val, components, registry, base_uri)?;
+        info.item_encoding = Some(Box::new(parsed));
     }
 
     Ok(info)
-}
-
-/// Helper to extract encoding map (property -> EncodingInfo).
-fn extract_encoding_map(
-    encoding: &std::collections::BTreeMap<String, Encoding>,
-) -> AppResult<Option<HashMap<String, EncodingInfo>>> {
-    if encoding.is_empty() {
-        return Ok(None);
-    }
-
-    let mut map = HashMap::new();
-    for (prop, enc) in encoding {
-        map.insert(prop.clone(), encoding_to_info(enc)?);
-    }
-
-    if map.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(map))
-    }
 }
 
 fn extract_encoding_map_with_raw(
@@ -884,14 +805,19 @@ fn extract_encoding_map_with_raw(
                 parse_encoding_value(enc_val, components, registry, base_uri)?,
             );
         }
-        return if map.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(map))
-        };
+        return Ok((!map.is_empty()).then_some(map));
     }
 
-    extract_encoding_map(encoding)
+    if encoding.is_empty() {
+        return Ok(None);
+    }
+
+    let mut map = HashMap::new();
+    for (prop, enc) in encoding {
+        map.insert(prop.clone(), encoding_to_info(enc)?);
+    }
+
+    Ok(Some(map))
 }
 
 fn resolve_encoding_header_type(
@@ -899,7 +825,7 @@ fn resolve_encoding_header_type(
     components: Option<&ShimComponents>,
     registry: Option<&DocumentRegistry>,
     base_uri: Option<&Url>,
-) -> AppResult<Option<String>> {
+) -> AppResult<String> {
     let mut visited = HashSet::new();
     let resolved = resolve_header_value_for_encoding(
         header_val,
@@ -909,7 +835,7 @@ fn resolve_encoding_header_type(
         &mut visited,
     )?;
     let Some(obj) = resolved.as_object() else {
-        return Ok(None);
+        return Ok("String".to_string());
     };
 
     if let Some(schema_val) = obj.get("schema") {
@@ -919,12 +845,12 @@ fn resolve_encoding_header_type(
                     "Encoding header schema is 'false' and cannot be satisfied".to_string(),
                 ));
             }
-            return Ok(Some("String".to_string()));
+            return Ok("String".to_string());
         }
         let schema: RefOr<Schema> = serde_json::from_value(schema_val.clone()).map_err(|e| {
             AppError::General(format!("Failed to parse encoding header schema: {}", e))
         })?;
-        return Ok(Some(map_schema_to_rust_type(&schema, true)?));
+        return map_schema_to_rust_type(&schema, true);
     }
 
     if let Some(content_val) = obj.get("content") {
@@ -938,7 +864,7 @@ fn resolve_encoding_header_type(
                 "Encoding header content must define exactly one media type".to_string(),
             ));
         }
-        let (media_type, media_obj) = content_map.iter().next().expect("Failed to next");
+        let (media_type, media_obj) = content_map.iter().next().expect("checked len == 1");
         let resolved_media = resolve_media_type_ref(
             media_obj,
             components,
@@ -960,7 +886,7 @@ fn resolve_encoding_header_type(
                         e
                     ))
                 })?;
-            return Ok(Some(map_schema_to_rust_type(&schema, true)?));
+            return map_schema_to_rust_type(&schema, true);
         }
         if let Some(item_schema) = resolved_obj.get("itemSchema") {
             let schema: RefOr<Schema> =
@@ -973,13 +899,13 @@ fn resolve_encoding_header_type(
             } else {
                 inner
             };
-            return Ok(Some(ty));
+            return Ok(ty);
         }
 
-        return Ok(Some("String".to_string()));
+        return Ok("String".to_string());
     }
 
-    Ok(Some("String".to_string()))
+    Ok("String".to_string())
 }
 
 fn resolve_header_value_for_encoding(
@@ -989,11 +915,11 @@ fn resolve_header_value_for_encoding(
     base_uri: Option<&Url>,
     visited: &mut HashSet<String>,
 ) -> AppResult<serde_json::Value> {
-    let Some(obj) = value.as_object() else {
-        return Ok(value.clone());
-    };
-
-    let Some(ref_str) = obj.get("$ref").and_then(|v| v.as_str()) else {
+    let Some(ref_str) = value
+        .as_object()
+        .and_then(|obj| obj.get("$ref"))
+        .and_then(|v| v.as_str())
+    else {
         return Ok(value.clone());
     };
 
@@ -1004,39 +930,30 @@ fn resolve_header_value_for_encoding(
         )));
     }
 
-    if let Some((comps, self_uri)) = components.map(|c| (c, c.self_uri.as_deref())) {
-        if let Some(name) = extract_component_name(ref_str, self_uri, "headers") {
-            if let Some(resolved) = comps
-                .extra
-                .get("headers")
-                .and_then(|headers| headers.get(&name))
-                .cloned()
-            {
-                let result = resolve_header_value_for_encoding(
-                    &resolved, components, registry, base_uri, visited,
-                )?;
-                visited.remove(ref_str);
-                return Ok(result);
-            }
-        }
+    if let Some(resolved) = components.and_then(|c| {
+        let name = extract_component_name(ref_str, c.self_uri.as_deref(), "headers")?;
+        c.extra.get("headers")?.get(&name).cloned()
+    }) {
+        let result =
+            resolve_header_value_for_encoding(&resolved, components, registry, base_uri, visited)?;
+        visited.remove(ref_str);
+        return Ok(result);
     }
 
-    if let Some(registry) = registry {
-        if let Some((resolved, comps_override, base_override)) =
-            registry.resolve_component_ref_with_components(ref_str, base_uri, "headers")
-        {
-            let next_components = comps_override.as_ref().or(components);
-            let next_base = base_override.as_ref().or(base_uri);
-            let result = resolve_header_value_for_encoding(
-                &resolved,
-                next_components,
-                Some(registry),
-                next_base,
-                visited,
-            )?;
-            visited.remove(ref_str);
-            return Ok(result);
-        }
+    if let Some((resolved, comps_override, base_override)) =
+        registry.and_then(|r| r.resolve_component_ref_with_components(ref_str, base_uri, "headers"))
+    {
+        let next_components = comps_override.as_ref().or(components);
+        let next_base = base_override.as_ref().or(base_uri);
+        let result = resolve_header_value_for_encoding(
+            &resolved,
+            next_components,
+            registry,
+            next_base,
+            visited,
+        )?;
+        visited.remove(ref_str);
+        return Ok(result);
     }
 
     Err(AppError::General(format!(
@@ -2100,5 +2017,613 @@ components:
             def.example,
             Some(ExampleValue::data(json!({"filename": "demo.png"})))
         );
+
+        // Comprehensive tests for remaining branches in body.rs:
+        // 1. Unresolved Ref & empty content
+        let missing_ref = RefOr::Ref(Ref::new("#/components/requestBodies/Missing"));
+        assert!(extract_request_body_type(&missing_ref, Some(&components))
+            .expect("ok")
+            .is_none());
+        assert!(extract_request_body_raw(&missing_ref, None).is_none());
+        let inline_shim: ShimRequestBody = serde_json::from_value(json!({
+            "content": {}
+        }))
+        .expect("empty content");
+        assert!(extract_request_body_raw(&RefOr::T(inline_shim.clone()), None).is_some());
+        assert!(extract_request_body_raw(
+            &RefOr::Ref(Ref::new(
+                "https://example.com/openapi.yaml#/components/requestBodies/Missing"
+            )),
+            Some(&components)
+        )
+        .is_none());
+        assert!(extract_request_body_type(&RefOr::T(inline_shim), None)
+            .expect("ok")
+            .is_none());
+
+        // 2. itemSchema: false (required vs optional) & non-sequential itemSchema
+        let item_false_opt: ShimRequestBody = serde_json::from_value(json!({
+            "required": false,
+            "content": { "application/json": { "itemSchema": false } }
+        }))
+        .expect("item false opt");
+        assert!(extract_request_body_type(&RefOr::T(item_false_opt), None)
+            .expect("ok")
+            .is_none());
+        let item_false_req: ShimRequestBody = serde_json::from_value(json!({
+            "required": true,
+            "content": { "application/json": { "itemSchema": false } }
+        }))
+        .expect("item false req");
+        assert!(extract_request_body_type(&RefOr::T(item_false_req), None).is_err());
+
+        let item_non_seq: ShimRequestBody = serde_json::from_value(json!({
+            "content": { "application/json": { "itemSchema": { "type": "integer" } } }
+        }))
+        .expect("item non seq");
+        let def_non_seq = extract_request_body_type(&RefOr::T(item_non_seq), None)
+            .expect("ok")
+            .expect("some");
+        assert_eq!(def_non_seq.ty, "i32");
+
+        // 3. Fallback media types (*/*, custom/unknown, image/png, audio/mp3, video/mp4, application/pdf)
+        for mt in [
+            "*/*",
+            "custom/unknown",
+            "image/png",
+            "audio/mp3",
+            "video/mp4",
+            "application/pdf",
+        ] {
+            let s: ShimRequestBody = serde_json::from_value(json!({
+                "content": { mt: {} }
+            }))
+            .expect("mt");
+            let d = extract_request_body_type(&RefOr::T(s), None)
+                .expect("ok")
+                .expect("some");
+            assert_eq!(d.ty, "Vec<u8>");
+        }
+        assert_eq!(infer_binary_type("text/custom"), "String");
+        assert_eq!(
+            default_body_type(BodyFormat::Form, "application/x-www-form-urlencoded"),
+            "serde_json::Value"
+        );
+        assert_eq!(
+            default_body_type(BodyFormat::Multipart, "multipart/form-data"),
+            "Multipart"
+        );
+
+        // 4. Registry requestBody & mediaTypes resolution
+        let mut reg = DocumentRegistry::new();
+        reg.register_openapi_yaml(
+            "https://example.com/ext.yaml",
+            r#"
+openapi: 3.2.0
+info: { title: Ext, version: "1.0" }
+paths: {}
+components:
+  requestBodies:
+    ExtBody:
+      required: true
+      content:
+        application/json:
+          $ref: '#/components/mediaTypes/ExtMedia'
+  mediaTypes:
+    ExtMedia:
+      schema:
+        type: string
+  headers:
+    ExtHdr:
+      schema:
+        type: string
+"#,
+        )
+        .expect("reg");
+        let ext_ref = RefOr::Ref(Ref::new(
+            "https://example.com/ext.yaml#/components/requestBodies/ExtBody",
+        ));
+        let ext_media_body: ShimRequestBody = serde_json::from_value(json!({
+            "content": {
+                "application/json": {
+                    "$ref": "https://example.com/ext.yaml#/components/mediaTypes/ExtMedia"
+                }
+            }
+        }))
+        .expect("ext_media_body");
+        let ext_media_def = extract_request_body_type_with_registry(
+            &RefOr::T(ext_media_body),
+            None,
+            Some(&reg),
+            None,
+        )
+        .expect("ok")
+        .expect("some");
+        assert_eq!(ext_media_def.ty, "String");
+
+        let only_ct_enc = json!({
+            "headers": {
+                "Content-Type": { "schema": { "type": "string" } }
+            }
+        });
+        let parsed_only_ct = parse_encoding_value(&only_ct_enc, None, None, None).expect("only ct");
+        assert!(parsed_only_ct.headers.is_empty());
+
+        let _ = extract_positional_encoding(None, None, None, None).expect("none");
+        assert!(extract_request_body_raw_with_registry(&ext_ref, None, Some(&reg), None).is_some());
+
+        // Media type ref cycle & non-object media in raw
+        let mut cycle_comps = ShimComponents::default();
+        cycle_comps.extra.insert(
+            "mediaTypes".to_string(),
+            json!({
+                "CycleM": { "$ref": "#/components/mediaTypes/CycleM" }
+            }),
+        );
+        let cycle_body: ShimRequestBody = serde_json::from_value(json!({
+            "content": {
+                "application/json": { "$ref": "#/components/mediaTypes/CycleM" }
+            }
+        }))
+        .expect("cycle_body");
+        let _ = extract_request_body_type(&RefOr::T(cycle_body), Some(&cycle_comps)).expect("ok");
+        assert!(raw_media_for_type(
+            &json!({ "content": { "application/json": { "$ref": "#/components/mediaTypes/MissingM" } } }),
+            "application/json",
+            Some(&cycle_comps),
+            Some(&reg),
+            None
+        )
+        .is_some());
+        assert!(raw_media_for_type(
+            &json!({ "content": { "application/json": "not_an_obj" } }),
+            "application/json",
+            None,
+            None,
+            None
+        )
+        .is_none());
+
+        // 5. Examples: rawexample, cycle in examples ref, externalValue in raw, non-object/null in examples,
+        // utoipa Example with summary/description/none, Ref with summary/description override, Schema examples array (Object, Array, OneOf, AnyOf, AllOf, other)
+        let mut ex_comps = ShimComponents::default();
+        ex_comps.extra.insert(
+            "examples".to_string(),
+            json!({
+                "CycleEx": { "$ref": "#/components/examples/CycleEx" },
+                "ExtEx": {
+                    "summary": "S",
+                    "description": "D",
+                    "externalValue": "https://example.com/ex.json"
+                },
+                "ValEx": {
+                    "value": { "k": "v" }
+                },
+                "EmptyEx": {}
+            }),
+        );
+        ex_comps.extra.insert(
+            "schemas".to_string(),
+            json!({
+                "WithExamplesArr": {
+                    "examples": ["first_ex"]
+                },
+                "NotObjSchema": "bad"
+            }),
+        );
+        let raw_ex_body: ShimRequestBody = serde_json::from_value(json!({
+            "content": {
+                "application/json": {
+                    "example": "top_ex"
+                }
+            }
+        }))
+        .expect("raw_ex_body");
+        let d_ex = extract_request_body_type(&RefOr::T(raw_ex_body), None)
+            .expect("ok")
+            .expect("some");
+        assert_eq!(d_ex.example, Some(ExampleValue::data(json!("top_ex"))));
+
+        let mut vis = HashSet::new();
+        assert!(extract_example_value(&json!(null), None, "application/json", &mut vis).is_none());
+        assert_eq!(
+            extract_example_value(&json!("primitive_val"), None, "application/json", &mut vis),
+            Some(ExampleValue::data(json!("primitive_val")))
+        );
+        assert_eq!(
+            extract_example_value(
+                &json!({ "serializedValue": 123 }),
+                None,
+                "application/json",
+                &mut vis
+            ),
+            Some(ExampleValue::serialized(json!(123)))
+        );
+
+        let raw_examples_misc: ShimRequestBody = serde_json::from_value(json!({
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "a_cycle": { "$ref": "#/components/examples/CycleEx" },
+                        "b_empty_obj": {},
+                        "d_invalid_json_ser": { "serializedValue": "{bad json" }
+                    }
+                }
+            }
+        }))
+        .expect("misc");
+        let d_misc = extract_request_body_type(&RefOr::T(raw_examples_misc), Some(&ex_comps))
+            .expect("ok")
+            .expect("some");
+        assert_eq!(
+            d_misc.example,
+            Some(ExampleValue::serialized(json!("{bad json")))
+        );
+
+        let raw_ext_val: ShimRequestBody = serde_json::from_value(json!({
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "ext": { "externalValue": "https://example.com/a" }
+                    }
+                }
+            }
+        }))
+        .expect("ext");
+        let d_ext_val = extract_request_body_type(&RefOr::T(raw_ext_val), None)
+            .expect("ok")
+            .expect("some");
+        assert_eq!(
+            d_ext_val.example,
+            Some(ExampleValue::external(json!("https://example.com/a")))
+        );
+
+        // Typed media examples (when raw_body has no examples)
+        let mut r_override = Ref::new("#/components/examples/ExtEx");
+        r_override.summary = "SumOvr".to_string();
+        r_override.description = "DescOvr".to_string();
+        let typed_media = Content::builder()
+            .examples_from_iter([
+                (
+                    "empty",
+                    RefOr::T(utoipa::openapi::example::ExampleBuilder::new().build()),
+                ),
+                (
+                    "ext_inline",
+                    RefOr::T(
+                        utoipa::openapi::example::ExampleBuilder::new()
+                            .external_value("https://example.com/inline.json")
+                            .build(),
+                    ),
+                ),
+            ])
+            .build();
+        let _ = extract_media_example(
+            &typed_media,
+            Some(&ex_comps),
+            None,
+            None,
+            None,
+            "application/json",
+        );
+        let typed_media_ref_ovr = Content::builder()
+            .examples_from_iter([("ref_ext", RefOr::Ref(r_override))])
+            .build();
+        let _ = extract_media_example(
+            &typed_media_ref_ovr,
+            Some(&ex_comps),
+            None,
+            None,
+            None,
+            "application/json",
+        );
+        let typed_media_val = Content::builder()
+            .examples_from_iter([(
+                "with_meta",
+                RefOr::T(
+                    utoipa::openapi::example::ExampleBuilder::new()
+                        .summary("S")
+                        .description("D")
+                        .value(Some(json!(1)))
+                        .build(),
+                ),
+            )])
+            .build();
+        let _ = extract_media_example(
+            &typed_media_val,
+            Some(&ex_comps),
+            None,
+            None,
+            None,
+            "application/json",
+        );
+        let typed_media_ref_val = Content::builder()
+            .examples_from_iter([
+                (
+                    "empty_ref",
+                    RefOr::Ref(Ref::new("#/components/examples/EmptyEx")),
+                ),
+                (
+                    "val_ref",
+                    RefOr::Ref(Ref::new("#/components/examples/ValEx")),
+                ),
+            ])
+            .build();
+        let _ = extract_media_example(
+            &typed_media_ref_val,
+            Some(&ex_comps),
+            None,
+            None,
+            None,
+            "application/json",
+        );
+        let typed_media_ref_only = Content::builder()
+            .examples_from_iter([(
+                "ext_ref",
+                RefOr::Ref(Ref::new("#/components/examples/ExtEx")),
+            )])
+            .build();
+        let _ = extract_media_example(
+            &typed_media_ref_only,
+            Some(&ex_comps),
+            None,
+            None,
+            None,
+            "application/json",
+        );
+        #[allow(deprecated)]
+        let typed_media_top_ex = Content::builder().example(Some(json!("typed_top"))).build();
+        assert_eq!(
+            extract_media_example(
+                &typed_media_top_ex,
+                None,
+                None,
+                None,
+                None,
+                "application/json"
+            ),
+            Some(ExampleValue::data(json!("typed_top")))
+        );
+
+        // Schema example variants
+        for s in [
+            Schema::Object(
+                utoipa::openapi::schema::ObjectBuilder::new()
+                    .examples([json!("obj_ex")])
+                    .build(),
+            ),
+            Schema::Array(
+                utoipa::openapi::schema::ArrayBuilder::new()
+                    .examples([json!("arr_ex")])
+                    .build(),
+            ),
+            Schema::OneOf(
+                utoipa::openapi::schema::OneOfBuilder::new()
+                    .examples([json!("oneof_ex")])
+                    .build(),
+            ),
+            Schema::AnyOf(
+                utoipa::openapi::schema::AnyOfBuilder::new()
+                    .examples([json!("anyof_ex")])
+                    .build(),
+            ),
+            Schema::AllOf(
+                utoipa::openapi::schema::AllOfBuilder::new()
+                    .examples([json!("allof_ex")])
+                    .build(),
+            ),
+        ] {
+            let m = Content::builder().schema(Some(RefOr::T(s))).build();
+            let _ = extract_media_example(&m, None, None, None, None, "application/json");
+        }
+        let m_schema_ref = Content::builder()
+            .schema(Some(RefOr::Ref(Ref::new(
+                "#/components/schemas/WithExamplesArr",
+            ))))
+            .build();
+        assert_eq!(
+            extract_media_example(
+                &m_schema_ref,
+                Some(&ex_comps),
+                None,
+                None,
+                None,
+                "application/json"
+            ),
+            Some(ExampleValue::data(json!("first_ex")))
+        );
+        let m_schema_bad = Content::builder()
+            .schema(Some(RefOr::Ref(Ref::new(
+                "#/components/schemas/NotObjSchema",
+            ))))
+            .build();
+        assert!(extract_media_example(
+            &m_schema_bad,
+            Some(&ex_comps),
+            None,
+            None,
+            None,
+            "application/json"
+        )
+        .is_none());
+
+        // 6. Positional encoding & encoding headers edge cases
+        let conflict_prefix: ShimRequestBody = serde_json::from_value(json!({
+            "content": {
+                "multipart/mixed": {
+                    "encoding": { "a": { "contentType": "text/plain" } },
+                    "prefixEncoding": [{ "contentType": "text/plain" }]
+                }
+            }
+        }))
+        .expect("conflict_prefix");
+        assert!(extract_request_body_type(&RefOr::T(conflict_prefix), None).is_err());
+
+        let bad_prefix: ShimRequestBody = serde_json::from_value(json!({
+            "content": {
+                "multipart/mixed": {
+                    "prefixEncoding": "not_an_array"
+                }
+            }
+        }))
+        .expect("bad_prefix");
+        assert!(extract_request_body_type(&RefOr::T(bad_prefix), None).is_err());
+
+        let empty_prefix: ShimRequestBody = serde_json::from_value(json!({
+            "content": {
+                "multipart/mixed": {
+                    "prefixEncoding": [],
+                    "encoding": {}
+                }
+            }
+        }))
+        .expect("empty_prefix");
+        let _ = extract_request_body_type(&RefOr::T(empty_prefix), None).expect("ok");
+
+        assert!(parse_encoding_value(&json!("not_an_encoding"), None, None, None).is_err());
+
+        assert_eq!(
+            resolve_encoding_header_type(&json!("not_an_obj"), None, None, None).expect("ok"),
+            "String"
+        );
+        let enc_rich = json!({
+            "headers": {
+                "Content-Type": { "schema": { "type": "string" } },
+                "X-Bool-True": { "schema": true },
+                "X-No-Schema-Or-Content": {},
+                "X-Content-Schema": {
+                    "content": {
+                        "application/json": { "schema": { "type": "integer", "format": "int32" } }
+                    }
+                },
+                "X-Content-Item-Seq": {
+                    "content": {
+                        "application/jsonl": { "itemSchema": { "type": "string" } }
+                    }
+                },
+                "X-Content-Item-NonSeq": {
+                    "content": {
+                        "application/json": { "itemSchema": { "type": "string" } }
+                    }
+                },
+                "X-Content-Empty": {
+                    "content": {
+                        "text/plain": {}
+                    }
+                },
+                "X-Ext-Hdr": {
+                    "$ref": "https://example.com/ext.yaml#/components/headers/ExtHdr"
+                }
+            },
+            "encoding": {},
+            "prefixEncoding": []
+        });
+        let parsed_enc =
+            parse_encoding_value(&enc_rich, None, Some(&reg), None).expect("parsed_enc");
+        assert_eq!(
+            parsed_enc.headers.get("X-Bool-True").map(String::as_str),
+            Some("String")
+        );
+        assert_eq!(
+            parsed_enc
+                .headers
+                .get("X-Content-Schema")
+                .map(String::as_str),
+            Some("i32")
+        );
+        assert_eq!(
+            parsed_enc
+                .headers
+                .get("X-Content-Item-Seq")
+                .map(String::as_str),
+            Some("Vec<String>")
+        );
+        assert_eq!(
+            parsed_enc
+                .headers
+                .get("X-Content-Item-NonSeq")
+                .map(String::as_str),
+            Some("String")
+        );
+        assert_eq!(
+            parsed_enc
+                .headers
+                .get("X-Content-Empty")
+                .map(String::as_str),
+            Some("String")
+        );
+        assert_eq!(
+            parsed_enc.headers.get("X-Ext-Hdr").map(String::as_str),
+            Some("String")
+        );
+
+        let mut hdr_cycle_comps = ShimComponents::default();
+        hdr_cycle_comps.extra.insert(
+            "headers".to_string(),
+            json!({
+                "CycleH": { "$ref": "#/components/headers/CycleH" },
+                "LocalH": { "schema": { "type": "string" } }
+            }),
+        );
+        assert_eq!(
+            resolve_encoding_header_type(
+                &json!({ "$ref": "#/components/headers/LocalH" }),
+                Some(&hdr_cycle_comps),
+                None,
+                None
+            )
+            .expect("local hdr"),
+            "String"
+        );
+        let mut typed_enc_map = BTreeMap::new();
+        typed_enc_map.insert(
+            "part".to_string(),
+            EncodingBuilder::new()
+                .header(
+                    "Content-Type",
+                    HeaderBuilder::new()
+                        .schema(RefOr::Ref(Ref::new("#/components/schemas/String")))
+                        .build(),
+                )
+                .header(
+                    "X-Custom",
+                    HeaderBuilder::new()
+                        .schema(RefOr::Ref(Ref::new("#/components/schemas/Uuid")))
+                        .build(),
+                )
+                .build(),
+        );
+        let _ =
+            extract_encoding_map_with_raw(&typed_enc_map, None, None, None, None).expect("typed");
+        let _ =
+            extract_encoding_map_with_raw(&BTreeMap::new(), None, None, None, None).expect("empty");
+        for bad_hdr in [
+            json!({ "schema": false }),
+            json!({ "schema": 123 }),
+            json!({ "content": "not_an_obj" }),
+            json!({ "content": {} }),
+            json!({ "content": { "application/json": "not_an_obj" } }),
+            json!({ "content": { "application/json": { "schema": 123 } } }),
+            json!({ "content": { "application/json": { "itemSchema": 123 } } }),
+            json!({ "$ref": "#/components/headers/CycleH" }),
+            json!({ "$ref": "#/components/headers/MissingH" }),
+        ] {
+            assert!(
+                resolve_encoding_header_type(&bad_hdr, Some(&hdr_cycle_comps), None, None).is_err()
+            );
+        }
+
+        for style in [
+            Some(ParameterStyle::Matrix),
+            Some(ParameterStyle::Label),
+            Some(ParameterStyle::Form),
+            Some(ParameterStyle::Simple),
+            Some(ParameterStyle::SpaceDelimited),
+            Some(ParameterStyle::PipeDelimited),
+            Some(ParameterStyle::DeepObject),
+            None,
+        ] {
+            let _ = map_param_style(style.as_ref());
+        }
     }
 }

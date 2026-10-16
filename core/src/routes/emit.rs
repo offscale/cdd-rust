@@ -386,5 +386,21 @@ pub fn config(cfg: &mut web::ServiceConfig) {
         let strategy = ActixStrategy;
         let res = register_routes("fn other() {}", "mod", &[], &strategy);
         assert!(res.is_err());
+
+        let no_body = register_routes(
+            "extern \"C\" { fn config(cfg: &mut web::ServiceConfig); }",
+            "mod",
+            &[],
+            &strategy,
+        );
+        assert!(no_body.is_err());
+
+        let unclosed = register_routes(
+            "pub fn config(cfg: &mut web::ServiceConfig) {",
+            "mod",
+            &[],
+            &strategy,
+        );
+        assert!(unclosed.is_err());
     }
 }

@@ -136,13 +136,12 @@ fn multipart_body_setup(body: &crate::openapi::parse::RequestBodyDefinition) -> 
             );
         }
 
-        if let Some(payload) = build_multipart_payload(body, boundary) {
-            let payload_lit = rust_string_literal(&payload);
-            return format!(
-                "        .insert_header((\"Content-Type\", \"{}\"))\n        .set_payload({})\n",
-                content_type, payload_lit
-            );
-        }
+        let payload = build_multipart_payload(&example.value, body, boundary);
+        let payload_lit = rust_string_literal(&payload);
+        return format!(
+            "        .insert_header((\"Content-Type\", \"{}\"))\n        .set_payload({})\n",
+            content_type, payload_lit
+        );
     }
 
     let payload = build_multipart_fallback_payload(body, boundary);
@@ -154,25 +153,21 @@ fn multipart_body_setup(body: &crate::openapi::parse::RequestBodyDefinition) -> 
 }
 
 fn build_multipart_payload(
+    value: &serde_json::Value,
     body: &crate::openapi::parse::RequestBodyDefinition,
     boundary: &str,
-) -> Option<String> {
-    let example = body.example.as_ref()?;
-    let value = &example.value;
-
+) -> String {
     match value {
-        serde_json::Value::Object(map) => Some(render_named_multipart(
-            map,
-            body.encoding.as_ref(),
-            boundary,
-        )),
-        serde_json::Value::Array(items) => Some(render_positional_multipart(
+        serde_json::Value::Object(map) => {
+            render_named_multipart(map, body.encoding.as_ref(), boundary)
+        }
+        serde_json::Value::Array(items) => render_positional_multipart(
             items,
             body.prefix_encoding.as_ref(),
             body.item_encoding.as_ref(),
             boundary,
-        )),
-        _ => Some(render_single_part("payload", value, boundary, None)),
+        ),
+        _ => render_single_part("payload", value, boundary, None),
     }
 }
 
@@ -267,7 +262,7 @@ fn render_named_multipart(
         append_multipart_part(
             &mut payload,
             boundary,
-            Some(name),
+            name,
             content_type.as_deref(),
             enc.map(|e| &e.headers),
             value,
@@ -292,7 +287,7 @@ fn render_positional_multipart(
         append_multipart_part(
             &mut payload,
             boundary,
-            Some(&name),
+            &name,
             content_type.as_deref(),
             enc.map(|e| &e.headers),
             value,
@@ -308,38 +303,27 @@ fn render_single_part(
     content_type: Option<&str>,
 ) -> String {
     let mut payload = String::new();
-    append_multipart_part(
-        &mut payload,
-        boundary,
-        Some(name),
-        content_type,
-        None,
-        value,
-    );
+    append_multipart_part(&mut payload, boundary, name, content_type, None, value);
     finalize_multipart_payload(payload, boundary)
 }
 
 fn append_multipart_part(
     out: &mut String,
     boundary: &str,
-    name: Option<&str>,
+    name: &str,
     content_type: Option<&str>,
     headers: Option<&std::collections::HashMap<String, String>>,
     value: &serde_json::Value,
 ) {
-    let inferred = content_type.or_else(|| infer_multipart_content_type(value));
+    let inferred = content_type.unwrap_or_else(|| infer_multipart_content_type(value));
     let body = serialize_multipart_value(value, inferred);
 
     out.push_str(&format!("--{}\r\n", boundary));
-    if let Some(n) = name {
-        out.push_str(&format!(
-            "Content-Disposition: form-data; name=\"{}\"\r\n",
-            n
-        ));
-    }
-    if let Some(ct) = inferred {
-        out.push_str(&format!("Content-Type: {}\r\n", ct));
-    }
+    out.push_str(&format!(
+        "Content-Disposition: form-data; name=\"{}\"\r\n",
+        name
+    ));
+    out.push_str(&format!("Content-Type: {}\r\n", inferred));
     append_multipart_headers(out, headers);
     out.push_str("\r\n");
     out.push_str(&body);
@@ -354,13 +338,12 @@ fn append_multipart_headers(
         return;
     };
 
-    let mut names = headers.keys().collect::<Vec<_>>();
-    names.sort();
-    for name in names {
+    let mut entries = headers.iter().collect::<Vec<_>>();
+    entries.sort_by_key(|(k, _)| *k);
+    for (name, ty) in entries {
         if name.eq_ignore_ascii_case("content-type") {
             continue;
         }
-        let ty = headers.get(name).map(|s| s.as_str()).unwrap_or("String");
         let value = header_value_for_type(ty);
         out.push_str(&format!("{}: {}\r\n", name, value));
     }
@@ -385,21 +368,18 @@ fn finalize_multipart_payload(mut payload: String, boundary: &str) -> String {
     payload
 }
 
-fn infer_multipart_content_type(value: &serde_json::Value) -> Option<&'static str> {
+fn infer_multipart_content_type(value: &serde_json::Value) -> &'static str {
     match value {
-        serde_json::Value::Object(_) | serde_json::Value::Array(_) => Some("application/json"),
+        serde_json::Value::Object(_) | serde_json::Value::Array(_) => "application/json",
         serde_json::Value::String(_)
         | serde_json::Value::Number(_)
         | serde_json::Value::Bool(_)
-        | serde_json::Value::Null => Some("text/plain"),
+        | serde_json::Value::Null => "text/plain",
     }
 }
 
-fn serialize_multipart_value(value: &serde_json::Value, content_type: Option<&str>) -> String {
-    if content_type
-        .map(|ct| ct.to_ascii_lowercase().contains("json"))
-        .unwrap_or(false)
-    {
+fn serialize_multipart_value(value: &serde_json::Value, content_type: &str) -> String {
+    if content_type.to_ascii_lowercase().contains("json") {
         return value.to_string();
     }
 
@@ -413,7 +393,7 @@ fn serialize_multipart_value(value: &serde_json::Value, content_type: Option<&st
 }
 
 fn first_content_type(value: &str) -> Option<String> {
-    let ct = value.split(',').next()?.trim();
+    let ct = value.split(',').next().unwrap_or(value).trim();
     if ct.is_empty() {
         None
     } else {
@@ -474,7 +454,7 @@ fn json_payload_for_media_type(media_type: &str) -> String {
 }
 
 fn json_value_expr(value: &serde_json::Value) -> String {
-    let serialized = serde_json::to_string(value).unwrap_or_else(|_| "null".to_string());
+    let serialized = value.to_string();
     let literal = rust_string_literal(&serialized);
     format!(
         "serde_json::from_str::<serde_json::Value>({}).expect(\"expected value\")",
@@ -483,18 +463,12 @@ fn json_value_expr(value: &serde_json::Value) -> String {
 }
 
 fn json_string_expr(value: &serde_json::Value) -> String {
-    let serialized = serde_json::to_string(value).unwrap_or_else(|_| "null".to_string());
+    let serialized = value.to_string();
     rust_string_literal(&serialized)
 }
 
 fn text_string_expr(value: &serde_json::Value) -> String {
-    let payload = match value {
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Null => "null".to_string(),
-        _ => value.to_string(),
-    };
+    let payload = example_to_string(value);
     rust_string_literal(&payload)
 }
 
@@ -2128,5 +2102,502 @@ mod tests {
         assert!(helper.contains("set-cookie"));
         assert!(helper.contains("schema_type_hint"));
         assert!(helper.contains("resolve_response_ref"));
+
+        // Cover json_body_setup non-application/json with example and without example (sequential and non-sequential)
+        let json_custom_ex = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
+            ty: "Payload".into(),
+            description: None,
+            media_type: "application/vnd.api+json".into(),
+            format: crate::openapi::parse::BodyFormat::Json,
+            required: true,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: None,
+            example: Some(ExampleValue::data(serde_json::json!({"id": 1}))),
+        });
+        assert!(json_custom_ex.contains("application/vnd.api+json"));
+
+        for mt in [
+            "application/jsonl",
+            "application/x-ndjson",
+            "application/json-seq",
+            "application/geo+json-seq",
+            "application/vnd.custom+jsonl",
+            "application/vnd.custom+ndjson",
+            "application/vnd.custom+json-seq",
+            "application/vnd.api+json",
+        ] {
+            let b = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
+                ty: "Payload".into(),
+                description: None,
+                media_type: mt.into(),
+                format: crate::openapi::parse::BodyFormat::Json,
+                required: true,
+                encoding: None,
+                prefix_encoding: None,
+                item_encoding: None,
+                example: None,
+            });
+            assert!(b.contains(mt));
+        }
+
+        // Cover form_body_setup: serialized example, non-object example, non-urlencoded media type
+        let form_ser = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
+            ty: "Form".into(),
+            description: None,
+            media_type: "application/x-www-form-urlencoded".into(),
+            format: crate::openapi::parse::BodyFormat::Form,
+            required: true,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: None,
+            example: Some(ExampleValue::serialized(serde_json::json!("k=v"))),
+        });
+        assert!(form_ser.contains("k=v"));
+
+        let form_non_obj = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
+            ty: "Form".into(),
+            description: None,
+            media_type: "application/x-www-form-urlencoded".into(),
+            format: crate::openapi::parse::BodyFormat::Form,
+            required: true,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: None,
+            example: Some(ExampleValue::data(serde_json::json!("raw"))),
+        });
+        assert!(form_non_obj.contains(".set_form("));
+
+        let form_other_mt_ex =
+            test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
+                ty: "Form".into(),
+                description: None,
+                media_type: "application/custom-form".into(),
+                format: crate::openapi::parse::BodyFormat::Form,
+                required: true,
+                encoding: None,
+                prefix_encoding: None,
+                item_encoding: None,
+                example: Some(ExampleValue::data(serde_json::json!({"k": "v"}))),
+            });
+        assert!(form_other_mt_ex.contains(".set_form("));
+
+        let form_other_mt_def =
+            test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
+                ty: "Form".into(),
+                description: None,
+                media_type: "application/custom-form".into(),
+                format: crate::openapi::parse::BodyFormat::Form,
+                required: true,
+                encoding: None,
+                prefix_encoding: None,
+                item_encoding: None,
+                example: None,
+            });
+        assert!(form_other_mt_def.contains("dummy=value"));
+
+        // Cover multipart_body_setup: empty media_type, media_type with boundary=, array example, primitive example,
+        // fallback with empty encoding, prefix_encoding + item_encoding, empty prefix_encoding, single part fallback,
+        // and all header types + value types
+        let mut hdrs = HashMap::new();
+        hdrs.insert("X-Int".to_string(), "i32".to_string());
+        hdrs.insert("X-I64".to_string(), "i64".to_string());
+        hdrs.insert("X-Integer".to_string(), "Integer".to_string());
+        hdrs.insert("X-Bool".to_string(), "bool".to_string());
+        hdrs.insert("X-Boolean".to_string(), "Boolean".to_string());
+        hdrs.insert("X-Date".to_string(), "NaiveDate".to_string());
+        hdrs.insert("X-Str".to_string(), "String".to_string());
+
+        let enc_item = EncodingInfo {
+            content_type: Some(" , ".to_string()),
+            headers: hdrs,
+            style: None,
+            explode: None,
+            allow_reserved: None,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: None,
+        };
+        let enc_prefix = EncodingInfo {
+            content_type: Some("text/plain, text/html".to_string()),
+            headers: HashMap::new(),
+            style: None,
+            explode: None,
+            allow_reserved: None,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: None,
+        };
+
+        let mp_arr = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
+            ty: "Upload".into(),
+            description: None,
+            media_type: "multipart/mixed; boundary=custom".into(),
+            format: crate::openapi::parse::BodyFormat::Multipart,
+            required: true,
+            encoding: None,
+            prefix_encoding: Some(vec![enc_prefix.clone()]),
+            item_encoding: Some(enc_item.clone()),
+            example: Some(ExampleValue::data(serde_json::json!([
+                123,
+                true,
+                null,
+                {"obj": 1}
+            ]))),
+        });
+        assert!(mp_arr.contains("boundary=custom"));
+
+        let mp_prim = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
+            ty: "Upload".into(),
+            description: None,
+            media_type: "".into(),
+            format: crate::openapi::parse::BodyFormat::Multipart,
+            required: true,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: None,
+            example: Some(ExampleValue::data(serde_json::json!("prim"))),
+        });
+        assert!(mp_prim.contains("multipart/form-data; boundary=boundary"));
+
+        let mp_fb_pos = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
+            ty: "Upload".into(),
+            description: None,
+            media_type: "multipart/mixed".into(),
+            format: crate::openapi::parse::BodyFormat::Multipart,
+            required: true,
+            encoding: Some(HashMap::new()),
+            prefix_encoding: Some(vec![enc_prefix]),
+            item_encoding: Some(enc_item.clone()),
+            example: None,
+        });
+        assert!(mp_fb_pos.contains("part0"));
+        assert!(mp_fb_pos.contains("part1"));
+
+        let mp_fb_item_only = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
+            ty: "Upload".into(),
+            description: None,
+            media_type: "multipart/mixed".into(),
+            format: crate::openapi::parse::BodyFormat::Multipart,
+            required: true,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: Some(enc_item),
+            example: None,
+        });
+        assert!(mp_fb_item_only.contains("part0"));
+
+        let mp_fb_empty_prefix =
+            test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
+                ty: "Upload".into(),
+                description: None,
+                media_type: "multipart/mixed".into(),
+                format: crate::openapi::parse::BodyFormat::Multipart,
+                required: true,
+                encoding: None,
+                prefix_encoding: Some(vec![]),
+                item_encoding: None,
+                example: None,
+            });
+        assert!(mp_fb_empty_prefix.contains("part0"));
+
+        let mp_fb_single = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
+            ty: "Upload".into(),
+            description: None,
+            media_type: "multipart/form-data".into(),
+            format: crate::openapi::parse::BodyFormat::Multipart,
+            required: true,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: None,
+            example: None,
+        });
+        assert!(mp_fb_single.contains("name=\\\"payload\\\""));
+
+        // Cover serialize_multipart_value non-json object/array branch
+        let mut custom_enc = HashMap::new();
+        custom_enc.insert(
+            "raw_obj".to_string(),
+            EncodingInfo {
+                content_type: Some("text/plain".to_string()),
+                headers: HashMap::new(),
+                style: None,
+                explode: None,
+                allow_reserved: None,
+                encoding: None,
+                prefix_encoding: None,
+                item_encoding: None,
+            },
+        );
+        let mp_obj_as_text = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
+            ty: "Upload".into(),
+            description: None,
+            media_type: "multipart/form-data".into(),
+            format: crate::openapi::parse::BodyFormat::Multipart,
+            required: true,
+            encoding: Some(custom_enc),
+            prefix_encoding: None,
+            item_encoding: None,
+            example: Some(ExampleValue::data(serde_json::json!({
+                "raw_obj": {"k": "v"}
+            }))),
+        });
+        assert!(mp_obj_as_text.contains("raw_obj"));
+
+        // Cover text_body_setup and binary_body_setup edge cases
+        for ex in [
+            Some(ExampleValue::serialized(serde_json::json!("ser_txt"))),
+            Some(ExampleValue::data(serde_json::json!("plain_txt"))),
+            Some(ExampleValue::data(serde_json::json!(42))),
+            Some(ExampleValue::data(serde_json::json!(false))),
+            Some(ExampleValue::data(serde_json::Value::Null)),
+            Some(ExampleValue::data(serde_json::json!({"a": 1}))),
+        ] {
+            let tb = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
+                ty: "String".into(),
+                description: None,
+                media_type: "".into(),
+                format: crate::openapi::parse::BodyFormat::Text,
+                required: true,
+                encoding: None,
+                prefix_encoding: None,
+                item_encoding: None,
+                example: ex,
+            });
+            assert!(tb.contains("text/plain"));
+        }
+
+        let bin_ser = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
+            ty: "Vec<u8>".into(),
+            description: None,
+            media_type: "".into(),
+            format: crate::openapi::parse::BodyFormat::Binary,
+            required: true,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: None,
+            example: Some(ExampleValue::serialized(serde_json::json!("raw_bin"))),
+        });
+        assert!(bin_ser.contains("application/octet-stream"));
+        assert!(bin_ser.contains("raw_bin"));
+
+        let bin_non_ser = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
+            ty: "Vec<u8>".into(),
+            description: None,
+            media_type: "application/octet-stream".into(),
+            format: crate::openapi::parse::BodyFormat::Binary,
+            required: true,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: None,
+            example: Some(ExampleValue::data(serde_json::json!("ignored"))),
+        });
+        assert!(bin_non_ser.contains("vec![0u8"));
+
+        // Cover form array & object styles, empty array/object, and all reserved characters
+        let mut form_enc = HashMap::new();
+        for (name, style, explode, allow_res, ct) in [
+            (
+                "arr_space",
+                Some(ParamStyle::SpaceDelimited),
+                Some(false),
+                Some(false),
+                None,
+            ),
+            (
+                "arr_pipe",
+                Some(ParamStyle::PipeDelimited),
+                Some(false),
+                Some(false),
+                None,
+            ),
+            (
+                "arr_form_exp",
+                Some(ParamStyle::Form),
+                Some(true),
+                Some(false),
+                None,
+            ),
+            (
+                "arr_form_noexp",
+                Some(ParamStyle::Form),
+                Some(false),
+                Some(false),
+                None,
+            ),
+            ("arr_empty", Some(ParamStyle::Form), None, None, None),
+            (
+                "obj_deep",
+                Some(ParamStyle::DeepObject),
+                Some(true),
+                Some(false),
+                None,
+            ),
+            (
+                "obj_space",
+                Some(ParamStyle::SpaceDelimited),
+                Some(false),
+                Some(false),
+                None,
+            ),
+            (
+                "obj_pipe",
+                Some(ParamStyle::PipeDelimited),
+                Some(false),
+                Some(false),
+                None,
+            ),
+            (
+                "obj_form_exp",
+                Some(ParamStyle::Form),
+                Some(true),
+                Some(false),
+                None,
+            ),
+            (
+                "obj_form_noexp",
+                Some(ParamStyle::Form),
+                Some(false),
+                Some(false),
+                None,
+            ),
+            ("obj_empty", Some(ParamStyle::Form), None, None, None),
+            (
+                "res_all",
+                Some(ParamStyle::Form),
+                Some(true),
+                Some(true),
+                None,
+            ),
+            (
+                "json_wildcard",
+                None,
+                None,
+                None,
+                Some("application/*+json".to_string()),
+            ),
+            (
+                "json_suffix",
+                None,
+                None,
+                None,
+                Some("application/vnd.test+json".to_string()),
+            ),
+            (
+                "json_seq",
+                None,
+                None,
+                None,
+                Some("application/jsonl".to_string()),
+            ),
+        ] {
+            form_enc.insert(
+                name.to_string(),
+                EncodingInfo {
+                    content_type: ct,
+                    headers: HashMap::new(),
+                    style,
+                    explode,
+                    allow_reserved: allow_res,
+                    encoding: None,
+                    prefix_encoding: None,
+                    item_encoding: None,
+                },
+            );
+        }
+
+        let form_styles = test_body_setup_code(&crate::openapi::parse::RequestBodyDefinition {
+            ty: "Form".into(),
+            description: None,
+            media_type: "application/x-www-form-urlencoded".into(),
+            format: crate::openapi::parse::BodyFormat::Form,
+            required: true,
+            encoding: Some(form_enc),
+            prefix_encoding: None,
+            item_encoding: None,
+            example: Some(ExampleValue::data(serde_json::json!({
+                "arr_space": ["a", "b"],
+                "arr_pipe": ["a", "b"],
+                "arr_form_exp": ["a", "b"],
+                "arr_form_noexp": ["a", "b"],
+                "arr_empty": [],
+                "obj_deep": {"k": "v"},
+                "obj_space": {"k": "v"},
+                "obj_pipe": {"k": "v"},
+                "obj_form_exp": {"k": "v"},
+                "obj_form_noexp": {"k": "v"},
+                "obj_empty": {},
+                "res_all": ":/?#[]@!$&'()*+,;=%",
+                "json_wildcard": {"x": 1},
+                "json_suffix": {"x": 1},
+                "json_seq": {"x": 1}
+            }))),
+        });
+        assert!(form_styles.contains("arr_space=a%20b"));
+        assert!(form_styles.contains("arr_pipe=a%7Cb"));
+        assert!(form_styles.contains("arr_form_exp=a&arr_form_exp=b"));
+        assert!(form_styles.contains("arr_form_noexp=a,b"));
+        assert!(form_styles.contains("obj_deep%5Bk%5D=v"));
+        assert!(form_styles.contains("obj_space=k%20v"));
+        assert!(form_styles.contains("obj_pipe=k%7Cv"));
+        assert!(form_styles.contains("k=v"));
+        assert!(form_styles.contains("obj_form_noexp=k,v"));
+
+        // Cover handler_unit_test methods and unclosed brace + non-path param
+        for method in ["GET", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "CUSTOM"] {
+            let route = crate::openapi::parse::ParsedRoute {
+                method: method.into(),
+                handler_name: "h".into(),
+                path: "/items/{id}/{unclosed".into(),
+                summary: None,
+                description: None,
+                path_summary: None,
+                path_description: None,
+                path_extensions: std::collections::BTreeMap::new(),
+                operation_summary: None,
+                operation_description: None,
+                base_path: None,
+                path_servers: None,
+                servers_override: None,
+                operation_id: None,
+                params: vec![crate::openapi::parse::RouteParam {
+                    name: "q".into(),
+                    description: None,
+                    source: crate::openapi::parse::ParamSource::Query,
+                    ty: "String".into(),
+                    content_media_type: None,
+                    style: None,
+                    explode: false,
+                    deprecated: false,
+                    allow_empty_value: false,
+                    allow_reserved: false,
+                    example: None,
+                    raw_schema: None,
+                    extensions: std::collections::BTreeMap::new(),
+                }],
+                path_params: vec![],
+                request_body: None,
+                security: vec![],
+                security_defined: false,
+                response_type: None,
+                response_status: None,
+                response_summary: None,
+                response_description: None,
+                response_media_type: None,
+                response_example: None,
+                response_headers: vec![],
+                response_links: None,
+                kind: crate::openapi::parse::models::RouteKind::Path,
+                callbacks: vec![],
+                deprecated: false,
+                external_docs: None,
+                raw_request_body: None,
+                raw_responses: None,
+                tags: vec![],
+                extensions: std::collections::BTreeMap::new(),
+            };
+            let gen = handler_unit_test(&route);
+            assert!(gen.contains("/items/0/{unclosed"));
+        }
     }
 }

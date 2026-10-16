@@ -151,7 +151,7 @@ pub fn bytes_extractor(_body_type: &str) -> String {
 /// The Axum `Extension<...>` security extractor string.
 pub fn security_extractor(requirements: &[SecurityRequirementGroup]) -> String {
     if requirements.is_empty() {
-        return "Extension<AuthUser>".to_string();
+        return String::new();
     }
 
     let is_optional = requirements
@@ -166,10 +166,8 @@ pub fn security_extractor(requirements: &[SecurityRequirementGroup]) -> String {
                 .filter(|s| !s.is_empty())
                 .map(|part| {
                     let mut chars = part.chars();
-                    match chars.next() {
-                        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-                        None => String::new(),
-                    }
+                    let first = chars.next().into_iter().flat_map(char::to_uppercase);
+                    first.chain(chars).collect::<String>()
                 })
                 .collect::<String>();
             if !pascal.is_empty() && !scheme_names.contains(&pascal) {
@@ -185,9 +183,9 @@ pub fn security_extractor(requirements: &[SecurityRequirementGroup]) -> String {
     };
 
     if is_optional {
-        format!("Option<Extension<{}>>", principal)
+        format!("auth: Option<Extension<{}>>", principal)
     } else {
-        format!("Extension<{}>", principal)
+        format!("auth: Extension<{}>", principal)
     }
 }
 
@@ -210,32 +208,48 @@ mod tests {
         assert_eq!(header_extractor(""), "axum::http::HeaderMap");
         assert_eq!(header_extractor("HeaderMap"), "axum::http::HeaderMap");
         assert_eq!(
+            header_extractor("axum::http::HeaderMap"),
+            "axum::http::HeaderMap"
+        );
+        assert_eq!(
             header_extractor("String"),
             "axum_extra::TypedHeader<String>"
         );
 
-        assert_eq!(security_extractor(&[]), "Extension<AuthUser>");
+        assert_eq!(security_extractor(&[]), "");
 
         let req_group = SecurityRequirementGroup {
-            schemes: vec![SecurityRequirement {
-                scheme_name: "api_key".to_string(),
-                scopes: vec![],
-                scheme: None,
-            }],
+            schemes: vec![
+                SecurityRequirement {
+                    scheme_name: "api_key".to_string(),
+                    scopes: vec![],
+                    scheme: None,
+                },
+                SecurityRequirement {
+                    scheme_name: "api-key".to_string(),
+                    scopes: vec![],
+                    scheme: None,
+                },
+                SecurityRequirement {
+                    scheme_name: "---".to_string(),
+                    scopes: vec![],
+                    scheme: None,
+                },
+            ],
         };
         assert_eq!(
             security_extractor(std::slice::from_ref(&req_group)),
-            "Extension<ApiKey>"
+            "auth: Extension<ApiKey>"
         );
 
         let anon_group = SecurityRequirementGroup { schemes: vec![] };
         assert_eq!(
             security_extractor(&[req_group, anon_group]),
-            "Option<Extension<ApiKey>>"
+            "auth: Option<Extension<ApiKey>>"
         );
         assert_eq!(
             security_extractor(&[SecurityRequirementGroup { schemes: vec![] }]),
-            "Option<Extension<AuthUser>>"
+            "auth: Option<Extension<AuthUser>>"
         );
     }
 

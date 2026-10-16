@@ -115,6 +115,10 @@ mod tests {
         assert_eq!(bytes_extractor("Vec<u8>"), "Vec<u8>");
         assert_eq!(security_extractor(&[]), "");
         assert_eq!(
+            security_extractor(&[SecurityRequirementGroup { schemes: vec![] }]),
+            ""
+        );
+        assert_eq!(
             security_extractor(&[SecurityRequirementGroup {
                 schemes: vec![SecurityRequirement {
                     scheme_name: "auth".to_string(),

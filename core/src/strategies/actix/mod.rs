@@ -312,5 +312,77 @@ mod tests {
         assert!(s
             .test_imports()
             .contains("use jsonschema::{Draft, JSONSchema};"));
+        assert_eq!(s.path_extractor(&["i32".to_string()]), "web::Path<i32>");
+        assert_eq!(s.query_extractor(), "web::Query<Value>");
+        assert_eq!(s.typed_query_extractor("Q"), "web::Query<Q>");
+        assert_eq!(s.query_string_extractor("Q", None), "web::Query<Q>");
+        assert_eq!(s.header_extractor("H"), "actix_web::HttpRequest");
+        assert_eq!(s.cookie_extractor(), "actix_web::HttpRequest");
+        assert_eq!(s.body_extractor("B"), "web::Json<B>");
+        assert_eq!(s.form_extractor("F"), "web::Form<F>");
+        assert_eq!(
+            s.multipart_extractor("Multipart"),
+            "actix_multipart::Multipart"
+        );
+        assert_eq!(s.text_extractor("String"), "String");
+        assert_eq!(s.bytes_extractor("Vec<u8>"), "web::Bytes");
+        assert_eq!(s.security_extractor(&[]), "");
+        assert!(s.test_fn_signature("test_op").contains("test_op"));
+        assert!(s.test_app_init("app").contains("app"));
+        let body = crate::openapi::parse::RequestBodyDefinition {
+            ty: "B".to_string(),
+            description: None,
+            media_type: "application/json".to_string(),
+            format: crate::openapi::parse::BodyFormat::Json,
+            required: true,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: None,
+            example: None,
+        };
+        assert!(!s.test_body_setup_code(&body).is_empty());
+        assert!(!s.test_request_builder("GET", "/p", "").is_empty());
+        assert!(!s.test_api_call().is_empty());
+        assert!(!s.test_assertion().is_empty());
+        assert!(!s.test_validation_helper().is_empty());
+
+        let route = ParsedRoute {
+            path: "/p".into(),
+            summary: None,
+            description: None,
+            path_summary: None,
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+            operation_summary: None,
+            operation_description: None,
+            base_path: None,
+            path_servers: None,
+            servers_override: None,
+            method: "GET".into(),
+            handler_name: "h".into(),
+            operation_id: None,
+            params: vec![],
+            path_params: vec![],
+            request_body: None,
+            security: vec![],
+            security_defined: false,
+            response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
+            response_headers: vec![],
+            response_links: None,
+            kind: RouteKind::Path,
+            callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
+            tags: vec![],
+            extensions: BTreeMap::new(),
+        };
+        assert!(s.handler_unit_test(&route).contains("test_h_unit"));
     }
 }

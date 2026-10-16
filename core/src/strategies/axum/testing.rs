@@ -71,18 +71,17 @@ pub fn test_app_init(app_factory: &str) -> String {
 pub fn test_body_setup_code(body: &RequestBodyDefinition) -> String {
     if let Some(example) = &body.example {
         if example.is_serialized() {
-            let serialized = example
-                .value
-                .as_str()
-                .map(ToOwned::to_owned)
-                .unwrap_or_else(|| example.value.to_string());
+            let serialized = match example.value.as_str() {
+                Some(s) => s.to_owned(),
+                None => example.value.to_string(),
+            };
             return format!(
                 "    let body = Body::from({:?});
 ",
                 serialized
             );
         }
-        let val_str = serde_json::to_string(&example.value).unwrap_or_else(|_| "{}".to_string());
+        let val_str = example.value.to_string();
         return match body.format {
             BodyFormat::Json => format!(
                 r#"    let req_body: serde_json::Value = serde_json::from_str({:?}).expect("valid json");
@@ -95,10 +94,10 @@ pub fn test_body_setup_code(body: &RequestBodyDefinition) -> String {
                     let pairs = obj
                         .iter()
                         .map(|(k, v)| {
-                            let s = v
-                                .as_str()
-                                .map(ToOwned::to_owned)
-                                .unwrap_or_else(|| v.to_string());
+                            let s = match v.as_str() {
+                                Some(st) => st.to_owned(),
+                                None => v.to_string(),
+                            };
                             format!("{}={}", k, s)
                         })
                         .collect::<Vec<_>>()
@@ -132,11 +131,10 @@ Content-Disposition: form-data; name='payload'
                 )
             }
             BodyFormat::Text => {
-                let text = example
-                    .value
-                    .as_str()
-                    .map(ToOwned::to_owned)
-                    .unwrap_or(val_str);
+                let text = match example.value.as_str() {
+                    Some(s) => s.to_owned(),
+                    None => val_str,
+                };
                 format!(
                     "    let body = Body::from({:?});
 ",
@@ -352,13 +350,10 @@ pub fn handler_unit_test(route: &ParsedRoute) -> String {
         if let Some(end) = router_path[start..].find('}') {
             let actual_end = start + end;
             let param_name = router_path[start + 1..actual_end].to_string();
+            let placeholder = format!("{{{}}}", param_name);
             let sample = sample_value_for_param(route, &param_name);
             router_path.replace_range(start..actual_end + 1, &format!(":{}", param_name));
-            if let Some(r_start) = req_path.find('{') {
-                if let Some(r_end) = req_path[r_start..].find('}') {
-                    req_path.replace_range(r_start..r_start + r_end + 1, sample);
-                }
-            }
+            req_path = req_path.replacen(&placeholder, sample, 1);
         } else {
             break;
         }
@@ -439,10 +434,14 @@ Code:
                 BodyFormat::Json,
                 Some(ExampleValue::serialized(serde_json::json!("raw_json"))),
             ),
+            (
+                BodyFormat::Json,
+                Some(ExampleValue::serialized(serde_json::json!(123))),
+            ),
             (BodyFormat::Json, None),
             (
                 BodyFormat::Form,
-                Some(ExampleValue::data(serde_json::json!({"k": "v"}))),
+                Some(ExampleValue::data(serde_json::json!({"k": "v", "num": 42}))),
             ),
             (
                 BodyFormat::Form,
@@ -457,6 +456,10 @@ Code:
             (
                 BodyFormat::Text,
                 Some(ExampleValue::data(serde_json::json!("hello"))),
+            ),
+            (
+                BodyFormat::Text,
+                Some(ExampleValue::data(serde_json::json!(99))),
             ),
             (BodyFormat::Text, None),
             (
@@ -513,6 +516,21 @@ Code:
             servers_override: None,
             operation_id: None,
             params: vec![
+                RouteParam {
+                    name: "q".to_string(),
+                    source: ParamSource::Query,
+                    ty: "String".to_string(),
+                    description: None,
+                    example: None,
+                    style: None,
+                    explode: false,
+                    allow_empty_value: false,
+                    allow_reserved: false,
+                    content_media_type: None,
+                    raw_schema: None,
+                    deprecated: false,
+                    extensions: BTreeMap::new(),
+                },
                 RouteParam {
                     name: "id".to_string(),
                     source: ParamSource::Path,
@@ -572,5 +590,18 @@ Code:
         assert!(generated.contains("post(super::my_handler)"));
         assert!(generated.contains("/users/00000000-0000-0000-0000-000000000000/flags/true"));
         assert!(generated.contains("StatusCode::from_u16(201)"));
+
+        let empty_req = test_request_builder("GET", "/users", "");
+        assert!(empty_req.contains("Body::empty()"));
+
+        for m in ["GET", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "CUSTOM"] {
+            let mut r = route.clone();
+            r.method = m.to_string();
+            r.path = "/items/{missing_param}/{unclosed".to_string();
+            r.response_status = None;
+            let gen = handler_unit_test(&r);
+            assert!(gen.contains(":missing_param/{unclosed"));
+            assert!(gen.contains("StatusCode::from_u16(200)"));
+        }
     }
 }

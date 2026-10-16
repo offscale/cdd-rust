@@ -73,23 +73,21 @@ pub struct RustToJsonMapper;
 
 impl TypeMapper for RustToJsonMapper {
     fn map(&self, rust_type: &str) -> AppResult<JsonSchema> {
+        let trimmed = rust_type.trim();
+        if trimmed.is_empty() {
+            return Err(AppError::General("Empty type string".into()));
+        }
         // Wrap implementation to parse valid Rust syntax using a type alias
-        let code = format!("type _Wrapper = {};", rust_type);
+        let code = format!("type _Wrapper = {};", trimmed);
         let parse = SourceFile::parse(&code, Edition::Edition2021);
         let file = parse.tree();
 
-        // Find the type alias definition
-        let type_alias = file
+        // Extract the type node from the type alias definition
+        let root_type = file
             .syntax()
             .descendants()
             .find_map(ast::TypeAlias::cast)
-            .ok_or_else(|| {
-                AppError::General(format!("Failed to parse type string: {}", rust_type))
-            })?;
-
-        // Extract the type node
-        let root_type = type_alias
-            .ty()
+            .and_then(|ta| ta.ty())
             .ok_or_else(|| AppError::General(format!("Invalid type syntax: {}", rust_type)))?;
 
         // Recursively map the AST node
@@ -101,15 +99,14 @@ impl TypeMapper for RustToJsonMapper {
 fn map_ast_type(ty: &ast::Type) -> AppResult<JsonSchema> {
     match ty {
         ast::Type::PathType(path_type) => {
-            let path = path_type
+            let (segment, name_ref) = path_type
                 .path()
-                .ok_or_else(|| AppError::General("Empty path".into()))?;
-            let segment = path
-                .segment()
-                .ok_or_else(|| AppError::General("Empty segment".into()))?;
-            let name_ref = segment
-                .name_ref()
-                .ok_or_else(|| AppError::General("No type name".into()))?;
+                .and_then(|p| p.segment())
+                .and_then(|s| {
+                    let nr = s.name_ref()?;
+                    Some((s, nr))
+                })
+                .ok_or_else(|| AppError::General("Empty path segment".into()))?;
             let name = name_ref.text();
 
             match name.as_str() {
@@ -133,8 +130,11 @@ fn map_ast_type(ty: &ast::Type) -> AppResult<JsonSchema> {
                 "Bytes" | "ByteBuf" => Ok(binary_schema()),
 
                 // Containers & Wrappers
-                "Option" => handle_generic_wrapper(segment, true, |inner| inner),
-                "Vec" => handle_generic_wrapper(segment, false, |inner| {
+                "Option" => handle_generic_wrapper(segment, |mut inner| {
+                    inner.nullable = true;
+                    inner
+                }),
+                "Vec" => handle_generic_wrapper(segment, |inner| {
                     // Special case: Vec<u8> -> Binary (OAS 3.2 best practice)
                     // If the inner type is strictly an integer U8, we return binary string.
                     // This avoids generating array<integer> for byte arrays.
@@ -151,7 +151,7 @@ fn map_ast_type(ty: &ast::Type) -> AppResult<JsonSchema> {
                     }
                 }),
                 // Secret<T> wrapper (Registry: format: password)
-                "Secret" => handle_generic_wrapper(segment, false, |mut inner| {
+                "Secret" => handle_generic_wrapper(segment, |mut inner| {
                     // Only apply password format if inner is a String
                     if inner.type_ == JsonType::String {
                         inner.format = Some("password".to_string());
@@ -168,34 +168,23 @@ fn map_ast_type(ty: &ast::Type) -> AppResult<JsonSchema> {
             let inner = ref_type
                 .ty()
                 .ok_or_else(|| AppError::General("Invalid reference".into()))?;
-
-            // Check for slice &[u8]
-            if let ast::Type::SliceType(ref slice) = inner {
-                if let Some(slice_inner) = slice.ty() {
-                    if slice_inner.to_string().trim() == "u8" {
-                        return Ok(binary_schema());
-                    }
-                }
-            }
-
             map_ast_type(&inner)
         }
         ast::Type::SliceType(slice) => {
-            if let Some(inner) = slice.ty() {
-                let inner_schema = map_ast_type(&inner)?;
-                if inner.to_string().trim() == "u8" {
-                    return Ok(binary_schema());
-                }
-                Ok(JsonSchema {
-                    type_: JsonType::Array(Box::new(inner_schema)),
-                    format: None,
-                    nullable: false,
-                    content_media_type: None,
-                    content_encoding: None,
-                })
-            } else {
-                Err(AppError::General("Invalid slice type".into()))
+            let inner = slice
+                .ty()
+                .ok_or_else(|| AppError::General("Invalid slice type".into()))?;
+            let inner_schema = map_ast_type(&inner)?;
+            if inner.to_string().trim() == "u8" {
+                return Ok(binary_schema());
             }
+            Ok(JsonSchema {
+                type_: JsonType::Array(Box::new(inner_schema)),
+                format: None,
+                nullable: false,
+                content_media_type: None,
+                content_encoding: None,
+            })
         }
         _ => Err(AppError::General(format!(
             "Unsupported type structure: {:?}",
@@ -205,43 +194,23 @@ fn map_ast_type(ty: &ast::Type) -> AppResult<JsonSchema> {
 }
 
 /// Helper to handle types like `Option<T>` or `Vec<T>`.
-fn handle_generic_wrapper<F>(
-    segment: ast::PathSegment,
-    make_nullable: bool,
-    wrap: F,
-) -> AppResult<JsonSchema>
+fn handle_generic_wrapper<F>(segment: ast::PathSegment, wrap: F) -> AppResult<JsonSchema>
 where
     F: FnOnce(JsonSchema) -> JsonSchema,
 {
-    // Need HasGenericArgs trait for this method
-    let generic_args = segment
+    let first_arg = segment
         .generic_arg_list()
+        .and_then(|list| list.generic_args().next())
         .ok_or_else(|| AppError::General("Missing generic arguments for container type".into()))?;
 
-    // We assume the first argument is the type T.
-    let first_arg = generic_args
-        .generic_args()
-        .next()
-        .ok_or_else(|| AppError::General("Generic list empty".into()))?;
-
-    match first_arg {
-        ast::GenericArg::TypeArg(type_arg) => {
-            let inner_ty = type_arg
-                .ty()
-                .ok_or_else(|| AppError::General("Invalid generic type".into()))?;
-            let mut schema = map_ast_type(&inner_ty)?;
-
-            if make_nullable {
-                schema.nullable = true;
-            }
-
-            let result = wrap(schema);
-            Ok(result)
-        }
-        _ => Err(AppError::General(
-            "Unsupported generic argument type".into(),
-        )),
+    let inner_ty = match first_arg {
+        ast::GenericArg::TypeArg(type_arg) => type_arg.ty(),
+        _ => None,
     }
+    .ok_or_else(|| AppError::General("Unsupported generic argument type".into()))?;
+
+    let schema = map_ast_type(&inner_ty)?;
+    Ok(wrap(schema))
 }
 
 // Helpers for cleaner construction
@@ -352,17 +321,25 @@ mod tests {
     #[test]
     fn test_nested_complex() {
         let mapper = RustToJsonMapper;
-        // Vec<Option<Uuid>> is weird but structurally parseable: array<integer(uuid) nullable>
-        // Option<Vec<Uuid>> -> nullable array<string(uuid)>
         let res = mapper.map("Option<Vec<Uuid>>").expect("Failed to map");
 
         assert!(res.nullable);
-        if let JsonType::Array(inner) = res.type_ {
-            assert_eq!(inner.type_, JsonType::String);
-            assert_eq!(inner.format.as_deref(), Some("uuid"));
-        } else {
-            panic!("Expected array");
-        }
+        assert_eq!(
+            res.type_,
+            JsonType::Array(Box::new(JsonSchema {
+                type_: JsonType::String,
+                format: Some("uuid".to_string()),
+                nullable: false,
+                content_media_type: None,
+                content_encoding: None,
+            }))
+        );
+
+        let vec_str = mapper.map("Vec<String>").expect("Vec<String>");
+        assert_eq!(format!("{}", vec_str.type_), "array<string>");
+
+        let vec_i32 = mapper.map("Vec<i32>").expect("Vec<i32>");
+        assert_eq!(format!("{}", vec_i32.type_), "array<integer>");
     }
 
     #[test]
@@ -417,8 +394,21 @@ mod tests {
         assert_eq!(format!("{}", JsonType::Boolean), "boolean");
 
         assert!(mapper.map("").is_err());
+        assert!(mapper.map(";").is_err());
+        assert!(mapper.map("&").is_err());
+        assert!(mapper.map("[]").is_err());
+        assert!(mapper.map("[(i32, i32)]").is_err());
+        assert!(mapper.map("<i32>::").is_err());
         assert!(mapper.map("Option").is_err());
+        assert!(mapper.map("Option<>").is_err());
         assert!(mapper.map("Option<'a>").is_err());
+        assert!(mapper.map("Option<(i32, i32)>").is_err());
+        assert!(mapper.map("Vec").is_err());
+        assert!(mapper.map("Vec<'a>").is_err());
+        assert!(mapper.map("Vec<(i32, i32)>").is_err());
+        assert!(mapper.map("Secret").is_err());
+        assert!(mapper.map("Secret<'a>").is_err());
+        assert!(mapper.map("Secret<(i32, i32)>").is_err());
         assert!(mapper.map("(i32, String)").is_err());
     }
 }

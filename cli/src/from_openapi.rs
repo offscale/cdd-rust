@@ -8,7 +8,6 @@ use cdd_core::strategies::{
     McpServerStrategy, ReqwestStrategy, StrategyKind,
 };
 use clap::{Args, Subcommand};
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -140,7 +139,7 @@ impl GenerateArgs {
     pub fn get_output_dir(&self) -> PathBuf {
         self.output_dir
             .clone()
-            .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+            .unwrap_or_else(|| PathBuf::from("."))
     }
 
     /// Retrieve the input files either from the single file or the directory specified.
@@ -198,16 +197,14 @@ pub fn is_http_url(input: &str) -> bool {
 pub fn read_spec_source(input: &Path) -> AppResult<String> {
     let input_str = input.to_string_lossy();
     if is_http_url(&input_str) {
-        let response = ureq::get(input_str.as_ref())
+        let mut response = ureq::get(input_str.as_ref())
             .call()
             .map_err(|e| AppError::General(format!("Failed to fetch URL: {}", e)))?;
-        response
-            .into_body()
-            .read_to_string()
-            .map_err(|e| AppError::General(format!("Failed to read HTTP body: {}", e)))
+        let mut body = String::new();
+        std::io::Read::read_to_string(&mut response.body_mut().as_reader(), &mut body)?;
+        Ok(body)
     } else {
-        fs::read_to_string(input)
-            .map_err(|e| AppError::General(format!("Failed to read OpenAPI {:?}: {}", input, e)))
+        Ok(fs::read_to_string(input)?)
     }
 }
 
@@ -295,12 +292,13 @@ pub fn generate_sdk(args: &GenerateArgs) -> AppResult<()> {
 /// # Errors
 /// Returns [`AppError`] if reading specifications or writing files fails.
 pub fn generate_sdk_cli(args: &GenerateArgs) -> AppResult<()> {
-    run_generation_with_subdir(args, &ReqwestStrategy, "client")?;
-    run_generation_with_subdir(args, &ClapCliStrategy, "handlers")?;
-    if args.mcp {
-        append_mcp_module(args, &McpClientStrategy)?;
-    }
-    Ok(())
+    run_generation_with_subdir(args, &ReqwestStrategy, "client").and_then(|()| {
+        run_generation_with_subdir(args, &ClapCliStrategy, "handlers")?;
+        if args.mcp {
+            append_mcp_module(args, &McpClientStrategy)?;
+        }
+        Ok(())
+    })
 }
 
 /// Generates server scaffolding (`ActixStrategy` or `AxumStrategy`) and optional `src/mcp/`
@@ -333,7 +331,7 @@ fn append_mcp_module(args: &GenerateArgs, strategy: &impl BackendStrategy) -> Ap
     let out_dir = args.get_output_dir();
     let src_dir = out_dir.join("src");
     let mcp_dir = src_dir.join("mcp");
-    fs::create_dir_all(&mcp_dir).map_err(|e| AppError::General(e.to_string()))?;
+    fs::create_dir_all(&mcp_dir)?;
 
     for input in inputs {
         let scaffold_args = ScaffoldArgs {
@@ -346,24 +344,20 @@ fn append_mcp_module(args: &GenerateArgs, strategy: &impl BackendStrategy) -> Ap
     }
 
     write_mod_rs(&mcp_dir)?;
-    ensure_lib_mod(
-        &src_dir.join("lib.rs"),
-        "pub mod mcp;
-",
-    )?;
+    ensure_lib_mod(&src_dir.join("lib.rs"), "pub mod mcp;\n")?;
     Ok(())
 }
 
 /// Ensures a module declaration line is present in `lib.rs`.
 fn ensure_lib_mod(lib_rs_path: &Path, mod_decl: &str) -> AppResult<()> {
     let existing = if lib_rs_path.exists() {
-        fs::read_to_string(lib_rs_path).map_err(|e| AppError::General(e.to_string()))?
+        fs::read_to_string(lib_rs_path)?
     } else {
         String::new()
     };
     if !existing.contains(mod_decl.trim()) {
         let updated = format!("{}{}", mod_decl, existing);
-        fs::write(lib_rs_path, updated).map_err(|e| AppError::General(e.to_string()))?;
+        fs::write(lib_rs_path, updated)?;
     }
     Ok(())
 }
@@ -372,46 +366,31 @@ fn ensure_lib_mod(lib_rs_path: &Path, mod_decl: &str) -> AppResult<()> {
 fn write_mod_rs(dir: &Path) -> AppResult<Vec<String>> {
     let mut mods = Vec::new();
     let mut mod_names = Vec::new();
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file()
-                && path.extension().is_some_and(|ext| ext == "rs")
-                && path.file_name().is_some_and(|name| name != "mod.rs")
-            {
-                if let Some(stem) = path.file_stem() {
-                    let mod_name = stem.to_string_lossy().to_string();
-                    mods.push(format!(
-                        "pub mod {};
-",
-                        mod_name
-                    ));
-                    mod_names.push(mod_name);
-                }
-            }
+    for entry in fs::read_dir(dir)?.flatten() {
+        let path = entry.path();
+        if path.file_name().is_some_and(|name| name != "mod.rs")
+            && path.extension().is_some_and(|ext| ext == "rs")
+        {
+            let mod_name = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            mods.push(format!("pub mod {};\n", mod_name));
+            mod_names.push(mod_name);
         }
     }
     mods.sort();
     mod_names.sort();
-    fs::write(dir.join("mod.rs"), mods.join("")).map_err(|e| AppError::General(e.to_string()))?;
+    fs::write(dir.join("mod.rs"), mods.join(""))?;
     Ok(mod_names)
 }
 
-/// Runs the generation using the specified strategy and target module subdirectory name.
-fn run_generation_with_subdir(
+fn prepare_package_skeleton(
     args: &GenerateArgs,
-    strategy: &impl BackendStrategy,
-    module_subdir: &str,
+    out_dir: &Path,
+    extra_deps: &str,
 ) -> AppResult<()> {
-    let inputs = args.get_input_files();
-    if inputs.is_empty() {
-        return Err(AppError::General(
-            "No input files provided or found.".into(),
-        ));
-    }
-
-    let out_dir = args.get_output_dir();
-    fs::create_dir_all(&out_dir).map_err(|e| AppError::General(e.to_string()))?;
+    fs::create_dir_all(out_dir)?;
 
     if !args.no_installable_package {
         let cargo_toml_path = out_dir.join("Cargo.toml");
@@ -430,7 +409,12 @@ uuid = { version = "1.8", features = ["serde", "v4"] }
 "#,
             );
 
-            dependencies.push_str(&strategy.extra_cargo_dependencies());
+            dependencies.push_str(extra_deps);
+
+            let pkg_name = out_dir
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "generated_package".to_string());
 
             let cargo_toml = format!(
                 r#"[package]
@@ -441,19 +425,15 @@ edition = "2021"
 [dependencies]
 {}
 "#,
-                out_dir
-                    .file_name()
-                    .unwrap_or_else(|| std::ffi::OsStr::new("generated_package"))
-                    .to_string_lossy(),
-                dependencies
+                pkg_name, dependencies
             );
-            fs::write(cargo_toml_path, cargo_toml).map_err(|e| AppError::General(e.to_string()))?;
+            fs::write(cargo_toml_path, cargo_toml)?;
         }
     }
 
     if !args.no_github_actions {
         let gh_workflows_dir = out_dir.join(".github").join("workflows");
-        fs::create_dir_all(&gh_workflows_dir).map_err(|e| AppError::General(e.to_string()))?;
+        fs::create_dir_all(&gh_workflows_dir)?;
         let ci_yml_path = gh_workflows_dir.join("ci.yml");
         if !ci_yml_path.exists() {
             let ci_yml = r#"name: CI
@@ -473,75 +453,55 @@ jobs:
       - name: Run tests
         run: cargo test --verbose
 "#;
-            fs::write(ci_yml_path, ci_yml).map_err(|e| AppError::General(e.to_string()))?;
+            fs::write(ci_yml_path, ci_yml)?;
         }
     }
 
-    for input in inputs {
-        let yaml_content = read_spec_source(&input)?;
+    Ok(())
+}
 
-        // 1. Generate Models (DTOs)
-        let src_dir = out_dir.join("src");
-        fs::create_dir_all(&src_dir).map_err(|e| AppError::General(e.to_string()))?;
-        let lib_rs_path = src_dir.join("lib.rs");
+fn prepare_models_and_handlers_dir(
+    out_dir: &Path,
+    input: &Path,
+    module_subdir: &str,
+    is_http_server: bool,
+) -> AppResult<(PathBuf, PathBuf, PathBuf)> {
+    let yaml_content = read_spec_source(input)?;
 
-        let models_dir = src_dir.join("models");
-        fs::create_dir_all(&models_dir).map_err(|e| AppError::General(e.to_string()))?;
+    let src_dir = out_dir.join("src");
+    fs::create_dir_all(&src_dir)?;
+    let lib_rs_path = src_dir.join("lib.rs");
 
-        let models = cdd_core::openapi::parse::parse_openapi_spec(&yaml_content)?;
-        if !models.is_empty() {
-            let rust_code = cdd_core::classes::emit::generate_dtos(&models);
-            let file_path = models_dir.join("generated.rs");
-            fs::write(&file_path, rust_code).map_err(|e| AppError::General(e.to_string()))?;
-            let mod_rs = "pub mod generated;
-pub use generated::*;
-";
-            fs::write(models_dir.join("mod.rs"), mod_rs)
-                .map_err(|e| AppError::General(e.to_string()))?;
-            ensure_lib_mod(
-                &lib_rs_path,
-                "pub mod models;
-",
-            )?;
+    let models_dir = src_dir.join("models");
+    fs::create_dir_all(&models_dir)?;
+
+    let models = cdd_core::openapi::parse::parse_openapi_spec(&yaml_content)?;
+    if !models.is_empty() {
+        let rust_code = cdd_core::classes::emit::generate_dtos(&models);
+        let file_path = models_dir.join("generated.rs");
+        fs::write(&file_path, rust_code)?;
+        let mod_rs = "pub mod generated;\npub use generated::*;\n";
+        fs::write(models_dir.join("mod.rs"), mod_rs)?;
+        ensure_lib_mod(&lib_rs_path, "pub mod models;\n")?;
+    }
+
+    let handlers_dir = src_dir.join(module_subdir);
+    fs::create_dir_all(&handlers_dir)?;
+    ensure_lib_mod(&lib_rs_path, &format!("pub mod {};\n", module_subdir))?;
+
+    if is_http_server {
+        let current_lib = fs::read_to_string(&lib_rs_path).unwrap_or_default();
+        if !current_lib.contains("pub fn config(") {
+            let mut updated = current_lib;
+            if !updated.contains("pub mod security;") {
+                updated.push_str("pub mod security;\n\n");
+            }
+            updated.push_str("use actix_web::web;\n\n");
+            updated.push_str("pub fn config(cfg: &mut web::ServiceConfig) {\n}\n");
+            fs::write(&lib_rs_path, updated)?;
         }
 
-        // 2. Scaffold Handlers into `src/{module_subdir}`
-        let handlers_dir = src_dir.join(module_subdir);
-        fs::create_dir_all(&handlers_dir).map_err(|e| AppError::General(e.to_string()))?;
-        ensure_lib_mod(
-            &lib_rs_path,
-            &format!(
-                "pub mod {};
-",
-                module_subdir
-            ),
-        )?;
-
-        if strategy.kind() == StrategyKind::HttpServer {
-            let current_lib = fs::read_to_string(&lib_rs_path).unwrap_or_default();
-            if !current_lib.contains("pub fn config(") {
-                let mut updated = current_lib;
-                if !updated.contains("pub mod security;") {
-                    updated.push_str(
-                        "pub mod security;
-
-",
-                    );
-                }
-                updated.push_str(
-                    "use actix_web::web;
-
-",
-                );
-                updated.push_str(
-                    "pub fn config(cfg: &mut web::ServiceConfig) {
-}
-",
-                );
-                fs::write(&lib_rs_path, updated).map_err(|e| AppError::General(e.to_string()))?;
-            }
-
-            let security_mod_content = r#"// Security module stub
+        let security_mod_content = r#"// Security module stub
 use std::marker::PhantomData;
 
 #[derive(Clone, Default)]
@@ -563,15 +523,36 @@ pub mod scopes {
     pub struct ReadPets;
 }
 "#;
-            fs::write(src_dir.join("security.rs"), security_mod_content)
-                .map_err(|e| AppError::General(e.to_string()))?;
-        }
+        fs::write(src_dir.join("security.rs"), security_mod_content)?;
+    }
 
-        let route_config_path = if strategy.kind() == StrategyKind::HttpServer {
-            Some(lib_rs_path.clone())
-        } else {
-            None
-        };
+    Ok((src_dir, lib_rs_path, handlers_dir))
+}
+
+/// Runs the generation using the specified strategy and target module subdirectory name.
+fn run_generation_with_subdir(
+    args: &GenerateArgs,
+    strategy: &impl BackendStrategy,
+    module_subdir: &str,
+) -> AppResult<()> {
+    let inputs = args.get_input_files();
+    if inputs.is_empty() {
+        return Err(AppError::General(
+            "No input files provided or found.".into(),
+        ));
+    }
+
+    let out_dir = args.get_output_dir();
+    prepare_package_skeleton(args, &out_dir, &strategy.extra_cargo_dependencies())?;
+
+    let is_http_server = strategy.kind() == StrategyKind::HttpServer;
+    let is_cli = strategy.kind() == StrategyKind::Cli;
+
+    for input in inputs {
+        let (src_dir, lib_rs_path, handlers_dir) =
+            prepare_models_and_handlers_dir(&out_dir, &input, module_subdir, is_http_server)?;
+
+        let route_config_path = is_http_server.then_some(lib_rs_path);
 
         let scaffold_args = ScaffoldArgs {
             openapi_path: input.clone(),
@@ -581,34 +562,48 @@ pub mod scopes {
         };
         crate::scaffold::run_scaffold(&scaffold_args, strategy)?;
 
-        // Gather handler modules for mod.rs
         let mod_names = write_mod_rs(&handlers_dir)?;
-
-        // 4. Generate CLI Main
-        if strategy.kind() == StrategyKind::Cli {
-            let main_rs = ClapCliStrategy.generate_cli_main(module_subdir, &mod_names);
-            fs::write(src_dir.join("main.rs"), main_rs)
-                .map_err(|e| AppError::General(e.to_string()))?;
-        }
-
-        // 3. Generate Tests
-        if args.tests {
-            let tests_dir = out_dir.join("tests");
-            fs::create_dir_all(&tests_dir).map_err(|e| AppError::General(e.to_string()))?;
-            let crate_name = out_dir
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .replace('-', "_");
-            let test_gen_args = TestGenArgs {
-                openapi_path: input.clone(),
-                output_path: tests_dir.join("api_contracts.rs"),
-                app_factory: crate_name,
-            };
-            crate::test_gen::run_test_gen(&test_gen_args, strategy)?;
-        }
+        maybe_write_cli_main(is_cli, &src_dir, module_subdir, &mod_names)?;
+        maybe_generate_tests(args.tests, &out_dir, &input, strategy)?;
     }
 
+    Ok(())
+}
+
+fn maybe_write_cli_main(
+    is_cli: bool,
+    src_dir: &Path,
+    module_subdir: &str,
+    mod_names: &[String],
+) -> AppResult<()> {
+    if is_cli {
+        let main_rs = ClapCliStrategy.generate_cli_main(module_subdir, mod_names);
+        fs::write(src_dir.join("main.rs"), main_rs)?;
+    }
+    Ok(())
+}
+
+fn maybe_generate_tests(
+    enable_tests: bool,
+    out_dir: &Path,
+    input: &Path,
+    strategy: &impl BackendStrategy,
+) -> AppResult<()> {
+    if enable_tests {
+        let tests_dir = out_dir.join("tests");
+        fs::create_dir_all(&tests_dir)?;
+        let crate_name = out_dir
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .replace('-', "_");
+        let test_gen_args = TestGenArgs {
+            openapi_path: input.to_path_buf(),
+            output_path: tests_dir.join("api_contracts.rs"),
+            app_factory: crate_name,
+        };
+        crate::test_gen::run_test_gen(&test_gen_args, strategy)?;
+    }
     Ok(())
 }
 
@@ -698,6 +693,22 @@ mod tests {
 
         let err = read_spec_source(Path::new("http://127.0.0.1:1/nonexistent.yaml"));
         assert!(err.is_err());
+
+        // Start a minimal local HTTP server to test successful HTTP fetch
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut buf = [0u8; 512];
+            let _ = std::io::Read::read(&mut stream, &mut buf);
+            let resp =
+                "HTTP/1.1 200 OK\r\nContent-Length: 14\r\nConnection: close\r\n\r\nopenapi: 3.0.0";
+            let _ = std::io::Write::write_all(&mut stream, resp.as_bytes());
+        });
+        let url_str = format!("http://{}/openapi.yaml", addr);
+        let body = read_spec_source(Path::new(&url_str)).expect("http fetch");
+        assert_eq!(body, "openapi: 3.0.0");
+        let _ = handle.join();
     }
 
     #[test]
@@ -712,10 +723,7 @@ mod tests {
             mcp: false,
         };
         let dir = args.get_output_dir();
-        assert_eq!(
-            dir,
-            env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        );
+        assert_eq!(dir, PathBuf::from("."));
     }
 
     #[test]
@@ -754,9 +762,15 @@ mod tests {
         let file1 = dir.path().join("a.yaml");
         let file2 = dir.path().join("b.json");
         let file3 = dir.path().join("c.txt");
+        let file4 = dir.path().join("d.yml");
+        let file_no_ext = dir.path().join("noext");
+        let sub_dir = dir.path().join("subdir");
         fs::write(&file1, "").expect("Failed to write to file");
         fs::write(&file2, "").expect("Failed to write to file");
         fs::write(&file3, "").expect("Failed to write to file");
+        fs::write(&file4, "").expect("Failed to write to file");
+        fs::write(&file_no_ext, "").expect("Failed to write to file");
+        fs::create_dir_all(&sub_dir).expect("mkdir");
 
         let args = GenerateArgs {
             input: None,
@@ -769,9 +783,15 @@ mod tests {
         };
         let mut files = args.get_input_files();
         files.sort();
-        let mut expected = vec![file1, file2];
+        let mut expected = vec![file1, file2, file4];
         expected.sort();
         assert_eq!(files, expected);
+
+        let args_missing_dir = GenerateArgs {
+            input_dir: Some(dir.path().join("does_not_exist")),
+            ..args
+        };
+        assert!(args_missing_dir.get_input_files().is_empty());
     }
 
     #[test]
@@ -834,6 +854,20 @@ components:
         assert!(out_sdk_cli_mcp.join("src/mcp/mod.rs").exists());
         assert!(out_sdk_cli_mcp.join("src/main.rs").exists());
 
+        // Test SdkCli without mcp
+        let args_cli_no_mcp = FromOpenApiArgs {
+            command: FromOpenApiCommands::SdkCli(GenerateArgs {
+                input: Some(input_file.clone()),
+                input_dir: None,
+                output_dir: Some(dir.path().join("out1_no_mcp")),
+                no_github_actions: true,
+                no_installable_package: true,
+                tests: true,
+                mcp: false,
+            }),
+        };
+        assert!(run_from_openapi(&args_cli_no_mcp).is_ok());
+
         // Test Sdk with mcp
         let out_sdk = dir.path().join("out2");
         let args = FromOpenApiArgs {
@@ -853,6 +887,10 @@ components:
 
         // Test Server with ActixWeb and mcp - verifies handlers/ and mcp/ coexist
         let out_srv = dir.path().join("out3");
+        let srv_lib = out_srv.join("src");
+        fs::create_dir_all(&srv_lib).expect("mkdir");
+        fs::write(srv_lib.join("lib.rs"), "pub mod security;\n").expect("write lib.rs");
+        fs::write(srv_lib.join("extra.txt"), "ignore").expect("write txt");
         let args = FromOpenApiArgs {
             command: FromOpenApiCommands::Server {
                 args: GenerateArgs {
@@ -867,6 +905,8 @@ components:
                 framework: ServerFramework::ActixWeb,
             },
         };
+        assert!(run_from_openapi(&args).is_ok());
+        // Run a second time when Cargo.toml, ci.yml, and pub fn config( already exist
         assert!(run_from_openapi(&args).is_ok());
         assert!(out_srv.join("src/handlers/mod.rs").exists());
         assert!(out_srv.join("src/mcp/mod.rs").exists());
@@ -890,7 +930,7 @@ components:
     }
 
     #[test]
-    fn test_run_generation_empty() {
+    fn test_run_generation_no_inputs() {
         let args = GenerateArgs {
             input: None,
             input_dir: None,
@@ -900,8 +940,10 @@ components:
             tests: false,
             mcp: false,
         };
-        let result = run_generation_with_subdir(&args, &ActixStrategy, "handlers");
-        assert!(result.is_err());
+        assert!(run_generation_with_subdir(&args, &ActixStrategy, "handlers").is_err());
+        assert!(run_generation_with_subdir(&args, &AxumStrategy, "handlers").is_err());
+        assert!(run_generation_with_subdir(&args, &ReqwestStrategy, "client").is_err());
+        assert!(run_generation_with_subdir(&args, &ClapCliStrategy, "handlers").is_err());
     }
 
     #[test]
@@ -920,13 +962,14 @@ components:
     }
 
     #[test]
-    fn test_run_generation_with_tests_flag() -> Result<(), Box<dyn std::error::Error>> {
-        let dir = tempdir()?;
+    fn test_run_generation_with_tests_flag() {
+        let dir = tempdir().expect("tempdir");
         let input = dir.path().join("spec.json");
         std::fs::write(
             &input,
             r#"{"openapi": "3.0.0", "info": {"title": "Test", "version": "1.0"}, "paths": {}}"#,
-        )?;
+        )
+        .expect("write");
         let args = GenerateArgs {
             input: Some(input),
             input_dir: None,
@@ -938,7 +981,29 @@ components:
         };
         let res = run_generation_with_subdir(&args, &ActixStrategy, "handlers");
         assert!(res.is_ok());
-        Ok(())
+        assert!(run_generation_with_subdir(&args, &AxumStrategy, "handlers").is_ok());
+        assert!(run_generation_with_subdir(&args, &ReqwestStrategy, "client").is_ok());
+
+        let mod_dir = dir.path().join("my_out_app/src/handlers");
+        fs::write(mod_dir.join("ignore.txt"), "txt").expect("write txt");
+        assert!(write_mod_rs(&mod_dir).is_ok());
+
+        // Error propagation in generate_sdk, generate_sdk_cli, generate_server, append_mcp_module
+        let bad_args = GenerateArgs {
+            input: Some(dir.path().join("nonexistent.yaml")),
+            input_dir: None,
+            output_dir: Some(PathBuf::from("/")),
+            no_github_actions: false,
+            no_installable_package: false,
+            tests: false,
+            mcp: true,
+        };
+        assert!(generate_sdk(&bad_args).is_err());
+        assert!(generate_sdk_cli(&bad_args).is_err());
+        assert!(generate_server(&bad_args, ServerFramework::ActixWeb).is_err());
+        assert!(generate_server(&bad_args, ServerFramework::Axum).is_err());
+        assert!(append_mcp_module(&bad_args, &McpClientStrategy).is_err());
+        assert!(append_mcp_module(&bad_args, &McpServerStrategy).is_err());
     }
 
     #[test]

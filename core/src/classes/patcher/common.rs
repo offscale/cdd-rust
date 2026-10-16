@@ -18,8 +18,7 @@ pub(crate) fn find_struct(file: &SourceFile, name: &str) -> AppResult<ast::Struc
 /// Detects the indentation string used in a field list.
 pub(crate) fn detect_indent(list: &ast::RecordFieldList) -> Option<String> {
     let first_field = list.fields().next()?;
-    let first_token = first_field.syntax().first_token()?;
-    let token = first_token.prev_token()?;
+    let token = first_field.syntax().first_token()?.prev_token()?;
 
     if token.kind() == SyntaxKind::WHITESPACE {
         let text = token.text();
@@ -55,13 +54,13 @@ mod tests {
     use ra_ap_edition::Edition;
     use ra_ap_syntax::{ast, AstNode, SourceFile};
 
-    fn parse_struct(code: &str) -> ast::Struct {
+    fn parse_record_list(code: &str) -> ast::RecordFieldList {
         let parse = std::mem::ManuallyDrop::new(SourceFile::parse(code, Edition::Edition2021));
         let file = parse.tree();
         file.syntax()
             .descendants()
-            .find_map(ast::Struct::cast)
-            .expect("struct missing")
+            .find_map(ast::RecordFieldList::cast)
+            .expect("record field list missing")
     }
 
     #[test]
@@ -78,43 +77,36 @@ mod tests {
 
     #[test]
     fn test_detect_indent() {
-        let code = "struct User {\n    id: i32,\n    name: String,\n}";
-        let s = parse_struct(code);
-        let list = s
-            .field_list()
-            .and_then(|list| match list {
-                ast::FieldList::RecordFieldList(list) => Some(list),
-                _ => None,
-            })
-            .expect("record field list missing");
+        let list = parse_record_list("struct User {\n    id: i32,\n    name: String,\n}");
         let indent = detect_indent(&list).expect("indent missing");
         assert_eq!(indent, "    ");
+
+        // Single-line with space (no newline)
+        let list_inline = parse_record_list("struct User { id: i32 }");
+        assert!(detect_indent(&list_inline).is_none());
+
+        // Single-line without space (prev_token is L_CURLY, not WHITESPACE)
+        let list_tight = parse_record_list("struct User {id: i32}");
+        assert!(detect_indent(&list_tight).is_none());
+
+        // Empty struct (no fields)
+        let list_empty = parse_record_list("struct User {}");
+        assert!(detect_indent(&list_empty).is_none());
     }
 
     #[test]
     fn test_check_needs_comma() {
-        let code_no_comma = "struct User { id: i32 }";
-        let s = parse_struct(code_no_comma);
-        let list = s
-            .field_list()
-            .and_then(|list| match list {
-                ast::FieldList::RecordFieldList(list) => Some(list),
-                _ => None,
-            })
-            .expect("Failed to and then");
+        let list = parse_record_list("struct User { id: i32 /* comment */ }");
         let r_curly = list.syntax().last_token().expect("Failed to last token");
         assert!(check_needs_comma(&r_curly));
 
-        let code_with_comma = "struct User { id: i32, }";
-        let s = parse_struct(code_with_comma);
-        let list = s
-            .field_list()
-            .and_then(|list| match list {
-                ast::FieldList::RecordFieldList(list) => Some(list),
-                _ => None,
-            })
-            .expect("Failed to and then");
+        let list = parse_record_list("struct User { id: i32, }");
         let r_curly = list.syntax().last_token().expect("Failed to last token");
         assert!(!check_needs_comma(&r_curly));
+
+        // Token at start of file has no prev_token -> loop ends and returns false
+        let root = list.syntax().ancestors().last().expect("root");
+        let first_tok = root.first_token().expect("first token");
+        assert!(!check_needs_comma(&first_tok));
     }
 }

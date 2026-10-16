@@ -42,23 +42,69 @@ def check_no_coverage_cheats():
         sys.exit(1)
 
 
+def run_llvm_cov(env):
+    try:
+        llvm_res = subprocess.run(
+            ["cargo", "llvm-cov", "--workspace", "--branch", "--summary-only"],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+        llvm_out = llvm_res.stdout + llvm_res.stderr
+        totals = re.findall(
+            r"^TOTAL\s+\d+\s+\d+\s+[\d\.]+%\s+\d+\s+\d+\s+([\d\.]+)%\s+\d+\s+\d+\s+([\d\.]+)%\s+\d+\s+\d+\s+([\d\.]+)%",
+            llvm_out,
+            re.MULTILINE,
+        )
+        if totals:
+            func_cov, line_cov, branch_cov = (float(x) for x in totals[-1])
+            return f"{min(func_cov, line_cov, branch_cov):.2f}"
+    except FileNotFoundError:
+        pass
+    return None
+
+
 def main():
     check_no_coverage_cheats()
 
     print("Calculating test coverage...")
     test_cov = "0.00"
+    env = os.environ.copy()
+    existing_rustflags = env.get("RUSTFLAGS", "")
+    if "--cfg coverage" not in existing_rustflags:
+        env["RUSTFLAGS"] = f"{existing_rustflags} --cfg coverage".strip()
+
     try:
         result = subprocess.run(
-            ["cargo", "tarpaulin", "--workspace"], capture_output=True, text=True
+            ["cargo", "tarpaulin", "--workspace"],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
         )
         output = result.stdout + result.stderr
         match = re.search(r"(\d+\.\d+)%\s*coverage", output)
         if match:
             test_cov = match.group(1)
+        else:
+            llvm_cov = run_llvm_cov(env)
+            if llvm_cov is not None:
+                test_cov = llvm_cov
+            elif result.returncode != 0:
+                print(f"Error running cargo tarpaulin:\n{output}")
+                sys.exit(1)
     except FileNotFoundError:
-        print("Warning: cargo-tarpaulin is not installed. Test coverage will be 0.00%.")
+        llvm_cov = run_llvm_cov(env)
+        if llvm_cov is not None:
+            test_cov = llvm_cov
+        else:
+            print(
+                "Warning: neither cargo-tarpaulin nor cargo-llvm-cov is installed. Test coverage will be 0.00%."
+            )
     except Exception as e:
-        print(f"Error running tarpaulin: {e}")
+        print(f"Error running coverage: {e}")
+        sys.exit(1)
 
     print(f"Test coverage: {test_cov}%")
 
@@ -142,6 +188,13 @@ def main():
 
         with open("README.md", "w", encoding="utf-8") as f:
             f.write(content)
+
+    try:
+        if float(test_cov) < 100.0:
+            print(f"Error: Test coverage is {test_cov}%, required 100.00%.")
+            sys.exit(1)
+    except ValueError:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

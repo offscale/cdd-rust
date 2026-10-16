@@ -77,8 +77,7 @@ where
                 }
             }
 
-            let res = srv.call(req).await?;
-            Ok(res.map_into_left_body())
+            srv.call(req).await.map(|res| res.map_into_left_body())
         })
     }
 }
@@ -105,6 +104,20 @@ mod tests {
         let resp = test::call_service(&app, req).await;
         assert!(resp.status().is_success());
 
+        let req = test::TestRequest::post().uri("/").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
+        let req = test::TestRequest::post()
+            .uri("/")
+            .insert_header((
+                "Content-Type",
+                actix_web::http::header::HeaderValue::from_bytes(&[0xFF]).expect("hdr"),
+            ))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
         let req = test::TestRequest::post()
             .uri("/")
             .insert_header(("Content-Type", "application/json"))
@@ -120,6 +133,22 @@ mod tests {
         assert_eq!(
             resp.status(),
             actix_web::http::StatusCode::UNSUPPORTED_MEDIA_TYPE
+        );
+
+        let err_app = test::init_service(App::new().wrap(StrictValidation).route(
+            "/err",
+            web::get().to(|| async {
+                Err::<HttpResponse, actix_web::Error>(actix_web::error::ErrorInternalServerError(
+                    "boom",
+                ))
+            }),
+        ))
+        .await;
+        let req = test::TestRequest::get().uri("/err").to_request();
+        let resp = test::call_service(&err_app, req).await;
+        assert_eq!(
+            resp.status(),
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR
         );
     }
 }

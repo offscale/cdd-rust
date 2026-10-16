@@ -44,16 +44,16 @@ pub fn extract_routes_from_reqwest_functions(code: &str) -> AppResult<Vec<Parsed
 fn parse_reqwest_route(func: &ast::Fn) -> Option<ParsedRoute> {
     let handler_name = func.name()?.text().to_string();
 
-    let mut method = String::new();
-    let mut path = String::new();
+    let mut method = None;
+    let mut path = None;
     let mut summary = String::new();
 
     for doc in func.doc_comments() {
         let text = doc.text().trim_start_matches("///").trim();
         if let Some(rest) = text.strip_prefix("@OAS_METHOD:") {
-            method = rest.trim().to_uppercase();
+            method = Some(rest.trim().to_uppercase()).filter(|s| !s.is_empty());
         } else if let Some(rest) = text.strip_prefix("@OAS_PATH:") {
-            path = rest.trim().to_string();
+            path = Some(rest.trim().to_string()).filter(|s| !s.is_empty());
         } else if !text.is_empty() {
             if !summary.is_empty() {
                 summary.push(char::from(10u8));
@@ -62,35 +62,24 @@ fn parse_reqwest_route(func: &ast::Fn) -> Option<ParsedRoute> {
         }
     }
 
-    if (method.is_empty() || path.is_empty()) && func.body().is_some() {
-        if let Some(body) = func.body() {
-            if let Some((ast_method, ast_path)) = extract_method_and_path_from_body(&body) {
-                if method.is_empty() {
-                    method = ast_method;
-                }
-                if path.is_empty() {
-                    path = ast_path;
-                }
-            }
-        }
+    if let Some(body) = func.body() {
+        let (ast_method, ast_path) = extract_method_and_path_from_body(&body);
+        method = method.or(ast_method);
+        path = path.or(ast_path);
     }
 
-    if method.is_empty() || path.is_empty() {
-        return None;
-    }
+    let (method, path) = (method?, path?);
+
+    let summary_opt = if summary.is_empty() {
+        None
+    } else {
+        Some(summary)
+    };
 
     let route = ParsedRoute {
-        path: path.clone(),
-        summary: if summary.is_empty() {
-            None
-        } else {
-            Some(summary.clone())
-        },
-        description: if summary.is_empty() {
-            None
-        } else {
-            Some(summary)
-        },
+        path,
+        summary: summary_opt.clone(),
+        description: summary_opt,
         path_summary: None,
         path_description: None,
         operation_summary: None,
@@ -130,25 +119,24 @@ fn parse_reqwest_route(func: &ast::Fn) -> Option<ParsedRoute> {
 
 /// Inspects `ast::MethodCallExpr` and `ast::MacroCall` nodes inside a function block
 /// to extract the HTTP method and path template.
-fn extract_method_and_path_from_body(body: &ast::BlockExpr) -> Option<(String, String)> {
+fn extract_method_and_path_from_body(body: &ast::BlockExpr) -> (Option<String>, Option<String>) {
     let mut detected_method = None;
     let mut detected_path = None;
 
     for node in body.syntax().descendants() {
         if let Some(call) = ast::MethodCallExpr::cast(node.clone()) {
-            if let Some(name_ref) = call.name_ref() {
-                let name = name_ref.text().to_uppercase();
-                if matches!(
-                    name.as_str(),
-                    "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS" | "TRACE"
-                ) {
-                    detected_method = Some(name);
-                    if let Some(arg_list) = call.arg_list() {
-                        if let Some(first_arg) = arg_list.args().next() {
-                            if let Some(p) = extract_path_from_expr(&first_arg) {
-                                detected_path = Some(p);
-                            }
-                        }
+            let name = call
+                .name_ref()
+                .map(|n| n.text().to_uppercase())
+                .unwrap_or_default();
+            if matches!(
+                name.as_str(),
+                "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS" | "TRACE"
+            ) {
+                detected_method = Some(name);
+                if let Some(first_arg) = call.arg_list().and_then(|al| al.args().next()) {
+                    if let Some(p) = extract_path_from_expr(&first_arg) {
+                        detected_path = Some(p);
                     }
                 }
             }
@@ -161,7 +149,7 @@ fn extract_method_and_path_from_body(body: &ast::BlockExpr) -> Option<(String, S
         }
     }
 
-    Some((detected_method?, detected_path?))
+    (detected_method, detected_path)
 }
 
 fn extract_path_from_expr(expr: &ast::Expr) -> Option<String> {
@@ -171,15 +159,13 @@ fn extract_path_from_expr(expr: &ast::Expr) -> Option<String> {
                 return Some(p);
             }
         }
-        if let Some(token) = node.as_token() {
-            if let Some(str_token) = ast::String::cast(token.clone()) {
-                if let Ok(val) = str_token.value() {
-                    if let Ok(parsed_url) = url::Url::parse(&val) {
-                        return Some(parsed_url.path().to_string());
-                    }
-                    if let Some(idx) = val.find('/') {
-                        return Some(val[idx..].to_string());
-                    }
+        if let Some(str_token) = node.as_token().and_then(|t| ast::String::cast(t.clone())) {
+            if let Ok(val) = str_token.value() {
+                if let Ok(parsed_url) = url::Url::parse(&val) {
+                    return Some(parsed_url.path().to_string());
+                }
+                if let Some(idx) = val.find('/') {
+                    return Some(val[idx..].to_string());
                 }
             }
         }
@@ -188,19 +174,16 @@ fn extract_path_from_expr(expr: &ast::Expr) -> Option<String> {
 }
 
 fn extract_path_from_macro(macro_call: &ast::MacroCall) -> Option<String> {
-    let path = macro_call.path()?.to_string();
-    if path != "format" {
+    if macro_call.path().is_none_or(|p| p.to_string() != "format") {
         return None;
     }
     let tt = macro_call.token_tree()?;
     for element in tt.syntax().children_with_tokens() {
-        if let Some(token) = element.into_token() {
-            if let Some(str_token) = ast::String::cast(token) {
-                if let Ok(val) = str_token.value() {
-                    let cleaned = val.trim_start_matches("{}");
-                    if cleaned.starts_with('/') {
-                        return Some(cleaned.to_string());
-                    }
+        if let Some(str_token) = element.into_token().and_then(ast::String::cast) {
+            if let Ok(val) = str_token.value() {
+                let cleaned = val.trim_start_matches("{}");
+                if cleaned.starts_with('/') {
+                    return Some(cleaned.to_string());
                 }
             }
         }
@@ -216,12 +199,16 @@ mod tests {
     fn test_extract_reqwest_routes_from_docs_and_ast() {
         let code = r#"
         /// Get a user by ID
+        ///
+        /// Second line
         /// @OAS_METHOD: GET
         /// @OAS_PATH: /users/{id}
         pub async fn get_user() {}
 
         /// Create a user via AST inspection
         pub async fn create_user(client: &reqwest::Client, base_url: &str) {
+            println!("logging");
+            let non_slash = format!("hello {}", base_url);
             let url = format!("{}/users", base_url);
             let _ = client.post(&url).send().await;
         }
@@ -233,12 +220,44 @@ mod tests {
         pub async fn health(client: &reqwest::Client) {
             let _ = client.get("http://localhost:8080/health").send().await;
         }
+
+        /// @OAS_METHOD: PUT
+        pub async fn partial_method_doc(client: &reqwest::Client) {
+            let _ = client.put("/relative/path").send().await;
+        }
+
+        /// @OAS_METHOD: HEAD
+        pub async fn partial_method_no_ast_path(client: &reqwest::Client) {
+            let _ = client.head("no_slash").send().await;
+        }
+
+        /// @OAS_PATH: /doc_path
+        pub async fn partial_path_doc(client: &reqwest::Client) {
+            let _ = client.patch("no_slash_string").send().await;
+        }
+
+        pub async fn no_route_fn(client: &reqwest::Client) {
+            let _ = client.get().send();
+            let _ = client.post(println!("hi"));
+            let _ = client.put("\u{ZZZZ}");
+            let _ = format!("\u{ZZZZ}");
+            let _ = format!;
+        }
+
+        extern "C" {
+            fn decl_without_body();
+        }
+        fn
         "#;
         let routes = extract_routes_from_reqwest_functions(code)
             .expect("Failed to extract routes from reqwest functions");
-        assert_eq!(routes.len(), 4);
+        assert_eq!(routes.len(), 6);
         assert_eq!(routes[0].method, "GET");
         assert_eq!(routes[0].path, "/users/{id}");
+        assert_eq!(
+            routes[0].summary.as_deref(),
+            Some("Get a user by ID\nSecond line")
+        );
         assert_eq!(routes[1].method, "POST");
         assert_eq!(routes[1].path, "/users");
         assert_eq!(
@@ -249,5 +268,9 @@ mod tests {
         assert_eq!(routes[2].path, "/users/{id}");
         assert_eq!(routes[3].method, "GET");
         assert_eq!(routes[3].path, "/health");
+        assert_eq!(routes[4].method, "PUT");
+        assert_eq!(routes[4].path, "/relative/path");
+        assert_eq!(routes[5].method, "PATCH");
+        assert_eq!(routes[5].path, "/doc_path");
     }
 }

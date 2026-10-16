@@ -976,30 +976,21 @@ paths: {}
         let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("Failed to parse from string");
         let comps = openapi.components.expect("Missing components");
         let schemes = comps.security_schemes.expect("Missing security schemes");
-        let oauth = match schemes.get("oauth").expect("Failed to get") {
-            RefOr::T(ShimSecurityScheme::OAuth2(o)) => o,
-            _ => panic!("Expected OAuth2"),
-        };
+        let serialized_oauth =
+            serde_json::to_value(schemes.get("oauth").expect("oauth")).expect("json");
         assert_eq!(
-            oauth.oauth2_metadata_url.as_deref(),
-            Some("https://auth.example.com/.well-known/oauth-authorization-server")
-        );
-        let flow = oauth
-            .flows
-            .as_ref()
-            .expect("Failed to get reference")
-            .device_authorization
-            .as_ref()
-            .expect("Failed to get reference");
-        assert_eq!(
-            flow.device_authorization_url.as_deref(),
-            Some("https://auth.example.com/device")
+            serialized_oauth["oauth2MetadataUrl"],
+            serde_json::json!("https://auth.example.com/.well-known/oauth-authorization-server")
         );
         assert_eq!(
-            flow.token_url.as_deref(),
-            Some("https://auth.example.com/token")
+            serialized_oauth["flows"]["deviceAuthorization"]["deviceAuthorizationUrl"],
+            serde_json::json!("https://auth.example.com/device")
         );
-        assert!(flow.scopes.contains_key("read"));
+        assert_eq!(
+            serialized_oauth["flows"]["deviceAuthorization"]["tokenUrl"],
+            serde_json::json!("https://auth.example.com/token")
+        );
+        assert!(serialized_oauth["flows"]["deviceAuthorization"]["scopes"]["read"].is_string());
     }
 
     #[test]
@@ -1021,11 +1012,9 @@ paths: {}
         let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("Failed to parse from string");
         let comps = openapi.components.expect("Missing components");
         let schemes = comps.security_schemes.expect("Missing security schemes");
-        let legacy = match schemes.get("legacyKey").expect("Failed to get") {
-            RefOr::T(ShimSecurityScheme::ApiKey(k)) => k,
-            _ => panic!("Expected apiKey scheme"),
-        };
-        assert!(legacy.deprecated);
+        let serialized_key =
+            serde_json::to_value(schemes.get("legacyKey").expect("legacyKey")).expect("json");
+        assert_eq!(serialized_key["deprecated"], serde_json::json!(true));
     }
 
     #[test]
@@ -1058,28 +1047,15 @@ paths: {}
         let comps = openapi.components.expect("Missing components");
         let schemes = comps.security_schemes.expect("Missing security schemes");
 
-        // Check API Key
-        let api_key = match schemes.get("api_key").expect("Failed to get") {
-            RefOr::T(ShimSecurityScheme::ApiKey(k)) => k,
-            _ => panic!("Expected ApiKey"),
-        };
-        assert_eq!(api_key.name, "api_key");
-        assert_eq!(api_key.in_loc, "header");
-
-        // Check OAuth2
-        let oauth = match schemes.get("oauth").expect("Failed to get") {
-            RefOr::T(ShimSecurityScheme::OAuth2(o)) => o,
-            _ => panic!("Expected OAuth2"),
-        };
-        let flow = oauth
-            .flows
-            .as_ref()
-            .expect("Failed to get reference")
-            .implicit
-            .as_ref()
-            .expect("Failed to get reference");
-        assert_eq!(flow.authorization_url.as_deref(), Some("https://auth.com"));
-        assert!(flow.scopes.contains_key("read"));
+        let ser_api_key =
+            serde_json::to_value(schemes.get("api_key").expect("api_key")).expect("json");
+        assert_eq!(ser_api_key["name"], serde_json::json!("api_key"));
+        assert_eq!(ser_api_key["in"], serde_json::json!("header"));
+        let ser_oauth = serde_json::to_value(schemes.get("oauth").expect("oauth")).expect("json");
+        assert_eq!(
+            ser_oauth["flows"]["implicit"]["authorizationUrl"],
+            serde_json::json!("https://auth.com")
+        );
     }
 
     #[test]
@@ -1195,5 +1171,96 @@ webhooks:
         let webhooks = openapi.webhooks.as_ref().expect("Failed to get reference");
         assert!(webhooks.extensions.contains_key("x-webhooks-meta"));
         assert!(webhooks.items.contains_key("onEvent"));
+
+        // Cover ShimPaths::is_empty, Serialize for ShimPaths, ShimWebhooks, ShimResponses, ShimRequestBody,
+        // and all normalization branches (headers, content, encoding, prefixEncoding, itemEncoding)
+        assert!(!paths.is_empty());
+        assert!(ShimPaths::default().is_empty());
+        assert!(ShimResponses::default().raw().is_object());
+
+        let serialized_openapi = serde_json::to_value(&openapi).expect("serialize openapi");
+        assert!(serialized_openapi["paths"]["/health"].is_object());
+        assert!(serialized_openapi["webhooks"]["onEvent"].is_object());
+
+        assert!(serde_json::from_value::<ShimPaths>(serde_json::json!({
+            "/bad": "not_an_object"
+        }))
+        .is_err());
+        assert!(serde_json::from_value::<ShimWebhooks>(serde_json::json!({
+            "badHook": "not_an_object"
+        }))
+        .is_err());
+
+        let rich_resp_json = serde_json::json!({
+            "200": {
+                "description": "OK",
+                "headers": {
+                    "X-Bool": { "schema": true },
+                    "X-Ref": { "$ref": "#/components/headers/H" },
+                    "X-NoSchema": { "description": "no schema", "content": {} }
+                },
+                "content": {
+                    "application/json": {
+                        "$ref": "#/components/mediaTypes/M",
+                        "schema": true
+                    },
+                    "text/plain": "not_an_object"
+                },
+                "links": {
+                    "Self": { "operationId": "getSelf" }
+                }
+            }
+        });
+        let shim_resp = ShimResponses::from_raw(rich_resp_json.clone()).expect("from_raw");
+        assert!(!shim_resp.typed().responses.is_empty());
+        assert_eq!(shim_resp.raw(), &rich_resp_json);
+        let deser_resp: ShimResponses = serde_json::from_value(rich_resp_json).expect("deser resp");
+        let ser_resp = serde_json::to_value(&deser_resp).expect("ser resp");
+        assert!(ser_resp.is_object());
+        assert!(
+            serde_json::from_value::<ShimResponses>(serde_json::json!({"200": "bad"})).is_err()
+        );
+        assert!(serde_json::from_value::<ShimRequestBody>(serde_json::json!("bad")).is_err());
+
+        let mut non_obj_hdrs = serde_json::json!({"X-Bad": "not_obj"});
+        normalize_response_headers(&mut non_obj_hdrs);
+        let mut non_obj_resp = serde_json::json!("not_an_object");
+        normalize_responses_for_utoipa(&mut non_obj_resp);
+        normalize_response_object(&mut non_obj_resp);
+        normalize_response_headers(&mut non_obj_resp);
+        normalize_response_content(&mut non_obj_resp);
+        normalize_encoding_map_headers(&mut non_obj_resp);
+        normalize_encoding_array_headers(&mut non_obj_resp);
+        normalize_encoding_object_headers(&mut non_obj_resp);
+
+        let rich_rb_json = serde_json::json!({
+            "description": "RB",
+            "content": {
+                "multipart/mixed": {
+                    "schema": true,
+                    "encoding": {
+                        "partA": {
+                            "headers": {
+                                "X-Hdr": { "description": "hdr" }
+                            }
+                        }
+                    },
+                    "prefixEncoding": [
+                        { "contentType": "text/plain" }
+                    ],
+                    "itemEncoding": {
+                        "contentType": "application/octet-stream"
+                    }
+                }
+            }
+        });
+        let deser_rb: ShimRequestBody =
+            serde_json::from_value(rich_rb_json.clone()).expect("deser rb");
+        assert_eq!(deser_rb.raw(), &rich_rb_json);
+        assert_eq!(deser_rb.typed().description.as_deref(), Some("RB"));
+        let ser_rb = serde_json::to_value(&deser_rb).expect("ser rb");
+        assert_eq!(ser_rb, rich_rb_json);
+        let from_rb = ShimRequestBody::from(deser_rb.inner);
+        assert!(from_rb.raw().is_object());
     }
 }

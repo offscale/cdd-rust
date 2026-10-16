@@ -186,6 +186,48 @@ mod tests {
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), actix_web::http::StatusCode::NOT_FOUND);
+
+        let store_clone = store.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = store_clone.orders.lock().expect("lock");
+            panic!("poison order store");
+        })
+        .join();
+
+        let req = test::TestRequest::get()
+            .uri("/store/inventory")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(
+            resp.status(),
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+
+        let req = test::TestRequest::post()
+            .uri("/store/order")
+            .set_json(serde_json::json!({"id": 1}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(
+            resp.status(),
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+
+        let req = test::TestRequest::get().uri("/store/order/1").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(
+            resp.status(),
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+
+        let req = test::TestRequest::delete()
+            .uri("/store/order/1")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(
+            resp.status(),
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 
     #[actix_web::test]
@@ -198,6 +240,12 @@ mod tests {
                 .route("/store/order/{orderId}", web::delete().to(delete_order)),
         )
         .await;
+
+        let req = test::TestRequest::get()
+            .uri("/store/inventory")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
 
         let req = test::TestRequest::post().uri("/store/order").to_request();
         let resp = test::call_service(&app, req).await;

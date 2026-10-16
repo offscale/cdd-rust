@@ -90,9 +90,7 @@ pub fn run_sync(args: &SyncArgs, mapper: &impl ModelMapper) -> AppResult<()> {
                     args.input, args.output
                 );
 
-                mapper
-                    .generate(&args.input, &args.output)
-                    .map_err(|e| AppError::General(e.to_string()))?;
+                mapper.generate(&args.input, &args.output)?;
             } else {
                 println!("Skipping model generation (--no-gen).");
             }
@@ -135,9 +133,7 @@ fn process_models_for_openapi(
         )));
     }
 
-    let walker = WalkDir::new(model_dir).into_iter();
-
-    for entry in walker.filter_map(|e| e.ok()) {
+    for entry in WalkDir::new(model_dir).into_iter().flatten() {
         let path = entry.path();
 
         // Only process Rust files, skip mod.rs (orphans usually valid)
@@ -153,8 +149,7 @@ fn process_models_for_openapi(
 
 /// Processes a single file to inject derives and patch types.
 fn process_file(path: &Path, type_overrides: &HashMap<String, String>) -> AppResult<()> {
-    let content = fs::read_to_string(path)
-        .map_err(|e| AppError::General(format!("Failed to read file {:?}: {}", path, e)))?;
+    let content = fs::read_to_string(path)?;
 
     let mut new_content = content.clone();
 
@@ -170,57 +165,27 @@ fn process_file(path: &Path, type_overrides: &HashMap<String, String>) -> AppRes
 
         // B. Enforce Types
         if !type_overrides.is_empty() {
-            // We need to check fields of this struct.
-            // Note: `modify_struct_field_type` handles `find_struct` internally,
-            // but effectively we are re-parsing. Optimally we'd do it once, but patching strings
-            // requires recalculating offsets if length changes, so iterative patching is robust.
-            // We blindly try to patch fields if they exist in the overrides.
+            let fields = cdd_core::extract_struct_fields(&new_content, name)?;
             for (field, new_type) in type_overrides {
-                // We attempt modification. If the field doesn't exist, `modify_struct_field_type` returns Error.
-                // We should check existence first or ignore specific errors.
-                // For robustness in this bulk tool, checking fields first is safer.
-                match cdd_core::extract_struct_fields(&new_content, name) {
-                    Ok(fields) => {
-                        if fields.iter().any(|f| f.name == *field) {
-                            match modify_struct_field_type(&new_content, name, field, new_type) {
-                                Ok(patched) => new_content = patched,
-                                Err(e) => {
-                                    // Log warning but don't crash pipeline if patch fails for logic reasons
-                                    // (e.g. syntax issue in intermediate step), though unexpected here.
-                                    eprintln!(
-                                        "Warning: Failed to patch field '{}' in struct '{}': {}",
-                                        field, name, e
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    Err(_) => continue, // Struct parse failed, skip
+                if fields.iter().any(|f| f.name == *field) {
+                    new_content = modify_struct_field_type(&new_content, name, field, new_type)?;
                 }
             }
         }
     }
 
-    // 2. Add File Header Attributes (allow missing docs)
-    // Removed to comply with 100% doc coverage without exceptions.
-
     // 3. Add Imports if needed
     if !new_content.contains("use utoipa::ToSchema;") {
-        if let Some(idx) = new_content.find('\n') {
-            new_content.insert_str(idx + 1, "use utoipa::ToSchema;\n");
-        } else {
-            new_content.push_str("use utoipa::ToSchema;\n");
-        }
+        let pos = new_content.find('\n').map(|i| i + 1).unwrap_or(0);
+        new_content.insert_str(pos, "use utoipa::ToSchema;\n");
     }
     if !new_content.contains("use serde::{Deserialize, Serialize};") {
-        if let Some(idx) = new_content.find('\n') {
-            new_content.insert_str(idx + 1, "use serde::{Deserialize, Serialize};\n");
-        }
+        let pos = new_content.find('\n').map(|i| i + 1).unwrap_or(0);
+        new_content.insert_str(pos, "use serde::{Deserialize, Serialize};\n");
     }
 
     if new_content != content {
-        fs::write(path, new_content)
-            .map_err(|e| AppError::General(format!("Failed to write file {:?}: {}", path, e)))?;
+        fs::write(path, new_content)?;
     }
 
     Ok(())
@@ -284,9 +249,21 @@ mod tests {
         let res = super::sync(&config, &mapper);
         assert!(res.is_ok());
 
+        let api_config = super::SyncConfig {
+            truth: "api".to_string(),
+            ..config
+        };
+        assert!(super::sync(&api_config, &mapper).is_ok());
+
+        let db_err_config = super::SyncConfig {
+            truth: "db".to_string(),
+            ..api_config
+        };
+        assert!(super::sync(&db_err_config, &mapper).is_err());
+
         let invalid_config = super::SyncConfig {
             truth: "invalid".to_string(),
-            ..config
+            ..db_err_config
         };
         let err_res = super::sync(&invalid_config, &mapper);
         assert!(err_res.is_err());
@@ -355,8 +332,11 @@ pub struct Post {
             "created_at".to_string(),
             "chrono::DateTime<Utc>".to_string(),
         );
+        overrides.insert("nonexistent_field".to_string(), "String".to_string());
 
         process_file(&file_path, &overrides).expect("Failed to process file");
+        // Running a second time exercises the unchanged / already-present branches
+        process_file(&file_path, &overrides).expect("Idempotent second run");
 
         let new_code = fs::read_to_string(&file_path).expect("Failed to read file to string");
 
@@ -365,6 +345,18 @@ pub struct Post {
         // Check Type Replacement
         assert!(new_code.contains("pub created_at: chrono::DateTime<Utc>"));
         assert!(!new_code.contains("pub created_at: chrono::NaiveDateTime"));
+
+        // Single-line file without newline
+        let single_line = dir.path().join("single.rs");
+        fs::write(&single_line, "pub struct Single { pub id: i32 }").expect("write");
+        process_file(&single_line, &HashMap::new()).expect("single line");
+        let single_res = fs::read_to_string(&single_line).expect("read");
+        assert!(single_res.contains("use utoipa::ToSchema;"));
+
+        // Single-line file that already has ToSchema but not serde and no newline
+        let single_no_nl = dir.path().join("single_no_nl.rs");
+        fs::write(&single_no_nl, "use utoipa::ToSchema;").expect("write");
+        process_file(&single_no_nl, &HashMap::new()).expect("single no nl");
     }
 
     #[test]
@@ -403,6 +395,33 @@ pub struct Post {
         let mapper = DieselMapper;
         let res = run_sync(&args, &mapper);
         assert!(res.is_err());
+
+        // Full DB sync with valid schema and model dir containing mod.rs, .rs, and .txt
+        let dir = tempdir().expect("tempdir");
+        let schema_path = dir.path().join("schema.rs");
+        let models_dir = dir.path().join("models");
+        fs::create_dir_all(&models_dir).expect("mkdir");
+        fs::write(
+            &schema_path,
+            "diesel::table! { users (id) { id -> Int4, } }\n",
+        )
+        .expect("write schema");
+        fs::write(models_dir.join("mod.rs"), "// mod").expect("write mod.rs");
+        fs::write(models_dir.join("notes.txt"), "ignore").expect("write txt");
+        fs::write(
+            models_dir.join("extra.rs"),
+            "pub struct Extra { pub id: i32 }\n",
+        )
+        .expect("write extra.rs");
+
+        let full_args = SyncArgs {
+            truth: SyncTruth::Db,
+            input: schema_path,
+            output: models_dir,
+            no_gen: false,
+            force_type: vec![("id".to_string(), "i64".to_string())],
+        };
+        assert!(run_sync(&full_args, &mapper).is_ok());
     }
 
     #[test]

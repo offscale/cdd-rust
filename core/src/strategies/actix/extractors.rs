@@ -100,9 +100,7 @@ pub fn security_extractor(requirements: &[SecurityRequirementGroup]) -> String {
         return "".to_string();
     }
 
-    let Some(group) = requirements.iter().find(|group| !group.schemes.is_empty()) else {
-        return "".to_string();
-    };
+    let group = &requirements[0];
 
     let req = &group.schemes[0];
     let base_name = to_snake_case(&req.scheme_name);
@@ -201,6 +199,12 @@ mod tests {
     fn test_extractors() {
         assert_eq!(path_extractor(&["Uuid".into()]), "web::Path<Uuid>");
         assert_eq!(
+            path_extractor(&["Uuid".into(), "i32".into()]),
+            "web::Path<(Uuid, i32)>"
+        );
+        assert_eq!(query_extractor(), "web::Query<Value>");
+        assert_eq!(query_string_extractor("Filter", None), "web::Query<Filter>");
+        assert_eq!(
             query_string_extractor("Filter", Some(&ContentMediaType::FormUrlEncoded)),
             "web::Query<Filter>"
         );
@@ -209,10 +213,20 @@ mod tests {
             "String"
         );
         assert_eq!(
+            query_string_extractor(
+                "Filter",
+                Some(&ContentMediaType::Other("text/plain".to_string()))
+            ),
+            "String"
+        );
+        assert_eq!(
             typed_query_extractor("SearchQuery"),
             "web::Query<SearchQuery>"
         );
+        assert_eq!(header_extractor("String"), "actix_web::HttpRequest");
+        assert_eq!(cookie_extractor(), "actix_web::HttpRequest");
         assert_eq!(body_extractor("Dto"), "web::Json<Dto>");
+        assert_eq!(form_extractor("Dto"), "web::Form<Dto>");
         assert_eq!(text_extractor("String"), "String");
         assert_eq!(bytes_extractor("Vec<u8>"), "web::Bytes");
     }
@@ -395,6 +409,60 @@ mod tests {
                 schemes: vec![fallback_req]
             }]),
             "custom_scheme: web::ReqData<security::CustomScheme>"
+        );
+
+        let cookie_key_req = SecurityRequirement {
+            scheme_name: "ckey".to_string(),
+            scopes: vec![],
+            scheme: Some(SecuritySchemeInfo {
+                kind: SecuritySchemeKind::ApiKey {
+                    name: "sid".into(),
+                    in_loc: ParamSource::Cookie,
+                },
+                description: None,
+                deprecated: false,
+            }),
+        };
+        assert_eq!(
+            security_extractor(&[SecurityRequirementGroup {
+                schemes: vec![cookie_key_req]
+            }]),
+            "api_key: web::ReqData<security::ApiKey>"
+        );
+
+        let path_key_req = SecurityRequirement {
+            scheme_name: "pkey".to_string(),
+            scopes: vec![],
+            scheme: Some(SecuritySchemeInfo {
+                kind: SecuritySchemeKind::ApiKey {
+                    name: "pid".into(),
+                    in_loc: ParamSource::Path,
+                },
+                description: None,
+                deprecated: false,
+            }),
+        };
+        assert_eq!(
+            security_extractor(&[SecurityRequirementGroup {
+                schemes: vec![path_key_req]
+            }]),
+            "api_key: web::ReqData<security::ApiKey>"
+        );
+
+        let mtls_req = SecurityRequirement {
+            scheme_name: "mtls".to_string(),
+            scopes: vec![],
+            scheme: Some(SecuritySchemeInfo {
+                kind: SecuritySchemeKind::MutualTls,
+                description: None,
+                deprecated: false,
+            }),
+        };
+        assert_eq!(
+            security_extractor(&[SecurityRequirementGroup {
+                schemes: vec![mtls_req]
+            }]),
+            "_auth: web::ReqData<security::Authenticated>"
         );
     }
 }

@@ -51,16 +51,15 @@ pub fn handler_signature(route: &crate::openapi::parse::ParsedRoute, args: &[Str
         }
     }
 
-    let mut chars = actual_path.chars().peekable();
+    let mut chars = actual_path.chars();
     while let Some(c) = chars.next() {
         if c == '{' {
             let mut param_name = String::new();
-            while let Some(&p) = chars.peek() {
+            for p in chars.by_ref() {
                 if p == '}' {
-                    chars.next();
                     break;
                 }
-                param_name.push(chars.next().unwrap_or('_'));
+                param_name.push(p);
             }
             format_str.push_str("{}");
             format_args.push(crate::openapi::parse::routes::naming::to_snake_case(
@@ -356,9 +355,7 @@ mod tests {
         assert!(sig.contains("resp.json::<User>().await"));
 
         // Multipart + optional body + response headers + no query
-        if let Some(ref mut rb) = route.request_body {
-            rb.format = BodyFormat::Multipart;
-        }
+        route.request_body.as_mut().expect("request_body").format = BodyFormat::Multipart;
         route.response_headers = vec![ResponseHeader {
             name: "X-Rate".to_string(),
             description: None,
@@ -381,12 +378,64 @@ mod tests {
         // No response type and no response headers
         route.response_headers.clear();
         route.response_type = None;
-        if let Some(ref mut rb) = route.request_body {
-            rb.format = BodyFormat::Json;
-        }
+        route.request_body.as_mut().expect("request_body").format = BodyFormat::Json;
         let sig_plain =
             handler_signature(&route, &["id: i64".to_string(), "body: Value".to_string()]);
         assert!(sig_plain.contains("req.json(&body)"));
         assert!(sig_plain.contains("Ok(resp)"));
+
+        // Path already starting with base_path, unclosed '{', Query param, Cookie ApiKey, MutualTls, no security, no request_body
+        let mut route2 = route.clone();
+        route2.path = "/v1/items/{unclosed".to_string();
+        route2.base_path = Some("/v1".to_string());
+        route2.params.push(RouteParam {
+            name: "q".to_string(),
+            description: None,
+            source: ParamSource::Query,
+            ty: "String".to_string(),
+            content_media_type: None,
+            style: None,
+            explode: false,
+            allow_reserved: false,
+            deprecated: false,
+            allow_empty_value: false,
+            example: None,
+            raw_schema: None,
+            extensions: BTreeMap::new(),
+        });
+        route2.security = vec![SecurityRequirementGroup {
+            schemes: vec![
+                SecurityRequirement {
+                    scheme_name: "cookie_key".to_string(),
+                    scopes: vec![],
+                    scheme: Some(SecuritySchemeInfo {
+                        kind: SecuritySchemeKind::ApiKey {
+                            name: "sid".to_string(),
+                            in_loc: ParamSource::Cookie,
+                        },
+                        description: None,
+                        deprecated: false,
+                    }),
+                },
+                SecurityRequirement {
+                    scheme_name: "mtls".to_string(),
+                    scopes: vec![],
+                    scheme: Some(SecuritySchemeInfo {
+                        kind: SecuritySchemeKind::MutualTls,
+                        description: None,
+                        deprecated: false,
+                    }),
+                },
+            ],
+        }];
+        route2.request_body = None;
+        let sig2 = handler_signature(&route2, &["body: Value".to_string()]);
+        assert!(sig2.contains("{}/v1/items/{}"));
+        assert!(sig2.contains("req.json(&body)"));
+
+        route2.base_path = None;
+        route2.security.clear();
+        let sig3 = handler_signature(&route2, &[]);
+        assert!(!sig3.contains("auth_token"));
     }
 }

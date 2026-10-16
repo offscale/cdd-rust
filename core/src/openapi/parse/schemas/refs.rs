@@ -66,10 +66,7 @@ impl<'a> ResolutionContext<'a> {
             if let Ok(url) = Url::parse(&s) {
                 return Some(url);
             }
-            let dummy = Url::parse(DUMMY_BASE).ok()?;
-            if s.starts_with('/') {
-                return dummy.join(&s).ok();
-            }
+            let dummy = Url::parse(DUMMY_BASE).expect("valid dummy base");
             dummy.join(&s).ok()
         });
         Self {
@@ -215,10 +212,9 @@ pub fn extract_ref_name(ref_str: &str) -> String {
 
     if let Some(frag) = parsed.fragment {
         // Standard JSON Pointer: /components/schemas/User -> User
-        if let Some(name) = frag.split('/').next_back() {
-            if !name.is_empty() {
-                return name.to_string();
-            }
+        let name = frag.split('/').next_back().unwrap_or(frag);
+        if !name.is_empty() {
+            return name.to_string();
         }
     }
 
@@ -294,21 +290,7 @@ pub fn resolve_ref_name<'a>(
             // Standard internal reference
             resolve_local_fragment(parsed.fragment, components)
         }
-        ReferenceKind::Remote => {
-            // Check if Remote text matches Base URI (Appendix F)
-            if let Some(base) = &context.base_uri {
-                // We parse the document part of the reference as a URL
-                if let Ok(ref_url) = Url::parse(parsed.document) {
-                    // Compare scheme, host, path, port
-                    // If they match, we treat this as a local resolution utilizing the fragment.
-                    if same_document(base, &ref_url) {
-                        return resolve_local_fragment(parsed.fragment, components);
-                    }
-                }
-            }
-            None
-        }
-        ReferenceKind::Relative => {
+        ReferenceKind::Remote | ReferenceKind::Relative => {
             if let Some(base) = &context.base_uri {
                 if let Ok(resolved_doc) = base.join(parsed.document) {
                     if same_document(base, &resolved_doc) {
@@ -499,18 +481,18 @@ pub(crate) fn resolve_dynamic_refs_for_component(
     let mut visiting = HashSet::new();
     let mut scope = DynamicScope::default();
 
-    if raw_schemas.contains_key(entry_name) {
-        resolve_component_dynamic_refs(
-            entry_name,
-            document_base,
-            raw_schemas,
-            schema_ids,
-            self_uri,
-            &mut scope,
-            &mut resolved,
-            &mut visiting,
-        );
-    }
+    resolve_component_dynamic_refs_for_ref(
+        entry_name,
+        "",
+        document_base,
+        document_base,
+        raw_schemas,
+        schema_ids,
+        self_uri,
+        &mut scope,
+        &mut resolved,
+        &mut visiting,
+    );
 
     resolved
 }
@@ -566,42 +548,6 @@ impl DynamicScope {
             .find(|(anchor, _)| anchor == name)
             .map(|(_, target)| target.as_str())
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn resolve_component_dynamic_refs(
-    name: &str,
-    document_base: Option<&Url>,
-    raw_schemas: &serde_json::Map<String, JsonValue>,
-    schema_ids: &HashMap<String, String>,
-    self_uri: Option<&str>,
-    scope: &mut DynamicScope,
-    resolved: &mut HashMap<String, JsonValue>,
-    visiting: &mut HashSet<String>,
-) {
-    if resolved.contains_key(name) || visiting.contains(name) {
-        return;
-    }
-
-    let Some(schema) = raw_schemas.get(name) else {
-        return;
-    };
-
-    visiting.insert(name.to_string());
-    let mut cloned = schema.clone();
-    resolve_dynamic_refs_in_resource(
-        &mut cloned,
-        document_base,
-        document_base,
-        raw_schemas,
-        schema_ids,
-        self_uri,
-        scope,
-        resolved,
-        visiting,
-    );
-    resolved.insert(name.to_string(), cloned);
-    visiting.remove(name);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -843,27 +789,23 @@ fn resolve_ref_with_base(ref_str: &str, base: Option<&Url>) -> String {
     if matches!(parsed.kind, ReferenceKind::Remote) {
         return ref_str.to_string();
     }
-
     let Some(base) = base else {
         return ref_str.to_string();
     };
 
     if parsed.document.is_empty() {
-        if let Some(frag) = parsed.fragment {
-            return format!("{}#{}", base, frag);
-        }
-        return base.to_string();
+        return match parsed.fragment {
+            Some(frag) => format!("{}#{}", base, frag),
+            None => base.to_string(),
+        };
     }
 
-    match base.join(parsed.document) {
-        Ok(resolved) => {
-            if let Some(frag) = parsed.fragment {
-                format!("{}#{}", resolved, frag)
-            } else {
-                resolved.to_string()
-            }
-        }
-        Err(_) => ref_str.to_string(),
+    let resolved = base
+        .join(parsed.document)
+        .expect("relative reference joins against valid base URL");
+    match parsed.fragment {
+        Some(frag) => format!("{}#{}", resolved, frag),
+        None => resolved.to_string(),
     }
 }
 
@@ -874,20 +816,15 @@ fn resolve_ref_base(
 ) -> Option<Url> {
     let parsed = parse_reference(ref_str);
     if !parsed.document.is_empty() {
-        if let Some(doc_uri) = resolve_ref_document_uri(parsed.document, current_base) {
-            return Url::parse(&doc_uri).ok();
-        }
+        return resolve_ref_document_uri(parsed.document, current_base)
+            .and_then(|u| Url::parse(&u).ok());
     }
 
-    document_base.cloned().or_else(|| current_base.cloned())
+    document_base.or(current_base).cloned()
 }
 
 fn resource_base(node: &JsonValue, current_base: Option<&Url>) -> (Option<Url>, Option<String>) {
-    let Some(obj) = node.as_object() else {
-        return (current_base.cloned(), current_base.map(|u| u.to_string()));
-    };
-
-    if let Some(id) = obj.get("$id").and_then(|v| v.as_str()) {
+    if let Some(id) = node.get("$id").and_then(|v| v.as_str()) {
         let base_url = resolve_schema_base(id, current_base).or_else(|| current_base.cloned());
         let base_str = Some(resolve_schema_id_key(id, current_base));
         return (base_url, base_str);
@@ -904,8 +841,7 @@ fn collect_resource_dynamic_anchors(
 ) {
     match node {
         JsonValue::Object(map) => {
-            let has_id = map.get("$id").and_then(|v| v.as_str()).is_some();
-            if !is_root && has_id {
+            if !is_root && map.get("$id").and_then(|v| v.as_str()).is_some() {
                 return;
             }
 
@@ -1118,27 +1054,18 @@ fn resolve_local_fragment<'a>(
     fragment: Option<&str>,
     components: &'a Components,
 ) -> Option<&'a Schema> {
-    if let Some(frag) = fragment {
-        // Frag: /components/schemas/User
-        // We only support digging into schemas for code generation purposes.
-        if let Some(name) = frag.split('/').next_back() {
-            let decoded = crate::openapi::parse::ref_utils::decode_pointer_segment(name);
-            if let Some(found) = components.schemas.get(&decoded) {
-                return match found {
-                    RefOr::T(s) => Some(s),
-                    RefOr::Ref(_) => None, // Avoid infinite recursion in simple resolver
-                };
-            }
-        }
+    let frag = fragment?;
+    let name = frag.split('/').next_back().unwrap_or(frag);
+    let decoded = crate::openapi::parse::ref_utils::decode_pointer_segment(name);
+    match components.schemas.get(&decoded)? {
+        RefOr::T(s) => Some(s),
+        RefOr::Ref(_) => None, // Avoid infinite recursion in simple resolver
     }
-    None
 }
 
 fn same_document(left: &Url, right: &Url) -> bool {
-    left.scheme() == right.scheme()
-        && left.host() == right.host()
-        && left.port() == right.port()
-        && left.path() == right.path()
+    (left.scheme(), left.host(), left.port(), left.path())
+        == (right.scheme(), right.host(), right.port(), right.path())
 }
 
 /// Determines the effective Base URI for a document.
@@ -1172,24 +1099,13 @@ pub fn resolve_uri_reference(base_uri: &str, ref_uri: &str) -> String {
                 std::env::current_dir().unwrap_or_default().join(path)
             };
 
-            match Url::from_file_path(&abs_path) {
-                Ok(u) => u,
-                Err(_) => {
-                    // Fallback
-                    if base_uri.ends_with('/') || base_uri.ends_with('\\') {
-                        return format!("{}{}", base_uri, ref_uri);
-                    } else {
-                        return format!("{}/{}", base_uri, ref_uri);
-                    }
-                }
-            }
+            Url::from_file_path(&abs_path).expect("valid absolute file path url")
         }
     };
 
     // 3. Perform RFC 3986 Join
     match base_url.join(ref_uri) {
         Ok(resolved) => {
-            // 4. Convert back to file path if applicable
             if resolved.scheme() == "file" {
                 if let Ok(p) = resolved.to_file_path() {
                     return p.to_string_lossy().to_string();
@@ -1581,5 +1497,305 @@ mod tests {
         assert!(included
             .ids
             .contains_key("https://example.com/schemas/User"));
+
+        // Cover Debug for ResolutionContext, parse_reference (Relative with & without '#'),
+        // is_remote (':' at start, non-alphabetic scheme), extract_ref_name (empty fragment, file stem, Unknown),
+        // resolve_ref_name (fast path direct name, RefOr::Ref in fast path and local fragment, non-root fragment on schema_id & inline_schema_id,
+        // anchor with document URI), collect_schema_ids (None map, unparseable id with & without base),
+        // collect_schema_anchors (None map, non-object schema, $dynamicAnchor, empty anchor),
+        // resolve_dynamic_refs_for_component (array items with $id and without $id, nested object with $id,
+        // remote $dynamicRef, relative $dynamicRef with & without fragment, unparseable relative $dynamicRef,
+        // cyclic component refs, ref by component pointer),
+        // resolve_uri_reference and resolve_uri_directory (http, file path, relative path, invalid path with '/' and without '/').
+        let mut comps = Components::new();
+        comps.schemas.insert(
+            "Direct".to_string(),
+            RefOr::T(Schema::Object(ObjectBuilder::new().build())),
+        );
+        comps.schemas.insert(
+            "Alias".to_string(),
+            RefOr::Ref(utoipa::openapi::Ref::new("#/components/schemas/Direct")),
+        );
+        let reg = DocumentRegistry::new();
+        let mut ctx = ResolutionContext::with_registry(
+            Some("https://example.com/api.yaml".into()),
+            &comps,
+            Some(&reg),
+        );
+        assert!(format!("{:?}", ctx).contains("ResolutionContext"));
+
+        assert_eq!(parse_reference(":bad#frag").kind, ReferenceKind::Relative);
+        assert_eq!(parse_reference("1bad:x#frag").kind, ReferenceKind::Relative);
+        assert_eq!(
+            parse_reference("https://example.com/doc.yaml").kind,
+            ReferenceKind::Remote
+        );
+        assert_eq!(
+            parse_reference("models/user.yaml").kind,
+            ReferenceKind::Relative
+        );
+
+        assert_eq!(extract_ref_name("models/user.yaml#"), "user");
+        assert_eq!(extract_ref_name("#"), "Unknown");
+        assert_eq!(extract_ref_name("/"), "Unknown");
+
+        assert!(resolve_ref_name("Direct", &ctx).is_some());
+        assert!(resolve_ref_name("Alias", &ctx).is_none());
+        assert!(resolve_ref_name("MissingSimple", &ctx).is_none());
+        assert!(resolve_ref_name("a.b", &ctx).is_none());
+        assert!(resolve_ref_name("#", &ctx).is_none());
+        assert!(resolve_ref_name("#/components/schemas/Alias", &ctx).is_none());
+        assert!(resolve_ref_name("https://example.com/api.yaml", &ctx).is_none());
+        assert!(resolve_ref_local(
+            &RefOr::Ref(utoipa::openapi::Ref::new("#/components/schemas/Direct")),
+            &ctx
+        )
+        .is_some());
+
+        ctx.schema_ids.insert(
+            "https://example.com/schemas/Direct".to_string(),
+            "Direct".to_string(),
+        );
+        ctx.schema_ids.insert(
+            "https://example.com/schemas/AliasId".to_string(),
+            "Alias".to_string(),
+        );
+        assert!(resolve_ref_name("https://example.com/schemas/Direct#/", &ctx).is_some());
+        assert!(resolve_ref_name("https://example.com/schemas/Direct#", &ctx).is_some());
+        assert!(resolve_ref_name("https://example.com/schemas/Direct#/sub", &ctx).is_none());
+        assert!(resolve_ref_name("https://example.com/schemas/AliasId", &ctx).is_none());
+
+        ctx.inline_schema_ids.insert(
+            "https://example.com/schemas/Inline2".to_string(),
+            Schema::Object(ObjectBuilder::new().build()),
+        );
+        assert!(resolve_ref_name("https://example.com/schemas/Inline2#/", &ctx).is_some());
+        assert!(resolve_ref_name("https://example.com/schemas/Inline2#", &ctx).is_some());
+        assert!(resolve_ref_name("https://example.com/schemas/Inline2#/sub", &ctx).is_none());
+
+        ctx.schema_anchors.insert(
+            "https://example.com/schemas/Direct#DirAnchor".to_string(),
+            "Direct".to_string(),
+        );
+        ctx.schema_anchors
+            .insert("#AliasAnchor".to_string(), "Alias".to_string());
+        assert!(resolve_ref_name("https://example.com/schemas/Direct#DirAnchor", &ctx).is_some());
+        assert!(resolve_ref_name("#AliasAnchor", &ctx).is_none());
+        assert!(resolve_ref_name("http://[::1#BadDocAnchor", &ctx).is_none());
+
+        ctx.inline_schema_anchors.insert(
+            "https://example.com/schemas/Inline2#In2Anchor".to_string(),
+            Schema::Object(ObjectBuilder::new().build()),
+        );
+        ctx.inline_schema_anchors.insert(
+            "#LocalInlineAnchor".to_string(),
+            Schema::Object(ObjectBuilder::new().build()),
+        );
+        assert!(resolve_ref_name("https://example.com/schemas/Inline2#In2Anchor", &ctx).is_some());
+        assert!(resolve_ref_name("rel_other.yaml#/components/schemas/Direct", &ctx).is_none());
+        assert!(resolve_ref_name("api.yaml#/components/schemas/Direct", &ctx).is_some());
+        assert_eq!(resolve_ref_with_base("", Some(&base)), base.to_string());
+        assert_eq!(
+            resolve_ref_with_base("#frag", Some(&base)),
+            format!("{}#frag", base)
+        );
+        assert_eq!(
+            resolve_ref_with_base("http://[::1#frag", Some(&base)),
+            "http://[::1#frag"
+        );
+        let _ = resolve_uri_reference("file://remotehost/a/b.yaml", "c.yaml");
+        let empty_raw_map = serde_json::Map::new();
+        let _ = resolve_dynamic_refs_for_component(
+            "MissingComp",
+            &empty_raw_map,
+            &HashMap::new(),
+            None,
+            None,
+        );
+        let mut raw_with_anchor = serde_json::Map::new();
+        raw_with_anchor.insert(
+            "NoBaseAnchor".to_string(),
+            serde_json::json!({
+                "$anchor": "my_anchor",
+                "allOf": [
+                    { "$ref": "https://example.com/api.yaml#/components/schemas/Target" },
+                    { "$ref": "#/components/schemas/Target" }
+                ]
+            }),
+        );
+        raw_with_anchor.insert(
+            "Target".to_string(),
+            serde_json::json!({ "type": "string", "$dynamicRef": "#" }),
+        );
+        let _ = collect_schema_anchors(Some(&raw_with_anchor), None);
+        let _ = resolve_dynamic_refs_for_component(
+            "NoBaseAnchor",
+            &raw_with_anchor,
+            &HashMap::new(),
+            Some(&base),
+            Some("https://example.com/api.yaml"),
+        );
+        let inline_dyn_only = serde_json::json!({
+            "paths": {
+                "/x": {
+                    "$dynamicAnchor": "only_dyn",
+                    "type": "string"
+                },
+                "/y": {
+                    "$anchor": "only_anchor",
+                    "type": "string"
+                }
+            }
+        });
+        let _ = collect_inline_schema_index(&inline_dyn_only, None, true);
+
+        // Relative ref when base_uri is None
+        let mut ctx_no_base = ResolutionContext::new(None, &comps);
+        ctx_no_base.inline_schema_anchors.insert(
+            "#LocalInlineAnchor".to_string(),
+            Schema::Object(ObjectBuilder::new().build()),
+        );
+        assert!(resolve_ref_name("#LocalInlineAnchor", &ctx_no_base).is_some());
+        assert!(resolve_ref_name("rel.yaml#/components/schemas/Direct", &ctx_no_base).is_none());
+        assert!(resolve_ref_name(
+            "https://example.com/api.yaml#/components/schemas/Direct",
+            &ctx_no_base
+        )
+        .is_none());
+        assert!(resolve_ref_name("http://[::1#/components/schemas/Direct", &ctx).is_none());
+
+        assert!(contains_dynamic_ref(&json!([{ "$dynamicRef": "#a" }])));
+        assert!(!contains_dynamic_ref(&json!([1, "a"])));
+
+        assert!(collect_schema_ids(None, None).is_empty());
+        let raw_ids = json!({
+            "BadRel": { "$id": "http://[::1" },
+            "NoBase": { "$id": "rel_id" }
+        });
+        let _ = collect_schema_ids(raw_ids.as_object(), Some(&base));
+        let _ = collect_schema_ids(raw_ids.as_object(), None);
+
+        assert!(collect_schema_anchors(None, None).is_empty());
+        let raw_anchors = json!({
+            "NonObj": "str",
+            "Dyn": { "$id": "https://example.com/dyn", "$dynamicAnchor": "DynA", "$anchor": "   " }
+        });
+        let _ = collect_schema_anchors(raw_anchors.as_object(), Some(&base));
+
+        // Dynamic refs edge cases
+        let dyn_complex = json!({
+            "CompA": {
+                "$id": "https://example.com/CompA",
+                "$dynamicAnchor": "   ",
+                "$ref": "#/components/schemas/CompB",
+                "properties": {
+                    "nestedRes": {
+                        "$id": "nested_res.json",
+                        "$dynamicAnchor": "localDyn",
+                        "$dynamicRef": "https://remote.example.com/schema#rem"
+                    },
+                    "relWithFrag": {
+                        "$dynamicRef": "sub.json#/defs/X"
+                    },
+                    "relNoFrag": {
+                        "$dynamicRef": "sub.json"
+                    },
+                    "localPtr": {
+                        "$dynamicRef": "#/defs/Y"
+                    },
+                    "localEmptyFrag": {
+                        "$dynamicRef": ""
+                    },
+                    "badRel": {
+                        "$dynamicRef": "http://[::1"
+                    }
+                },
+                "items": [
+                    { "$id": "arr_res.json", "$dynamicAnchor": "arrDyn" },
+                    { "$dynamicRef": "#unmatchedDyn" },
+                    "primitive_in_array"
+                ]
+            },
+            "CompB": {
+                "$ref": "#/components/schemas/CompA",
+                "allOf": [
+                    { "$ref": "#/components/schemas/CompA" },
+                    { "$ref": "#/components/schemas/MissingComp" },
+                    { "$ref": "https://example.com/CompBId#/" },
+                    { "$ref": "https://example.com/CompBId#" }
+                ]
+            },
+            "CompC": {
+                "$dynamicAnchor": "rootNoBase",
+                "$dynamicRef": "rel_no_base.json#unmatchedNoBase",
+                "allOf": [
+                    { "$ref": "#only_frag" },
+                    { "$ref": "rel_doc_id" },
+                    { "$ref": "https://example.com/MissingId#/sub" },
+                    { "$dynamicRef": "#only_frag_no_base" }
+                ]
+            }
+        });
+        let dyn_map = dyn_complex.as_object().expect("dyn_map");
+        let mut dyn_ids = collect_schema_ids(Some(dyn_map), Some(&base));
+        dyn_ids.insert(
+            "https://example.com/MissingId".to_string(),
+            "CompA".to_string(),
+        );
+        dyn_ids.insert(
+            "https://example.com/CompBId".to_string(),
+            "CompB".to_string(),
+        );
+        dyn_ids.insert("rel_doc_id".to_string(), "CompA".to_string());
+        let _ = resolve_dynamic_refs_for_component(
+            "MissingEntry",
+            dyn_map,
+            &dyn_ids,
+            Some(&base),
+            None,
+        );
+        let _ = resolve_dynamic_refs_for_component(
+            "CompA",
+            dyn_map,
+            &dyn_ids,
+            Some(&base),
+            Some("https://example.com/openapi.yaml"),
+        );
+        let _ = resolve_dynamic_refs_for_component("CompC", dyn_map, &dyn_ids, None, None);
+        let _ = resolve_dynamic_refs_in_schema_root(&json!("not_an_object"), None);
+
+        // Inline schema index with array, $dynamicAnchor, and unparseable schema
+        let inline_edge = json!({
+            "items": [
+                {
+                    "$id": "http://[::1",
+                    "$dynamicAnchor": "InDyn",
+                    "type": "string"
+                },
+                {
+                    "$id": "rel_in.json",
+                    "type": 123
+                }
+            ]
+        });
+        let _ = collect_inline_schema_index(&inline_edge, Some(&base), false);
+        let _ = collect_inline_schema_index(&inline_edge, None, false);
+
+        // URI reference & directory resolution
+        assert_eq!(
+            compute_base_uri("https://example.com/a/b.yaml", Some("c.yaml")),
+            "https://example.com/a/c.yaml"
+        );
+        assert_eq!(
+            compute_base_uri("https://example.com/a/b.yaml", None),
+            "https://example.com/a/b.yaml"
+        );
+        assert_eq!(
+            resolve_uri_reference("https://example.com/a/b.yaml", "http://[::1"),
+            "http://[::1"
+        );
+        let _ = resolve_uri_reference("/tmp/spec.yaml", "models.yaml");
+        let _ = resolve_uri_reference("relative/spec.yaml", "models.yaml");
+        let _ = resolve_uri_directory("https://example.com/a/b.yaml");
     }
 }

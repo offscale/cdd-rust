@@ -78,19 +78,11 @@ mod tests {
 
         let mapper = DieselMapper;
         let res = mapper.generate(&schema_path, &output_dir);
+        assert!(res.is_ok());
 
-        // We primarily check that the method runs and validation logic passes.
-        // If dsync encounters internal issues (like missing imports in the string we provided),
-        // it returns Err, but it proves we called it.
-        // For a perfectly valid integration, dsync would succeed.
-        // Given we mock simple content, it might succeed or fail depending on dsync version strictness.
-        // We assert that we didn't get "Schema file not found".
-        if let Err(AppError::General(msg)) = res {
-            assert!(
-                !msg.contains("Schema file not found"),
-                "Should have found the schema file"
-            );
-        }
+        // Passing an existing regular file as output_dir causes dsync::generate_files to return Err
+        let bad_res = mapper.generate(&schema_path, &schema_path);
+        assert!(bad_res.is_err());
     }
 
     #[test]
@@ -99,10 +91,9 @@ mod tests {
         let p = Path::new("non_existent_schema.rs");
         let out = Path::new("out");
         let res = mapper.generate(p, out);
-        assert!(res.is_err());
-        match res.expect_err("expected error") {
-            AppError::General(msg) => assert!(msg.contains("Schema file not found")),
-            _ => panic!("Expected file not found error"),
-        }
+        assert!(res
+            .expect_err("expected error")
+            .to_string()
+            .contains("Schema file not found"));
     }
 }

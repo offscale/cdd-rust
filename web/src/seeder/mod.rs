@@ -124,6 +124,14 @@ mod additional_seeder_tests {
     #[actix_web::test]
     async fn test_seed_database_success() {
         let dao = Arc::new(SuccessUserDao);
+        assert!(dao.get_user(Uuid::nil()).await.expect("ok").is_none());
+        assert!(dao.get_user_by_name("u").await.expect("ok").is_none());
+        assert!(dao
+            .update_user(Uuid::nil(), UpdateUsers::default())
+            .await
+            .is_err());
+        assert!(dao.delete_user(Uuid::nil()).await.is_err());
+
         let res = seed_database(dao).await.expect("must succeed");
         assert_eq!(res.users.len(), 10);
     }

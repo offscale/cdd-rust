@@ -14,11 +14,9 @@ pub fn to_pascal_case(s: &str) -> String {
     s.split(|c: char| !c.is_alphanumeric())
         .filter(|part| !part.is_empty())
         .map(|part| {
-            let mut c = part.chars();
-            match c.next() {
-                None => String::new(),
-                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-            }
+            let mut chars = part.chars();
+            let first = chars.next().into_iter().flat_map(char::to_uppercase);
+            first.chain(chars).collect::<String>()
         })
         .collect()
 }
@@ -94,10 +92,6 @@ pub fn resolve_runtime_expr(expr_obj: &RuntimeExpression) -> String {
                 args.push(resolve_runtime_expr_inner(&raw));
             }
         }
-    }
-
-    if args.is_empty() {
-        return quote_rust_string(&format_str);
     }
 
     format!(
@@ -190,11 +184,7 @@ fn resolve_json_pointer(root_var: &str, pointer: &str) -> String {
     let mut result = root_var.to_string();
     let segments = pointer.split('/');
 
-    for (i, segment) in segments.enumerate() {
-        // RFC 6901: pointers start with /. First split is empty.
-        if i == 0 && segment.is_empty() {
-            continue;
-        }
+    for segment in segments {
         if segment.is_empty() {
             continue;
         }
@@ -286,5 +276,28 @@ mod tests {
             resolve_runtime_expr(&rx("static_value")),
             "\"static_value\""
         );
+        assert_eq!(resolve_runtime_expr(&rx("$request.body")), "body");
+        assert_eq!(resolve_runtime_expr(&rx("$request.body#")), "body");
+        assert_eq!(
+            resolve_runtime_expr(&rx("$request.body#//item")),
+            "body.item"
+        );
+        assert_eq!(
+            resolve_runtime_expr(&RuntimeExpression::new("$request.unknown")),
+            "/* Unresolved expr: $request.unknown */"
+        );
+        assert_eq!(
+            resolve_runtime_expr(&RuntimeExpression::new("$response.unknown")),
+            "/* Unresolved expr: $response.unknown */"
+        );
+        assert_eq!(
+            resolve_runtime_expr(&RuntimeExpression::new("$custom")),
+            "/* Unresolved expr: $custom */"
+        );
+        assert_eq!(
+            to_snake_case("Upper--Case/Path.Name"),
+            "upper_case_path_name"
+        );
+        assert_eq!(to_pascal_case("hello_world-test"), "HelloWorldTest");
     }
 }

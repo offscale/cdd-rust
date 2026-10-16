@@ -104,7 +104,7 @@ fn split_words(input: &str) -> Vec<String> {
         }
 
         let is_upper = ch.is_uppercase();
-        if is_upper && prev_is_lower_or_digit && !current.is_empty() {
+        if is_upper && prev_is_lower_or_digit {
             words.push(current.clone());
             current.clear();
         }
@@ -290,6 +290,8 @@ mod tests {
     #[test]
     fn test_rename_rule_apply_variants() {
         assert_eq!(RenameRule::SnakeCase.apply("userId"), "user_id");
+        assert_eq!(RenameRule::SnakeCase.apply("user1Id"), "user1_id");
+        assert_eq!(RenameRule::SnakeCase.apply("user-id"), "user_id");
         assert_eq!(RenameRule::KebabCase.apply("userId"), "user-id");
         assert_eq!(RenameRule::ScreamingSnakeCase.apply("userId"), "USER_ID");
         assert_eq!(RenameRule::ScreamingKebabCase.apply("userId"), "USER-ID");

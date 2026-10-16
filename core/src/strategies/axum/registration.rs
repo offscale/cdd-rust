@@ -123,5 +123,14 @@ mod tests {
             assert!(stmt.contains(&format!("axum::routing::{}(h)", expected)));
             assert!(stmt.contains("/v1/users/:id"));
         }
+
+        let mut r_already_prefixed = route.clone();
+        r_already_prefixed.path = "/v1/users/{unclosed".to_string();
+        r_already_prefixed.base_path = Some("/v1".to_string());
+        let stmt_unclosed = route_registration_statement(&r_already_prefixed, "h");
+        assert_eq!(
+            stmt_unclosed,
+            ".route(\"/v1/users/{unclosed\", axum::routing::get(h))"
+        );
     }
 }

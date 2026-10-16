@@ -628,5 +628,227 @@ mod tests {
 
         assert_eq!(callbacks.len(), 1);
         assert_eq!(callbacks[0].method, "GET");
+
+        // Cover registry resolution, invalid callback JSON in components/registry, duplicate operationId,
+        // explicit operation security (empty and non-empty), and querystring parameter conflicts
+        let mut bad_comps = ShimComponents::default();
+        bad_comps
+            .extra
+            .insert("callbacks".to_string(), json!({ "Bad": "not_a_map" }));
+        assert!(resolve_callback_object(
+            &RefOr::Ref(Ref::new("#/components/callbacks/Bad")),
+            Some(&bad_comps),
+            None,
+            None
+        )
+        .is_err());
+
+        let mut reg = DocumentRegistry::new();
+        reg.register_openapi_yaml(
+            "https://example.com/cb.yaml",
+            r#"
+openapi: 3.2.0
+info: { title: T, version: "1" }
+components:
+  callbacks:
+    GoodCb:
+      '{$request.body#/url}':
+        put:
+          operationId: cbPut
+          security: []
+          responses:
+            '200': { description: OK }
+    BadCb: "not_a_map"
+paths: {}
+"#,
+        )
+        .expect("reg");
+
+        let (resolved_reg, _, _) = resolve_callback_object(
+            &RefOr::Ref(Ref::new(
+                "https://example.com/cb.yaml#/components/callbacks/GoodCb",
+            )),
+            Some(&bad_comps),
+            Some(&reg),
+            None,
+        )
+        .expect("resolved from reg");
+        assert!(resolved_reg.contains_key("{$request.body#/url}"));
+
+        assert!(resolve_callback_object(
+            &RefOr::Ref(Ref::new(
+                "https://example.com/cb.yaml#/components/callbacks/BadCb"
+            )),
+            None,
+            Some(&reg),
+            None,
+        )
+        .is_err());
+
+        // Duplicate operationId & explicit security
+        let mut op_ids = HashSet::new();
+        let mut p_sec = empty_path_item();
+        let mut op1 = empty_operation();
+        op1.operation_id = Some("dupOp".to_string());
+        op1.security = Some(vec![]);
+        p_sec.put = Some(op1.clone());
+        let mut op2 = empty_operation();
+        op2.operation_id = Some("dupOp".to_string());
+        op2.security = Some(vec![json!({"Auth": []})]);
+        p_sec.delete = Some(op2.clone());
+
+        let mut cbs = Vec::new();
+        assert!(extract_callback_operations(
+            &mut cbs,
+            "Dup",
+            "$request.body#/url",
+            &p_sec,
+            None,
+            &mut op_ids,
+            None,
+            None,
+            None,
+        )
+        .is_err());
+
+        let mut p_sec2 = empty_path_item();
+        op2.operation_id = Some("uniqueOp".to_string());
+        op2.request_body = Some(RefOr::T(
+            serde_json::from_value(json!({
+                "required": false,
+                "content": {
+                    "application/json": { "schema": false }
+                }
+            }))
+            .expect("rb"),
+        ));
+        p_sec2.delete = Some(op2.clone());
+        let mut op_patch = empty_operation();
+        op_patch.responses =
+            crate::openapi::parse::routes::shims::ShimResponses::from(Responses::new());
+        p_sec2.patch = Some(op_patch.clone());
+        p_sec2.options = Some(op_patch.clone());
+        p_sec2.head = Some(op_patch.clone());
+        p_sec2.trace = Some(op_patch);
+        extract_callback_operations(
+            &mut cbs,
+            "Sec",
+            "$request.body#/url",
+            &p_sec2,
+            None,
+            &mut op_ids,
+            None,
+            None,
+            None,
+        )
+        .expect("sec");
+
+        // Cover resolve_callback_object when components lacks 'callbacks' key or ref is not a callbacks ref
+        let empty_comps = ShimComponents::default();
+        assert!(resolve_callback_object(
+            &RefOr::Ref(Ref::new("#/components/callbacks/Missing")),
+            Some(&empty_comps),
+            None,
+            None,
+        )
+        .is_err());
+        assert!(resolve_callback_object(
+            &RefOr::Ref(Ref::new("#/components/schemas/NotCb")),
+            Some(&empty_comps),
+            Some(&reg),
+            None,
+        )
+        .is_err());
+
+        // Cover duplicate param override and querystring conflicts in merge_callback_params
+        fn qs_param(name: &str) -> ShimParameter {
+            let mut content = BTreeMap::new();
+            content.insert(
+                "application/x-www-form-urlencoded".to_string(),
+                Content::new(Some(RefOr::T(Schema::Object(ObjectBuilder::new().build())))),
+            );
+            let mut p = string_param(name, "querystring");
+            p.schema = None;
+            p.content = Some(content);
+            p
+        }
+
+        let mut p_qs = empty_path_item();
+        p_qs.parameters = Some(vec![RefOr::T(qs_param("qs1"))]);
+        let mut op_qs = empty_operation();
+        op_qs.parameters = Some(vec![RefOr::T(qs_param("qs2"))]);
+        p_qs.get = Some(op_qs);
+        assert!(extract_callback_operations(
+            &mut cbs,
+            "QsDup",
+            "$request.body#/url",
+            &p_qs,
+            None,
+            &mut HashSet::new(),
+            None,
+            None,
+            None,
+        )
+        .is_err());
+
+        let mut p_qs_mix = empty_path_item();
+        p_qs_mix.parameters = Some(vec![
+            RefOr::T(string_param("q1", "query")),
+            RefOr::T(string_param("q2", "query")),
+        ]);
+        let mut op_qs_mix = empty_operation();
+        op_qs_mix.parameters = Some(vec![RefOr::T(qs_param("qs1"))]);
+        p_qs_mix.get = Some(op_qs_mix);
+        assert!(extract_callback_operations(
+            &mut cbs,
+            "QsMix",
+            "$request.body#/url",
+            &p_qs_mix,
+            None,
+            &mut HashSet::new(),
+            None,
+            None,
+            None,
+        )
+        .is_err());
+
+        let mut p_dup_override = empty_path_item();
+        p_dup_override.parameters = Some(vec![RefOr::T(string_param("q1", "query"))]);
+        let mut op_dup_override = empty_operation();
+        op_dup_override.parameters = Some(vec![RefOr::T(string_param("q1", "query"))]);
+        op_dup_override.responses =
+            crate::openapi::parse::routes::shims::ShimResponses::from(Responses::new());
+        p_dup_override.get = Some(op_dup_override);
+        extract_callback_operations(
+            &mut cbs,
+            "DupOverride",
+            "$request.body#/url",
+            &p_dup_override,
+            None,
+            &mut HashSet::new(),
+            None,
+            None,
+            None,
+        )
+        .expect("dup override");
+
+        let mut p_qs_only = empty_path_item();
+        let mut op_qs_only = empty_operation();
+        op_qs_only.parameters = Some(vec![RefOr::T(qs_param("qs1"))]);
+        op_qs_only.responses =
+            crate::openapi::parse::routes::shims::ShimResponses::from(Responses::new());
+        p_qs_only.get = Some(op_qs_only);
+        extract_callback_operations(
+            &mut cbs,
+            "QsOnly",
+            "$request.body#/url",
+            &p_qs_only,
+            None,
+            &mut HashSet::new(),
+            None,
+            None,
+            None,
+        )
+        .expect("qs only");
     }
 }

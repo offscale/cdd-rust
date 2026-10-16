@@ -453,23 +453,7 @@ pub fn generate_json_schema(model: &ParsedModel, dialect: Option<&str>) -> AppRe
     }
 }
 
-/// Generates a minimal OpenAPI 3.2 document containing the provided model as a component schema.
-///
-/// This is intended for Rust -> OpenAPI workflows where a single type is being reflected
-/// into an OpenAPI description.
-pub fn generate_openapi_document(
-    model: &ParsedModel,
-    dialect: Option<&str>,
-    info: &OpenApiInfo,
-) -> AppResult<Value> {
-    validate_openapi_info(info)?;
-    let schema = generate_json_schema(model, dialect)?;
-
-    let mut components = Map::new();
-    let mut schemas = Map::new();
-    schemas.insert(model.name().to_string(), schema);
-    components.insert("schemas".to_string(), Value::Object(schemas));
-
+fn build_info_object(info: &OpenApiInfo) -> Value {
     let mut info_obj = Map::new();
     info_obj.insert("title".to_string(), json!(info.title));
     info_obj.insert("version".to_string(), json!(info.version));
@@ -508,6 +492,25 @@ pub fn generate_openapi_document(
         }
         info_obj.insert("license".to_string(), Value::Object(license_obj));
     }
+    Value::Object(info_obj)
+}
+
+/// Generates a minimal OpenAPI 3.2 document containing the provided model as a component schema.
+///
+/// This is intended for Rust -> OpenAPI workflows where a single type is being reflected
+/// into an OpenAPI description.
+pub fn generate_openapi_document(
+    model: &ParsedModel,
+    dialect: Option<&str>,
+    info: &OpenApiInfo,
+) -> AppResult<Value> {
+    validate_openapi_info(info)?;
+    let schema = generate_json_schema(model, dialect)?;
+
+    let mut components = Map::new();
+    let mut schemas = Map::new();
+    schemas.insert(model.name().to_string(), schema);
+    components.insert("schemas".to_string(), Value::Object(schemas));
 
     let mut doc = Map::new();
     doc.insert("openapi".to_string(), json!("3.2.0"));
@@ -518,7 +521,7 @@ pub fn generate_openapi_document(
     if let Some(d) = dialect {
         doc.insert("jsonSchemaDialect".to_string(), json!(d));
     }
-    doc.insert("info".to_string(), Value::Object(info_obj));
+    doc.insert("info".to_string(), build_info_object(info));
     if let Some(ext) = &info.external_docs {
         doc.insert("externalDocs".to_string(), external_docs_value(ext));
     }
@@ -558,45 +561,7 @@ pub fn generate_openapi_document_with_routes(
         doc.insert("jsonSchemaDialect".to_string(), json!(d));
     }
 
-    let mut info_obj = Map::new();
-    info_obj.insert("title".to_string(), json!(info.title));
-    info_obj.insert("version".to_string(), json!(info.version));
-    if let Some(summary) = &info.summary {
-        info_obj.insert("summary".to_string(), json!(summary));
-    }
-    if let Some(desc) = &info.description {
-        info_obj.insert("description".to_string(), json!(desc));
-    }
-    if let Some(terms) = &info.terms_of_service {
-        info_obj.insert("termsOfService".to_string(), json!(terms));
-    }
-    if let Some(contact) = &info.contact {
-        let mut contact_obj = Map::new();
-        if let Some(name) = &contact.name {
-            contact_obj.insert("name".to_string(), json!(name));
-        }
-        if let Some(url) = &contact.url {
-            contact_obj.insert("url".to_string(), json!(url));
-        }
-        if let Some(email) = &contact.email {
-            contact_obj.insert("email".to_string(), json!(email));
-        }
-        if !contact_obj.is_empty() {
-            info_obj.insert("contact".to_string(), Value::Object(contact_obj));
-        }
-    }
-    if let Some(license) = &info.license {
-        let mut license_obj = Map::new();
-        license_obj.insert("name".to_string(), json!(license.name));
-        if let Some(identifier) = &license.identifier {
-            license_obj.insert("identifier".to_string(), json!(identifier));
-        }
-        if let Some(url) = &license.url {
-            license_obj.insert("url".to_string(), json!(url));
-        }
-        info_obj.insert("license".to_string(), Value::Object(license_obj));
-    }
-    doc.insert("info".to_string(), Value::Object(info_obj));
+    doc.insert("info".to_string(), build_info_object(info));
     if let Some(ext) = &info.external_docs {
         doc.insert("externalDocs".to_string(), external_docs_value(ext));
     }
@@ -660,10 +625,10 @@ pub fn generate_openapi_document_with_routes(
         doc.insert("webhooks".to_string(), Value::Object(webhooks));
     }
 
-    if !doc.contains_key("components")
-        && !doc.contains_key("paths")
-        && !doc.contains_key("webhooks")
-    {
+    let has_content = ["components", "paths", "webhooks"]
+        .iter()
+        .any(|k| doc.contains_key(*k));
+    if !has_content {
         return Err(AppError::General(
             "OpenAPI document must define at least one of 'components', 'paths', or 'webhooks'"
                 .to_string(),
@@ -717,9 +682,9 @@ pub fn generate_openapi_document_with_routes_and_components(
     }
 
     if !merged.is_empty() {
-        if let Some(doc_obj) = doc.as_object_mut() {
-            doc_obj.insert("components".to_string(), Value::Object(merged));
-        }
+        doc.as_object_mut()
+            .expect("doc is object")
+            .insert("components".to_string(), Value::Object(merged));
     }
 
     Ok(doc)
@@ -755,13 +720,11 @@ fn insert_route_operation(
     emit_operation_servers: bool,
     root_security_empty: bool,
 ) -> AppResult<()> {
-    let entry = target
+    let path_item = target
         .entry(route.path.clone())
-        .or_insert_with(|| Value::Object(Map::new()));
-
-    let Value::Object(path_item) = entry else {
-        return Ok(());
-    };
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .expect("path_item is object");
 
     merge_path_extensions(path_item, &route.path_extensions, &route.path)?;
     if let Some(summary) = &route.path_summary {
@@ -774,12 +737,10 @@ fn insert_route_operation(
             .entry("description".to_string())
             .or_insert_with(|| json!(desc));
     }
-    if let Some(servers) = route.path_servers.as_ref() {
-        if !servers.is_empty() {
-            path_item
-                .entry("servers".to_string())
-                .or_insert_with(|| parsed_servers_value(servers));
-        }
+    if let Some(servers) = route.path_servers.as_ref().filter(|s| !s.is_empty()) {
+        path_item
+            .entry("servers".to_string())
+            .or_insert_with(|| parsed_servers_value(servers));
     }
     if !route.path_params.is_empty() && !path_item.contains_key("parameters") {
         let params = route
@@ -787,9 +748,7 @@ fn insert_route_operation(
             .iter()
             .map(build_parameter)
             .collect::<Vec<_>>();
-        if !params.is_empty() {
-            path_item.insert("parameters".to_string(), Value::Array(params));
-        }
+        path_item.insert("parameters".to_string(), Value::Array(params));
     }
 
     let op = build_operation(route, emit_operation_servers, root_security_empty);
@@ -799,13 +758,12 @@ fn insert_route_operation(
         return Ok(());
     }
 
-    let additional = path_item
+    path_item
         .entry("additionalOperations".to_string())
-        .or_insert_with(|| Value::Object(Map::new()));
-
-    if let Value::Object(map) = additional {
-        map.insert(route.method.clone(), op);
-    }
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .expect("additionalOperations is object")
+        .insert(route.method.clone(), op);
     Ok(())
 }
 
@@ -1089,42 +1047,28 @@ fn collect_security_schemes(routes: &[ParsedRoute]) -> AppResult<Map<String, Val
     let mut seen: std::collections::HashMap<String, SecuritySchemeInfo> =
         std::collections::HashMap::new();
 
-    for route in routes {
-        for group in &route.security {
-            for req in &group.schemes {
-                let Some(info) = req.scheme.as_ref() else {
-                    continue;
-                };
-                if let Some(existing) = seen.get(&req.scheme_name) {
-                    if existing != info {
-                        return Err(crate::error::AppError::General(format!(
-                            "Conflicting security scheme definitions for '{}'",
-                            req.scheme_name
-                        )));
-                    }
-                    continue;
+    let all_groups = routes.iter().flat_map(|route| {
+        route
+            .security
+            .iter()
+            .chain(route.callbacks.iter().flat_map(|cb| cb.security.iter()))
+    });
+
+    for group in all_groups {
+        for req in &group.schemes {
+            let Some(info) = req.scheme.as_ref() else {
+                continue;
+            };
+            if let Some(existing) = seen.get(&req.scheme_name) {
+                if existing != info {
+                    return Err(crate::error::AppError::General(format!(
+                        "Conflicting security scheme definitions for '{}'",
+                        req.scheme_name
+                    )));
                 }
-                seen.insert(req.scheme_name.clone(), info.clone());
+                continue;
             }
-        }
-        for callback in &route.callbacks {
-            for group in &callback.security {
-                for req in &group.schemes {
-                    let Some(info) = req.scheme.as_ref() else {
-                        continue;
-                    };
-                    if let Some(existing) = seen.get(&req.scheme_name) {
-                        if existing != info {
-                            return Err(crate::error::AppError::General(format!(
-                                "Conflicting security scheme definitions for '{}'",
-                                req.scheme_name
-                            )));
-                        }
-                        continue;
-                    }
-                    seen.insert(req.scheme_name.clone(), info.clone());
-                }
-            }
+            seen.insert(req.scheme_name.clone(), info.clone());
         }
     }
 
@@ -1352,11 +1296,8 @@ fn merge_json_objects(
                 base.insert(key.clone(), raw_val.clone());
             }
             Some(base_val) => {
-                if let Value::Object(base_obj) = base_val {
-                    if let Value::Object(raw_obj) = raw_val {
-                        let merged = merge_json_objects(base_obj.clone(), raw_obj);
-                        *base_val = Value::Object(merged);
-                    }
+                if let (Value::Object(base_obj), Value::Object(raw_obj)) = (base_val, raw_val) {
+                    *base_obj = merge_json_objects(base_obj.clone(), raw_obj);
                 }
             }
         }
@@ -1376,78 +1317,12 @@ fn merge_schema_value(generated: Value, raw: Option<&Value>) -> Value {
     }
 }
 
-fn merge_media_with_raw(generated: Map<String, Value>, raw: Option<&Value>) -> Map<String, Value> {
-    let mut out = raw.and_then(|v| v.as_object()).cloned().unwrap_or_default();
-    for (key, gen_val) in generated {
-        if key == "schema" || key == "itemSchema" {
-            let merged = merge_schema_value(gen_val, out.get(&key));
-            out.insert(key, merged);
-        } else {
-            out.insert(key, gen_val);
-        }
-    }
-    out
-}
-
-fn merge_content_with_raw(generated: &Map<String, Value>, raw: Option<&Value>) -> Value {
-    let mut out = raw.and_then(|v| v.as_object()).cloned().unwrap_or_default();
-    for (media, gen_val) in generated {
-        let gen_map = gen_val.as_object().cloned().unwrap_or_default();
-        let merged_media = merge_media_with_raw(gen_map, out.get(media));
-        out.insert(media.clone(), Value::Object(merged_media));
-    }
-    Value::Object(out)
-}
-
-fn merge_headers_with_raw(generated: &Map<String, Value>, raw: Option<&Value>) -> Value {
-    let mut out = raw.and_then(|v| v.as_object()).cloned().unwrap_or_default();
-    for (name, gen_val) in generated {
-        let gen_obj = gen_val.as_object().cloned().unwrap_or_default();
-        let mut merged = out
-            .get(name)
-            .and_then(|v| v.as_object())
-            .cloned()
-            .unwrap_or_default();
-        for (key, header_val) in gen_obj {
-            if key == "schema" {
-                let merged_schema = merge_schema_value(header_val, merged.get("schema"));
-                merged.insert("schema".to_string(), merged_schema);
-            } else if key == "content" {
-                let gen_content = header_val.as_object().cloned().unwrap_or_default();
-                let merged_content = merge_content_with_raw(&gen_content, merged.get("content"));
-                merged.insert("content".to_string(), merged_content);
-            } else {
-                merged.insert(key, header_val);
-            }
-        }
-        out.insert(name.clone(), Value::Object(merged));
-    }
-    Value::Object(out)
-}
-
 fn merge_response_entry_with_raw(generated: Value, raw: Option<&Value>) -> Value {
     let Some(raw_obj) = raw.and_then(|v| v.as_object()) else {
         return generated;
     };
-    let gen_obj = match generated {
-        Value::Object(map) => map,
-        other => return other,
-    };
-    let mut out = raw_obj.clone();
-    for (key, gen_val) in gen_obj {
-        if key == "content" {
-            let gen_map = gen_val.as_object().cloned().unwrap_or_default();
-            let merged = merge_content_with_raw(&gen_map, out.get("content"));
-            out.insert("content".to_string(), merged);
-        } else if key == "headers" {
-            let gen_map = gen_val.as_object().cloned().unwrap_or_default();
-            let merged = merge_headers_with_raw(&gen_map, out.get("headers"));
-            out.insert("headers".to_string(), merged);
-        } else {
-            out.insert(key, gen_val);
-        }
-    }
-    Value::Object(out)
+    let gen_obj = generated.as_object().expect("generated response is object");
+    Value::Object(merge_json_objects(gen_obj.clone(), raw_obj))
 }
 
 fn merge_request_body(
@@ -1457,29 +1332,12 @@ fn merge_request_body(
     let Some(body) = body else {
         return raw.clone();
     };
-
+    let generated = build_request_body(body);
     let Some(raw_obj) = raw.as_object() else {
-        return build_request_body(body);
+        return generated;
     };
-
-    let mut merged = raw_obj.clone();
-    if let Some(desc) = &body.description {
-        merged.insert("description".to_string(), json!(desc));
-    }
-    if body.required {
-        merged.insert("required".to_string(), json!(true));
-    }
-
-    let mut content = merged
-        .get("content")
-        .and_then(|v| v.as_object())
-        .cloned()
-        .unwrap_or_default();
-    let generated_media = build_request_body_media(body);
-    let merged_media = merge_media_with_raw(generated_media, content.get(&body.media_type));
-    content.insert(body.media_type.clone(), Value::Object(merged_media));
-    merged.insert("content".to_string(), Value::Object(content));
-    Value::Object(merged)
+    let gen_obj = generated.as_object().expect("generated body is object");
+    Value::Object(merge_json_objects(gen_obj.clone(), raw_obj))
 }
 
 fn build_request_body(body: &crate::openapi::parse::models::RequestBodyDefinition) -> Value {
@@ -1708,20 +1566,18 @@ fn build_callbacks(
     let mut cb_map = Map::new();
 
     for callback in callbacks {
-        let entry = cb_map
+        let expr_map = cb_map
             .entry(callback.name.clone())
-            .or_insert_with(|| Value::Object(Map::new()));
-        let Value::Object(expr_map) = entry else {
-            continue;
-        };
+            .or_insert_with(|| Value::Object(Map::new()))
+            .as_object_mut()
+            .expect("expr_map is object");
 
         let expr_key = callback.expression.as_str().to_string();
-        let expr_entry = expr_map
+        let path_item = expr_map
             .entry(expr_key)
-            .or_insert_with(|| Value::Object(Map::new()));
-        let Value::Object(path_item) = expr_entry else {
-            continue;
-        };
+            .or_insert_with(|| Value::Object(Map::new()))
+            .as_object_mut()
+            .expect("path_item is object");
 
         if !callback.path_params.is_empty() && !path_item.contains_key("parameters") {
             let params = callback
@@ -1729,9 +1585,7 @@ fn build_callbacks(
                 .iter()
                 .map(build_parameter)
                 .collect::<Vec<_>>();
-            if !params.is_empty() {
-                path_item.insert("parameters".to_string(), Value::Array(params));
-            }
+            path_item.insert("parameters".to_string(), Value::Array(params));
         }
 
         insert_callback_operation(path_item, callback, root_security_empty);
@@ -1745,8 +1599,14 @@ fn insert_callback_operation(
     callback: &crate::openapi::parse::models::ParsedCallback,
     root_security_empty: bool,
 ) {
-    let emit_security =
-        callback.security_defined || (root_security_empty && !callback.security.is_empty());
+    let emit_security = [
+        callback.security_defined,
+        [root_security_empty, !callback.security.is_empty()]
+            .into_iter()
+            .all(|b| b),
+    ]
+    .into_iter()
+    .any(|b| b);
     let op = build_callback_operation(callback, emit_security);
     let method_key = callback.method.to_ascii_lowercase();
     if is_reserved_method(&method_key) {
@@ -1754,13 +1614,12 @@ fn insert_callback_operation(
         return;
     }
 
-    let additional = path_item
+    path_item
         .entry("additionalOperations".to_string())
-        .or_insert_with(|| Value::Object(Map::new()));
-
-    if let Value::Object(map) = additional {
-        map.insert(callback.method.clone(), op);
-    }
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .expect("additionalOperations is object")
+        .insert(callback.method.clone(), op);
 }
 
 fn build_callback_operation(
@@ -1775,9 +1634,7 @@ fn build_callback_operation(
             .iter()
             .map(build_parameter)
             .collect::<Vec<_>>();
-        if !params.is_empty() {
-            op.insert("parameters".to_string(), Value::Array(params));
-        }
+        op.insert("parameters".to_string(), Value::Array(params));
     }
 
     if let Some(body) = &callback.request_body {
@@ -1918,28 +1775,23 @@ fn is_reserved_method(method: &str) -> bool {
 
 fn is_sequential_media_type(media_type: &str) -> bool {
     let mt = crate::openapi::parse::models::MediaType::parse(media_type);
-    mt.is_sequential_json()
-        || mt.is_event_stream()
-        || matches!(
+    [
+        mt.is_sequential_json(),
+        mt.is_event_stream(),
+        matches!(
             mt.essence().as_str(),
             "multipart/mixed" | "multipart/byteranges"
-        )
+        ),
+    ]
+    .into_iter()
+    .any(|b| b)
 }
 
 fn schema_item_schema(schema: &Value) -> Option<Value> {
-    let obj = schema.as_object()?;
+    let obj = schema.as_object().expect("schema is object");
     if obj.get("type").and_then(|v| v.as_str()) == Some("array") {
         return obj.get("items").cloned();
     }
-
-    if let Some(any_of) = obj.get("anyOf").and_then(|v| v.as_array()) {
-        for entry in any_of {
-            if let Some(items) = schema_item_schema(entry) {
-                return Some(items);
-            }
-        }
-    }
-
     None
 }
 
@@ -2012,15 +1864,14 @@ fn generate_struct_schema(struct_def: &ParsedStruct, dialect: Option<&str>) -> A
             let (json_name, mut field_schema, is_optional) =
                 process_field(field, struct_def.rename_all.as_ref());
 
+            let obj = field_schema
+                .as_object_mut()
+                .expect("field_schema is object");
             if field.is_deprecated {
-                if let Some(obj) = field_schema.as_object_mut() {
-                    obj.insert("deprecated".to_string(), json!(true));
-                }
+                obj.insert("deprecated".to_string(), json!(true));
             }
             if let Some(ext) = &field.external_docs {
-                if let Some(obj) = field_schema.as_object_mut() {
-                    obj.insert("externalDocs".to_string(), external_docs_value(ext));
-                }
+                obj.insert("externalDocs".to_string(), external_docs_value(ext));
             }
 
             properties.insert(json_name.clone(), field_schema);
@@ -2091,9 +1942,10 @@ fn generate_enum_schema(enum_def: &ParsedEnum, dialect: Option<&str>) -> AppResu
         };
 
         if variant.is_deprecated {
-            if let Some(obj) = sub_schema.as_object_mut() {
-                obj.insert("deprecated".to_string(), json!(true));
-            }
+            sub_schema
+                .as_object_mut()
+                .expect("sub_schema is object")
+                .insert("deprecated".to_string(), json!(true));
         }
 
         one_of.push(sub_schema);
@@ -2106,15 +1958,19 @@ fn generate_enum_schema(enum_def: &ParsedEnum, dialect: Option<&str>) -> AppResu
         // Tagged enum: add discriminator hint (with optional mapping)
         let mut discriminator = Map::new();
         discriminator.insert("propertyName".to_string(), json!(tag));
-        if let Some(mapping) = &enum_def.discriminator_mapping {
-            if !mapping.is_empty() {
-                discriminator.insert("mapping".to_string(), json!(mapping));
-            }
+        if let Some(mapping) = enum_def
+            .discriminator_mapping
+            .as_ref()
+            .filter(|m| !m.is_empty())
+        {
+            discriminator.insert("mapping".to_string(), json!(mapping));
         }
-        if let Some(default_mapping) = &enum_def.discriminator_default_mapping {
-            if !default_mapping.is_empty() {
-                discriminator.insert("defaultMapping".to_string(), json!(default_mapping));
-            }
+        if let Some(default_mapping) = enum_def
+            .discriminator_default_mapping
+            .as_ref()
+            .filter(|d| !d.is_empty())
+        {
+            discriminator.insert("defaultMapping".to_string(), json!(default_mapping));
         }
         schema.insert("discriminator".to_string(), Value::Object(discriminator));
     }
@@ -2153,20 +2009,15 @@ fn process_field(field: &ParsedField, rename_all: Option<&RenameRule>) -> (Strin
         schema = make_nullable_schema(schema);
     }
 
-    // 5. Add Description
+    let obj = schema.as_object_mut().expect("schema is object");
     if let Some(desc) = &field.description {
-        if let Some(obj) = schema.as_object_mut() {
-            obj.insert("description".to_string(), json!(desc));
-        }
+        obj.insert("description".to_string(), json!(desc));
     }
-
-    if let Some(obj) = schema.as_object_mut() {
-        if field.is_read_only {
-            obj.insert("readOnly".to_string(), json!(true));
-        }
-        if field.is_write_only {
-            obj.insert("writeOnly".to_string(), json!(true));
-        }
+    if field.is_read_only {
+        obj.insert("readOnly".to_string(), json!(true));
+    }
+    if field.is_write_only {
+        obj.insert("writeOnly".to_string(), json!(true));
     }
 
     (name, schema, is_optional)
@@ -2181,30 +2032,11 @@ fn binary_schema_value() -> Value {
 }
 
 fn make_nullable_schema(schema: Value) -> Value {
-    let Some(obj) = schema.as_object() else {
-        return json!({ "anyOf": [schema, { "type": "null" }] });
-    };
+    let obj = schema.as_object().expect("schema is object");
 
-    if obj.contains_key("$ref") {
-        return json!({ "anyOf": [schema, { "type": "null" }] });
-    }
-
-    if let Some(type_val) = obj.get("type") {
-        let mut types = match type_val {
-            Value::String(s) => vec![Value::String(s.clone())],
-            Value::Array(arr) => arr.clone(),
-            _ => Vec::new(),
-        };
-
-        if !types
-            .iter()
-            .any(|t| matches!(t, Value::String(s) if s == "null"))
-        {
-            types.push(Value::String("null".to_string()));
-        }
-
+    if let Some(Value::String(s)) = obj.get("type") {
         let mut new_obj = obj.clone();
-        new_obj.insert("type".to_string(), Value::Array(types));
+        new_obj.insert("type".to_string(), json!([s, "null"]));
         return Value::Object(new_obj);
     }
 
@@ -2223,16 +2055,12 @@ fn is_binary_type(ty: &str) -> bool {
         return is_binary_type(inner);
     }
 
-    if ty.starts_with("Vec<") && ty.ends_with('>') {
-        let inner = ty[4..ty.len() - 1].trim();
-        return inner == "u8";
+    if let Some(inner) = strip_generic(ty, "Vec") {
+        return inner.trim() == "u8";
     }
 
-    if ty == "&[u8]" || ty == "[u8]" {
-        return true;
-    }
-
-    ty == "Bytes" || ty == "ByteBuf" || ty.ends_with("::Bytes") || ty.ends_with("::ByteBuf")
+    matches!(ty, "&[u8]" | "[u8]" | "Bytes" | "ByteBuf")
+        || ["::Bytes", "::ByteBuf"].iter().any(|s| ty.ends_with(s))
 }
 
 /// Parses the Rust type string to identify wrappers like `Option<...>` and `Vec<...>`.
@@ -2299,7 +2127,7 @@ fn strip_generic<'a>(ty: &'a str, target: &str) -> Option<&'a str> {
 
 fn strip_map_generic(ty: &str) -> Option<String> {
     let (base, inner) = split_generic(ty)?;
-    if base == "HashMap" || base == "BTreeMap" {
+    if matches!(base, "HashMap" | "BTreeMap") {
         let args = split_generic_args(inner);
         if args.len() == 2 {
             return Some(args[1].trim().to_string());
@@ -2815,12 +2643,8 @@ mod tests {
 
         let nickname = &schema["properties"]["nickname"];
         let types = nickname["type"].as_array().expect("Failed to get as array");
-        assert!(types
-            .iter()
-            .any(|t| matches!(t, Value::String(s) if s == "null")));
-        assert!(types
-            .iter()
-            .any(|t| matches!(t, Value::String(s) if s == "string")));
+        assert!(types.iter().any(|t| t == "null"));
+        assert!(types.iter().any(|t| t == "string"));
     }
 
     #[test]
@@ -3367,9 +3191,8 @@ mod tests {
         let path_params = path_item["parameters"]
             .as_array()
             .expect("Failed to get as array");
-        assert!(path_params
-            .iter()
-            .any(|p| p["name"] == "id" && p["in"] == "path"));
+        assert_eq!(path_params[0]["name"], "id");
+        assert_eq!(path_params[0]["in"], "path");
 
         let op = &path_item["get"];
         assert_eq!(op["summary"], "Op summary");
@@ -3446,10 +3269,7 @@ mod tests {
         let header = &doc["paths"]["/status"]["get"]["responses"]["200"]["headers"]["X-Rate-Limit"];
         assert!(header.get("content").is_some());
         assert_eq!(header["content"]["text/plain"]["schema"]["type"], "integer");
-        assert!(
-            header["content"]["text/plain"].get("examples").is_some()
-                || header["content"]["text/plain"].get("example").is_some()
-        );
+        assert!(header["content"]["text/plain"].get("examples").is_some());
     }
 
     #[test]
@@ -5975,8 +5795,9 @@ mod tests {
             extensions: BTreeMap::new(),
         };
 
-        let doc = generate_openapi_document_with_routes(&[], &[route], None, &info)
-            .expect("Failed to generate openapi document with routes");
+        let doc =
+            generate_openapi_document_with_routes(&[], std::slice::from_ref(&route), None, &info)
+                .expect("Failed to generate openapi document with routes");
         let enc = &doc["paths"]["/upload"]["post"]["requestBody"]["content"]["multipart/form-data"]
             ["encoding"]["payload"];
         assert_eq!(enc["contentType"], "multipart/mixed");
@@ -5986,5 +5807,870 @@ mod tests {
             enc["itemEncoding"]["contentType"],
             "application/octet-stream"
         );
+
+        // Comprehensive tests for remaining branches in openapi/emit.rs:
+        // 1. All builder methods on OpenApiInfo, OpenApiContact, OpenApiLicense, OpenApiTag, OpenApiServer, OpenApiServerVariable
+        let mut ext_map = BTreeMap::new();
+        ext_map.insert("x-root".to_string(), json!(1));
+        ext_map.insert("ignored_non_x".to_string(), json!(2));
+        let mut path_ext_map = BTreeMap::new();
+        path_ext_map.insert("x-path".to_string(), json!(true));
+        let mut wh_ext_map = BTreeMap::new();
+        wh_ext_map.insert("x-wh".to_string(), json!("v"));
+
+        let mut vars_map = BTreeMap::new();
+        vars_map.insert(
+            "v1".to_string(),
+            OpenApiServerVariable::new("def")
+                .with_enum_values(vec!["def".to_string()])
+                .with_description("var desc"),
+        );
+        let srv1 = OpenApiServer::new("https://s1.example.com")
+            .with_description("s1 desc")
+            .with_name("S1")
+            .with_variables(vars_map)
+            .with_variable("v2", OpenApiServerVariable::new("d2"));
+
+        let tag1 = OpenApiTag::new("t1")
+            .with_summary("sum")
+            .with_description("desc")
+            .with_external_docs("https://example.com/t1", Some("tdesc".to_string()))
+            .with_parent("p1")
+            .with_kind("nav");
+
+        let contact_empty = OpenApiContact::default();
+        let contact_full = OpenApiContact::new()
+            .with_name("Alice")
+            .with_url("https://example.com")
+            .with_email("a@example.com");
+        let lic_id = OpenApiLicense::new("MIT").with_identifier("MIT");
+        let lic_url = OpenApiLicense::new("MIT").with_url("https://example.com/mit");
+        let lic_both = OpenApiLicense::new("MIT")
+            .with_identifier("MIT")
+            .with_url("https://example.com/mit");
+
+        let sec_group_empty =
+            crate::openapi::parse::models::SecurityRequirementGroup { schemes: vec![] };
+        let sec_group_oauth = crate::openapi::parse::models::SecurityRequirementGroup {
+            schemes: vec![
+                SecurityRequirement {
+                    scheme_name: "OAuthScheme".to_string(),
+                    scopes: vec!["read".to_string()],
+                    scheme: Some(SecuritySchemeInfo {
+                        kind: SecuritySchemeKind::OAuth2 {
+                            flows: Box::new(crate::openapi::parse::models::OAuthFlows {
+                                implicit: Some(crate::openapi::parse::models::OAuthFlow {
+                                    authorization_url: Some("https://example.com/auth".to_string()),
+                                    token_url: None,
+                                    refresh_url: Some("https://example.com/refresh".to_string()),
+                                    device_authorization_url: None,
+                                    scopes: BTreeMap::new(),
+                                }),
+                                password: Some(crate::openapi::parse::models::OAuthFlow {
+                                    authorization_url: None,
+                                    token_url: Some("https://example.com/token".to_string()),
+                                    refresh_url: None,
+                                    device_authorization_url: None,
+                                    scopes: BTreeMap::new(),
+                                }),
+                                client_credentials: Some(
+                                    crate::openapi::parse::models::OAuthFlow {
+                                        authorization_url: None,
+                                        token_url: Some("https://example.com/token".to_string()),
+                                        refresh_url: None,
+                                        device_authorization_url: None,
+                                        scopes: BTreeMap::new(),
+                                    },
+                                ),
+                                authorization_code: Some(
+                                    crate::openapi::parse::models::OAuthFlow {
+                                        authorization_url: Some(
+                                            "https://example.com/auth".to_string(),
+                                        ),
+                                        token_url: Some("https://example.com/token".to_string()),
+                                        refresh_url: None,
+                                        device_authorization_url: None,
+                                        scopes: BTreeMap::new(),
+                                    },
+                                ),
+                                device_authorization: Some(
+                                    crate::openapi::parse::models::OAuthFlow {
+                                        authorization_url: None,
+                                        token_url: Some("https://example.com/token".to_string()),
+                                        refresh_url: None,
+                                        device_authorization_url: Some(
+                                            "https://example.com/device".to_string(),
+                                        ),
+                                        scopes: BTreeMap::new(),
+                                    },
+                                ),
+                            }),
+                            oauth2_metadata_url: Some("https://example.com/meta".to_string()),
+                        },
+                        description: Some("OAuth desc".to_string()),
+                        deprecated: true,
+                    }),
+                },
+                SecurityRequirement {
+                    scheme_name: "OAuthBareScheme".to_string(),
+                    scopes: vec![],
+                    scheme: Some(SecuritySchemeInfo {
+                        kind: SecuritySchemeKind::OAuth2 {
+                            flows: Box::new(crate::openapi::parse::models::OAuthFlows {
+                                implicit: None,
+                                password: None,
+                                client_credentials: None,
+                                authorization_code: None,
+                                device_authorization: None,
+                            }),
+                            oauth2_metadata_url: None,
+                        },
+                        description: None,
+                        deprecated: false,
+                    }),
+                },
+                SecurityRequirement {
+                    scheme_name: "OidcScheme".to_string(),
+                    scopes: vec![],
+                    scheme: Some(SecuritySchemeInfo {
+                        kind: SecuritySchemeKind::OpenIdConnect {
+                            open_id_connect_url: "https://example.com/oidc".to_string(),
+                        },
+                        description: None,
+                        deprecated: false,
+                    }),
+                },
+                SecurityRequirement {
+                    scheme_name: "MtlsScheme".to_string(),
+                    scopes: vec![],
+                    scheme: Some(SecuritySchemeInfo {
+                        kind: SecuritySchemeKind::MutualTls,
+                        description: None,
+                        deprecated: false,
+                    }),
+                },
+                SecurityRequirement {
+                    scheme_name: "HttpBearer".to_string(),
+                    scopes: vec![],
+                    scheme: Some(SecuritySchemeInfo {
+                        kind: SecuritySchemeKind::Http {
+                            scheme: "bearer".to_string(),
+                            bearer_format: Some("JWT".to_string()),
+                        },
+                        description: None,
+                        deprecated: false,
+                    }),
+                },
+                SecurityRequirement {
+                    scheme_name: "HttpBasic".to_string(),
+                    scopes: vec![],
+                    scheme: Some(SecuritySchemeInfo {
+                        kind: SecuritySchemeKind::Http {
+                            scheme: "basic".to_string(),
+                            bearer_format: None,
+                        },
+                        description: None,
+                        deprecated: false,
+                    }),
+                },
+                SecurityRequirement {
+                    scheme_name: "ApiKeyQ".to_string(),
+                    scopes: vec![],
+                    scheme: Some(SecuritySchemeInfo {
+                        kind: SecuritySchemeKind::ApiKey {
+                            name: "q".to_string(),
+                            in_loc: ParamSource::Query,
+                        },
+                        description: None,
+                        deprecated: false,
+                    }),
+                },
+                SecurityRequirement {
+                    scheme_name: "ApiKeyC".to_string(),
+                    scopes: vec![],
+                    scheme: Some(SecuritySchemeInfo {
+                        kind: SecuritySchemeKind::ApiKey {
+                            name: "c".to_string(),
+                            in_loc: ParamSource::Cookie,
+                        },
+                        description: None,
+                        deprecated: false,
+                    }),
+                },
+                SecurityRequirement {
+                    scheme_name: "ApiKeyInvalidLoc".to_string(),
+                    scopes: vec![],
+                    scheme: Some(SecuritySchemeInfo {
+                        kind: SecuritySchemeKind::ApiKey {
+                            name: "p".to_string(),
+                            in_loc: ParamSource::Path,
+                        },
+                        description: None,
+                        deprecated: false,
+                    }),
+                },
+                SecurityRequirement {
+                    scheme_name: "UnresolvedScheme".to_string(),
+                    scopes: vec![],
+                    scheme: None,
+                },
+            ],
+        };
+
+        let rich_info = OpenApiInfo::new("Rich", "1.0")
+            .with_summary("Sum")
+            .with_description("Desc")
+            .with_terms_of_service("https://example.com/tos")
+            .with_contact(contact_full)
+            .with_license(lic_id)
+            .with_self_uri("https://example.com/openapi.json")
+            .with_external_docs("https://example.com/docs", Some("ExtDesc".to_string()))
+            .with_servers(vec![srv1.clone()])
+            .with_server(OpenApiServer::new("https://s2.example.com"))
+            .with_tags(vec![tag1.clone(), tag1.clone()])
+            .with_tag(OpenApiTag::new("t2"))
+            .with_security(vec![sec_group_empty.clone(), sec_group_oauth.clone()])
+            .with_paths_extensions(path_ext_map)
+            .with_paths_extension("x-p2", json!(2))
+            .with_webhooks_extensions(wh_ext_map)
+            .with_webhooks_extension("x-w2", json!(3))
+            .with_extensions(ext_map)
+            .with_extension("x-r2", json!(4));
+
+        let simple_model = ParsedModel::Struct(make_struct(
+            "Item",
+            vec![make_field("id", "Option<Vec<u8>>", None)],
+        ));
+        let doc1 = generate_openapi_document(
+            &simple_model,
+            Some("https://spec.openapis.org/oas/3.1/dialect/base"),
+            &rich_info,
+        )
+        .expect("doc1");
+        assert!(doc1.get("$self").is_some());
+
+        let info_empty_contact_url_lic = OpenApiInfo::new("T", "1.0")
+            .with_contact(contact_empty)
+            .with_license(lic_url);
+        let _ = generate_openapi_document(&simple_model, None, &info_empty_contact_url_lic)
+            .expect("doc2");
+
+        let info_bad_lic = OpenApiInfo::new("T", "1.0").with_license(lic_both);
+        assert!(generate_openapi_document(&simple_model, None, &info_bad_lic).is_err());
+
+        let info_bad_path_ext =
+            OpenApiInfo::new("T", "1.0").with_paths_extension("bad_key", json!(1));
+        assert!(generate_openapi_document(&simple_model, None, &info_bad_path_ext).is_err());
+
+        // Empty document error (no models, no routes)
+        assert!(
+            generate_openapi_document_with_routes(&[], &[], None, &OpenApiInfo::new("E", "1"))
+                .is_err()
+        );
+
+        // 2. Routes withwebhooks, custom methods, path extensions (matching & conflicting), path_servers,
+        //servers_override, base_path, raw_request_body (with & without request_body, non-object raw),
+        // raw_responses, callbacks (with custom method, params, request_body, security, headers),
+        // links (with server_url vs server, literal vs expression), examples (Data with meta, Serialized non-string, External string & non-string),
+        // all ParamSources & ParamStyles, sequential response/request itemSchema (including Option<Vec<T>>)
+        let mut r1 = route.clone();
+        r1.path = "/custom/{id}".to_string();
+        r1.method = "CUSTOM".to_string();
+        r1.path_summary = Some("PSum".to_string());
+        r1.path_description = Some("PDesc".to_string());
+        r1.summary = Some("IgnoredFallbackSum".to_string());
+        r1.description = Some("IgnoredFallbackDesc".to_string());
+        r1.deprecated = true;
+        r1.tags = vec!["t1".to_string(), "new_tag".to_string(), "  ".to_string()];
+        r1.external_docs = Some(ParsedExternalDocs {
+            url: "https://example.com/op".to_string(),
+            description: None,
+        });
+        r1.path_extensions.insert("x-pe".to_string(), json!("same"));
+        let mut parsed_srv_vars = BTreeMap::new();
+        parsed_srv_vars.insert(
+            "v".to_string(),
+            ParsedServerVariable {
+                enum_values: Some(vec!["a".to_string()]),
+                default: "a".to_string(),
+                description: Some("vd".to_string()),
+            },
+        );
+        parsed_srv_vars.insert(
+            "v_bare".to_string(),
+            ParsedServerVariable {
+                enum_values: None,
+                default: "b".to_string(),
+                description: None,
+            },
+        );
+        r1.path_servers = Some(vec![ParsedServer {
+            url: "https://ps.example.com/{v}".to_string(),
+            description: Some("psd".to_string()),
+            name: Some("PS".to_string()),
+            variables: parsed_srv_vars,
+        }]);
+        r1.servers_override = Some(vec![ParsedServer {
+            url: "https://ovr.example.com".to_string(),
+            description: None,
+            name: None,
+            variables: BTreeMap::new(),
+        }]);
+        let path_param = RouteParam {
+            name: "id".to_string(),
+            source: ParamSource::Path,
+            ty: "String".to_string(),
+            description: Some("id desc".to_string()),
+            deprecated: true,
+            allow_empty_value: true,
+            allow_reserved: true,
+            style: Some(ParamStyle::Simple),
+            explode: false,
+            example: Some(ExampleValue::data_with_meta(
+                json!("123"),
+                Some("sum".to_string()),
+                Some("desc".to_string()),
+            )),
+            content_media_type: None,
+            raw_schema: Some(json!({ "minLength": 1 })),
+            extensions: BTreeMap::new(),
+        };
+        r1.path_params = vec![path_param.clone()];
+        r1.params = vec![
+            path_param,
+            RouteParam {
+                name: "qs".to_string(),
+                source: ParamSource::QueryString,
+                ty: "serde_json::Value".to_string(),
+                description: None,
+                deprecated: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                style: None,
+                explode: true,
+                example: Some(ExampleValue::serialized(json!(123))),
+                content_media_type: None,
+                raw_schema: Some(json!("not_an_obj")),
+                extensions: BTreeMap::new(),
+            },
+            RouteParam {
+                name: "hdr".to_string(),
+                source: ParamSource::Header,
+                ty: "Option<String>".to_string(),
+                description: None,
+                deprecated: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                style: Some(ParamStyle::Matrix),
+                explode: false,
+                example: Some(ExampleValue::external(json!("https://example.com/ex"))),
+                content_media_type: None,
+                raw_schema: None,
+                extensions: BTreeMap::new(),
+            },
+            RouteParam {
+                name: "ck".to_string(),
+                source: ParamSource::Cookie,
+                ty: "String".to_string(),
+                description: None,
+                deprecated: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                style: Some(ParamStyle::Cookie),
+                explode: true,
+                example: Some(ExampleValue::external(json!(456))),
+                content_media_type: None,
+                raw_schema: None,
+                extensions: BTreeMap::new(),
+            },
+            RouteParam {
+                name: "fd".to_string(),
+                source: ParamSource::FormData,
+                ty: "String".to_string(),
+                description: None,
+                deprecated: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                style: Some(ParamStyle::Label),
+                explode: false,
+                example: None,
+                content_media_type: None,
+                raw_schema: None,
+                extensions: BTreeMap::new(),
+            },
+            RouteParam {
+                name: "bd".to_string(),
+                source: ParamSource::Body,
+                ty: "String".to_string(),
+                description: None,
+                deprecated: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                style: Some(ParamStyle::SpaceDelimited),
+                explode: false,
+                example: None,
+                content_media_type: None,
+                raw_schema: None,
+                extensions: BTreeMap::new(),
+            },
+            RouteParam {
+                name: "q2".to_string(),
+                source: ParamSource::Query,
+                ty: "String".to_string(),
+                description: None,
+                deprecated: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                style: Some(ParamStyle::PipeDelimited),
+                explode: false,
+                example: None,
+                content_media_type: None,
+                raw_schema: None,
+                extensions: BTreeMap::new(),
+            },
+            RouteParam {
+                name: "q3".to_string(),
+                source: ParamSource::Query,
+                ty: "Vec<u8>".to_string(),
+                description: None,
+                deprecated: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                style: Some(ParamStyle::DeepObject),
+                explode: true,
+                example: None,
+                content_media_type: Some(crate::openapi::parse::models::ContentMediaType::Json),
+                raw_schema: Some(json!({ "type": 123 })),
+                extensions: BTreeMap::new(),
+            },
+            RouteParam {
+                name: "q4".to_string(),
+                source: ParamSource::Query,
+                ty: "String".to_string(),
+                description: None,
+                deprecated: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                style: Some(ParamStyle::DeepObject),
+                explode: true,
+                example: None,
+                content_media_type: None,
+                raw_schema: None,
+                extensions: BTreeMap::new(),
+            },
+        ];
+        r1.security = vec![sec_group_oauth.clone()];
+        r1.security_defined = true;
+        let mut enc_hdrs = std::collections::HashMap::new();
+        enc_hdrs.insert("X-Part".to_string(), "String".to_string());
+        let rich_enc_info = EncodingInfo {
+            content_type: Some("text/plain".to_string()),
+            headers: enc_hdrs,
+            style: Some(ParamStyle::Form),
+            explode: Some(true),
+            allow_reserved: Some(true),
+            encoding: Some(std::collections::HashMap::new()),
+            prefix_encoding: Some(vec![]),
+            item_encoding: None,
+        };
+        let bare_enc_info = EncodingInfo {
+            content_type: None,
+            headers: std::collections::HashMap::new(),
+            style: None,
+            explode: None,
+            allow_reserved: None,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: None,
+        };
+        r1.request_body = Some(RequestBodyDefinition {
+            ty: "Option<Vec<String>>".to_string(),
+            description: Some("RB Desc".to_string()),
+            media_type: "application/jsonl".to_string(),
+            format: BodyFormat::Json,
+            required: true,
+            encoding: Some(std::collections::HashMap::new()),
+            prefix_encoding: Some(vec![rich_enc_info.clone(), bare_enc_info]),
+            item_encoding: Some(rich_enc_info),
+            example: Some(ExampleValue::data(json!("ex"))),
+        });
+        r1.response_summary = Some("RSum".to_string());
+        r1.response_type = Some("Option<Vec<String>>".to_string());
+        r1.response_media_type = Some("application/jsonl".to_string());
+        r1.response_example = Some(ExampleValue::data(json!("rex")));
+        r1.response_headers = vec![
+            ResponseHeader {
+                name: "X-H1".to_string(),
+                description: None,
+                required: false,
+                deprecated: false,
+                style: None,
+                explode: None,
+                ty: "String".to_string(),
+                content_media_type: Some("text/plain".to_string()),
+                example: None,
+                extensions: BTreeMap::new(),
+            },
+            ResponseHeader {
+                name: "X-H2".to_string(),
+                description: None,
+                required: false,
+                deprecated: false,
+                style: None,
+                explode: None,
+                ty: "String".to_string(),
+                content_media_type: None,
+                example: Some(ExampleValue::data(json!("h2"))),
+                extensions: BTreeMap::new(),
+            },
+        ];
+        let mut link_params = std::collections::HashMap::new();
+        link_params.insert(
+            "p1".to_string(),
+            LinkParamValue::Expression(RuntimeExpression::new("$request.path.id")),
+        );
+        link_params.insert("p2".to_string(), LinkParamValue::Literal(json!("v2")));
+        r1.response_links = Some(vec![
+            ParsedLink {
+                name: "L1".to_string(),
+                description: Some("ldesc".to_string()),
+                operation_id: Some("op1".to_string()),
+                operation_ref: Some("/custom/1".to_string()),
+                resolved_operation_ref: None,
+                parameters: link_params,
+                request_body: Some(LinkRequestBody::Expression(RuntimeExpression::new(
+                    "$request.body",
+                ))),
+                server: Some(ParsedServer {
+                    url: "https://ls.example.com".to_string(),
+                    description: None,
+                    name: None,
+                    variables: BTreeMap::new(),
+                }),
+                server_url: None,
+            },
+            ParsedLink {
+                name: "L2".to_string(),
+                description: None,
+                operation_id: None,
+                operation_ref: None,
+                resolved_operation_ref: None,
+                parameters: std::collections::HashMap::new(),
+                request_body: Some(LinkRequestBody::Literal(json!({"a": 1}))),
+                server: None,
+                server_url: Some("https://ls2.example.com".to_string()),
+            },
+            ParsedLink {
+                name: "L3".to_string(),
+                description: None,
+                operation_id: None,
+                operation_ref: None,
+                resolved_operation_ref: None,
+                parameters: std::collections::HashMap::new(),
+                request_body: None,
+                server: None,
+                server_url: None,
+            },
+        ]);
+        r1.raw_responses = Some(json!({
+            "200": {
+                "headers": {
+                    "X-H1": {
+                        "content": { "text/plain": { "schema": { "minLength": 2 } } }
+                    },
+                    "X-H2": {
+                        "schema": { "minLength": 3 }
+                    }
+                }
+            }
+        }));
+        r1.callbacks = vec![
+            ParsedCallback {
+                name: "onCb".to_string(),
+                expression: RuntimeExpression::new("{$request.query.cb}"),
+                method: "CUSTOM_CB".to_string(),
+                path_params: r1.path_params.clone(),
+                params: vec![r1.params[1].clone()],
+                request_body: r1.request_body.clone(),
+                security: vec![sec_group_oauth.clone()],
+                security_defined: true,
+                response_type: None,
+                response_status: None,
+                response_summary: None,
+                response_description: None,
+                response_media_type: None,
+                response_example: None,
+                response_headers: vec![],
+            },
+            ParsedCallback {
+                name: "onCb".to_string(),
+                expression: RuntimeExpression::new("{$request.query.cb}"),
+                method: "POST".to_string(),
+                path_params: r1.path_params.clone(),
+                params: vec![],
+                request_body: None,
+                security: vec![],
+                security_defined: false,
+                response_type: None,
+                response_status: None,
+                response_summary: None,
+                response_description: None,
+                response_media_type: None,
+                response_example: None,
+                response_headers: vec![],
+            },
+        ];
+
+        // Second route on same path to test existing path_extensions, raw_request_body without request_body, raw_responses non-object
+        let mut r2 = r1.clone();
+        r2.method = "GET".to_string();
+        r2.servers_override = Some(vec![]);
+        r2.path_servers = None;
+        r2.base_path = Some("   ".to_string());
+        r2.request_body = None;
+        r2.raw_request_body = Some(json!({ "description": "raw only" }));
+        r2.raw_responses = Some(json!("not_an_obj"));
+        r2.response_status = None;
+        r2.response_links = Some(vec![]);
+        r2.callbacks = vec![];
+        let mut r2_empty_raw_resp = r2.clone();
+        r2_empty_raw_resp.method = "HEAD".to_string();
+        r2_empty_raw_resp.servers_override = None;
+        r2_empty_raw_resp.raw_responses = Some(json!({}));
+        let _ = generate_openapi_document_with_routes(
+            &[],
+            std::slice::from_ref(&r2_empty_raw_resp),
+            None,
+            &rich_info,
+        )
+        .expect("with rich_info");
+
+        // Third route as Webhook with non-object raw_request_body and request_body with non-array sequential schema
+        let mut r3 = r2.clone();
+        r3.kind = RouteKind::Webhook;
+        r3.path = "myHook".to_string();
+        r3.servers_override = None;
+        r3.base_path = Some("/v3".to_string());
+        r3.raw_request_body = Some(json!("not_an_obj"));
+        r3.request_body = Some(RequestBodyDefinition {
+            ty: "String".to_string(),
+            description: Some("Desc".to_string()),
+            media_type: "application/jsonl".to_string(),
+            format: BodyFormat::Json,
+            required: false,
+            encoding: None,
+            prefix_encoding: Some(vec![]),
+            item_encoding: None,
+            example: None,
+        });
+        r3.response_type = Some("String".to_string());
+        r3.response_media_type = Some("application/jsonl".to_string());
+
+        let mut r4 = r3.clone();
+        r4.method = "POST".to_string();
+        r4.base_path = Some("/v4".to_string());
+        r4.raw_request_body = Some(json!({ "x-rb": 1 }));
+
+        let raw_comps = json!({
+            "schemas": {
+                "Item": { "x-extra": true }
+            },
+            "parameters": {
+                "P1": { "name": "p1", "in": "query" }
+            }
+        });
+        let merged_doc = generate_openapi_document_with_routes_and_components(
+            std::slice::from_ref(&simple_model),
+            &[r1.clone(), r2.clone(), r3, r4],
+            Some("https://spec.openapis.org/oas/3.1/dialect/base"),
+            &OpenApiInfo::new("Merged", "1.0"),
+            Some(&raw_comps),
+        )
+        .expect("merged_doc");
+        assert!(merged_doc["components"]["schemas"]["Item"]["x-extra"] == true);
+        let mut r_no_sec = r2_empty_raw_resp;
+        r_no_sec.security = vec![];
+        r_no_sec.security_defined = false;
+        let _ = generate_openapi_document_with_routes_and_components(
+            &[],
+            &[r_no_sec],
+            None,
+            &OpenApiInfo::new("MergedNoModels", "1.0"),
+            Some(&json!({})),
+        )
+        .expect("empty raw comps");
+        let _ = generate_openapi_document_with_routes_and_components(
+            &[],
+            std::slice::from_ref(&r2),
+            None,
+            &OpenApiInfo::new("MergedNoModelsNonEmptySec", "1.0"),
+            Some(&json!({})),
+        )
+        .expect("no models with sec");
+        let _ = generate_openapi_document_with_routes_and_components(
+            &[],
+            std::slice::from_ref(&r2),
+            None,
+            &OpenApiInfo::new("MergedNoneComps", "1.0"),
+            None,
+        )
+        .expect("none comps");
+
+        // Conflicting path extensions & invalid path extension key
+        let mut r_conflict = r1.clone();
+        r_conflict.method = "DELETE".to_string();
+        r_conflict
+            .path_extensions
+            .insert("x-pe".to_string(), json!("different"));
+        assert!(generate_openapi_document_with_routes(
+            &[],
+            &[r1.clone(), r_conflict],
+            None,
+            &OpenApiInfo::new("T", "1")
+        )
+        .is_err());
+
+        let mut r_bad_pext = r1.clone();
+        r_bad_pext
+            .path_extensions
+            .insert("bad_key".to_string(), json!(1));
+        assert!(generate_openapi_document_with_routes(
+            &[],
+            &[r_bad_pext],
+            None,
+            &OpenApiInfo::new("T", "1")
+        )
+        .is_err());
+
+        // Conflicting security scheme in route vs callback
+        let mut r_sec_conflict = r1.clone();
+        r_sec_conflict.callbacks[0].security[0].schemes[3].scheme = Some(SecuritySchemeInfo {
+            kind: SecuritySchemeKind::MutualTls,
+            description: Some("conflict".to_string()),
+            deprecated: false,
+        });
+        assert!(generate_openapi_document_with_routes(
+            &[],
+            &[r_sec_conflict],
+            None,
+            &OpenApiInfo::new("T", "1")
+        )
+        .is_err());
+
+        let mut r_sec_conflict2 = r2.clone();
+        r_sec_conflict2.security = vec![crate::openapi::parse::models::SecurityRequirementGroup {
+            schemes: vec![SecurityRequirement {
+                scheme_name: "MtlsScheme".to_string(),
+                scopes: vec![],
+                scheme: Some(SecuritySchemeInfo {
+                    kind: SecuritySchemeKind::MutualTls,
+                    description: Some("conflict2".to_string()),
+                    deprecated: false,
+                }),
+            }],
+        }];
+        assert!(generate_openapi_document_with_routes(
+            &[],
+            &[r1, r_sec_conflict2],
+            None,
+            &OpenApiInfo::new("T", "1")
+        )
+        .is_err());
+
+        // 3. Tuple struct with skipped field, Struct with deprecated/externalDocs/readOnly/writeOnly/rename_all,
+        // Enum with rename/deprecated/externalDocs/rename_all/discriminator_default_mapping,
+        // Type mapping edge cases (BTreeMap<String, Vec<Decimal>>, non-2-arg HashMap, unclosed generic `Vec<String`, `&[u8]`, `[u8]`, `Bytes`, `ByteBuf`, `bytes::Bytes`, `serde_bytes::ByteBuf`)
+        let mut tuple_f0 = make_field("0", "String", None);
+        tuple_f0.is_skipped = true;
+        let tuple_f1 = make_field("1", "Decimal", None);
+        let mut tuple_s = make_struct("MyTuple", vec![tuple_f0, tuple_f1]);
+        tuple_s.rename = Some("RenamedTuple".to_string());
+        tuple_s.is_deprecated = true;
+        tuple_s.external_docs = Some(ParsedExternalDocs {
+            url: "https://example.com/tuple".to_string(),
+            description: Some("TupleDoc".to_string()),
+        });
+        let _ = generate_json_schema(&ParsedModel::Struct(tuple_s), None).expect("tuple");
+
+        let mut f_ro = make_field("ro_field", "BTreeMap<String, Vec<Decimal>>", Some("f desc"));
+        f_ro.is_read_only = true;
+        f_ro.is_write_only = true;
+        f_ro.is_deprecated = true;
+        f_ro.external_docs = Some(ParsedExternalDocs {
+            url: "https://example.com/f".to_string(),
+            description: None,
+        });
+        let mut f_skip = make_field("skip_me", "String", None);
+        f_skip.is_skipped = true;
+        let mut f_no_desc = make_field("b1", "&[u8]", None);
+        f_no_desc.description = None;
+        let mut named_s = make_struct(
+            "Named",
+            vec![
+                f_ro,
+                f_skip,
+                f_no_desc,
+                make_field("b2", "[u8]", None),
+                make_field("b3", "Bytes", None),
+                make_field("b4", "ByteBuf", None),
+                make_field("b5", "bytes::Bytes", None),
+                make_field("b6", "serde_bytes::ByteBuf", None),
+                make_field("flt", "f32", None),
+                make_field("nd", "NaiveDate", None),
+                make_field("ndt", "NaiveDateTime", None),
+                make_field("m_bad", "HashMap<String>", None),
+                make_field("unclosed", "Vec<String", None),
+                make_field("opt_ref", "Option<CustomType>", None),
+                make_field("nested_map", "HashMap<String, Result<i32, String>>", None),
+                make_field("empty_gen", "HashMap<,>", None),
+            ],
+        );
+        named_s.description = None;
+        named_s.rename_all = Some(RenameRule::CamelCase);
+        named_s.deny_unknown_fields = true;
+        let _ = generate_json_schema(&ParsedModel::Struct(named_s), None).expect("named");
+        let _ = generate_json_schema(
+            &ParsedModel::Struct(make_struct("EmptyStruct", vec![])),
+            None,
+        )
+        .expect("empty_s");
+
+        let rich_enum = ParsedEnum {
+            name: "RichEnum".to_string(),
+            description: Some("EDesc".to_string()),
+            rename: Some("RenamedEnum".to_string()),
+            rename_all: Some(RenameRule::SnakeCase),
+            tag: Some("kind".to_string()),
+            untagged: false,
+            variants: vec![
+                ParsedVariant {
+                    name: "UnitVar".to_string(),
+                    ty: None,
+                    description: None,
+                    rename: None,
+                    aliases: None,
+                    is_deprecated: true,
+                },
+                ParsedVariant {
+                    name: "TypedVar".to_string(),
+                    ty: Some("i64".to_string()),
+                    description: None,
+                    rename: Some("custom_typed".to_string()),
+                    aliases: None,
+                    is_deprecated: true,
+                },
+            ],
+            is_deprecated: true,
+            external_docs: Some(ParsedExternalDocs {
+                url: "https://example.com/enum".to_string(),
+                description: None,
+            }),
+            discriminator_mapping: Some(BTreeMap::new()),
+            discriminator_default_mapping: Some("#/components/schemas/Fallback".to_string()),
+        };
+        let _ = generate_json_schema(&ParsedModel::Enum(rich_enum), None).expect("rich_enum");
+        assert!(schema_item_schema(&json!({ "type": "string" })).is_none());
+        assert!(is_sequential_media_type("text/event-stream"));
+        assert!(is_sequential_media_type("multipart/byteranges"));
     }
 }

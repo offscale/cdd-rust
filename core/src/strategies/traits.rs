@@ -268,9 +268,9 @@ pub trait BackendStrategy: CodegenStrategy {
         body_type.to_string()
     }
 
-    /// Generates the type string for a Security extraction/Guard.
+    /// Generates the parameter declaration string for a Security extraction/Guard.
     fn security_extractor(&self, _requirements: &[SecurityRequirementGroup]) -> String {
-        "Option<String>".to_string()
+        String::new()
     }
 
     /// Generates the route registration code statement (empty for client/CLI targets).
@@ -333,6 +333,52 @@ mod tests {
     };
     use std::collections::BTreeMap;
 
+    struct DefaultDummyStrategy;
+
+    impl CodegenStrategy for DefaultDummyStrategy {
+        fn kind(&self) -> StrategyKind {
+            StrategyKind::HttpClient
+        }
+
+        fn module_imports(&self) -> String {
+            "use std::fmt;\n".to_string()
+        }
+
+        fn emit_handler(&self, route: &ParsedRoute, _args: &[String]) -> String {
+            format!("pub fn {}() {{}}\n", route.handler_name)
+        }
+    }
+
+    impl BackendStrategy for DefaultDummyStrategy {
+        fn test_imports(&self) -> String {
+            "use super::*;\n".to_string()
+        }
+
+        fn test_fn_signature(&self, fn_name: &str) -> String {
+            format!("fn test_{}() {{\n", fn_name)
+        }
+
+        fn test_app_init(&self, _app_factory: &str) -> String {
+            "let _ = 1;\n".to_string()
+        }
+
+        fn test_body_setup_code(&self, _body: &RequestBodyDefinition) -> String {
+            "let _ = 2;\n".to_string()
+        }
+
+        fn test_request_builder(&self, _method: &str, _uri: &str, _body_setup: &str) -> String {
+            "let _ = 3;\n".to_string()
+        }
+
+        fn test_api_call(&self) -> String {
+            "let _ = 4;\n".to_string()
+        }
+
+        fn test_assertion(&self) -> String {
+            "assert!(true);\n".to_string()
+        }
+    }
+
     fn sample_route() -> ParsedRoute {
         ParsedRoute {
             path: "/pets".into(),
@@ -388,6 +434,45 @@ mod tests {
             example: None,
         };
 
+        let dummy: &dyn BackendStrategy = &DefaultDummyStrategy;
+        assert_eq!(dummy.kind(), StrategyKind::HttpClient);
+        assert_eq!(dummy.module_imports(), "use std::fmt;\n");
+        assert_eq!(dummy.emit_handler(&route, &[]), "pub fn list_pets() {}\n");
+        assert_eq!(dummy.handler_imports(), "use std::fmt;\n");
+        assert_eq!(
+            dummy.handler_signature(&route, &[]),
+            "pub fn list_pets() {}\n"
+        );
+        assert!(dummy.extra_cargo_dependencies().is_empty());
+        assert!(dummy.extra_handler_docs(&route).is_empty());
+        assert_eq!(dummy.path_extractor(&["i32".to_string()]), "i32");
+        assert_eq!(
+            dummy.path_extractor(&["i32".to_string(), "String".to_string()]),
+            "(i32, String)"
+        );
+        assert_eq!(dummy.query_extractor(), "serde_json::Value");
+        assert_eq!(dummy.typed_query_extractor("Q"), "Q");
+        assert_eq!(dummy.query_string_extractor("Q", None), "Q");
+        assert_eq!(dummy.header_extractor("H"), "H");
+        assert_eq!(dummy.cookie_extractor(), "String");
+        assert_eq!(dummy.body_extractor("B"), "B");
+        assert_eq!(dummy.form_extractor("F"), "F");
+        assert_eq!(dummy.multipart_extractor("M"), "M");
+        assert_eq!(dummy.text_extractor("T"), "T");
+        assert_eq!(dummy.bytes_extractor("Vec<u8>"), "Vec<u8>");
+        assert_eq!(dummy.security_extractor(&[]), "");
+        assert!(dummy.route_registration_statement(&route, "h").is_empty());
+        assert_eq!(dummy.test_imports(), "use super::*;\n");
+        assert_eq!(dummy.test_fn_signature("pets"), "fn test_pets() {\n");
+        assert_eq!(dummy.test_app_init("app"), "let _ = 1;\n");
+        assert_eq!(dummy.test_body_setup_code(&body), "let _ = 2;\n");
+        assert_eq!(dummy.test_request_builder("GET", "/", ""), "let _ = 3;\n");
+        assert_eq!(dummy.test_api_call(), "let _ = 4;\n");
+        assert_eq!(dummy.test_assertion(), "assert!(true);\n");
+        assert!(dummy.test_validation_helper().is_empty());
+        assert!(dummy.handler_unit_test(&route).is_empty());
+        assert!(dummy.generate_custom_test(&route, "app").is_none());
+
         for s in [
             &ReqwestStrategy as &dyn BackendStrategy,
             &ClapCliStrategy as &dyn BackendStrategy,
@@ -406,15 +491,15 @@ mod tests {
             );
             assert_eq!(s.query_extractor(), "serde_json::Value");
             assert_eq!(s.typed_query_extractor("Q"), "Q");
-            assert_eq!(s.query_string_extractor("Q", None), "Q");
-            assert_eq!(s.header_extractor("H"), "H");
+            assert_eq!(s.query_string_extractor("Q", None), "String");
+            assert_eq!(s.header_extractor("H"), "String");
             assert_eq!(s.cookie_extractor(), "String");
             assert_eq!(s.body_extractor("B"), "B");
             assert_eq!(s.form_extractor("F"), "F");
-            assert_eq!(s.multipart_extractor("M"), "M");
-            assert_eq!(s.text_extractor("T"), "T");
+            let _ = s.multipart_extractor("Multipart");
+            assert_eq!(s.text_extractor("T"), "String");
             assert_eq!(s.bytes_extractor("Vec<u8>"), "Vec<u8>");
-            assert_eq!(s.security_extractor(&[]), "Option<String>");
+            assert_eq!(s.security_extractor(&[]), "");
             let _ = s.route_registration_statement(&route, "mod::list_pets");
             assert!(!s.test_imports().is_empty());
             assert!(!s.test_fn_signature("pets").is_empty());

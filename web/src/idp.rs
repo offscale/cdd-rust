@@ -83,8 +83,7 @@ pub async fn login(
     let sub = creds
         .map(|c| c.email.clone())
         .unwrap_or_else(|| "default-user".to_string());
-    let token = create_jwt(&sub)?;
-    Ok(HttpResponse::Ok().json(serde_json::json!({"token": token})))
+    create_jwt(&sub).map(|token| HttpResponse::Ok().json(serde_json::json!({"token": token})))
 }
 
 /// Issues a refreshed signed JWT (`POST /auth/refresh`).
@@ -95,8 +94,8 @@ pub async fn login(
 /// # Errors
 /// * Returns [`ServerError`] if JWT generation fails.
 pub async fn refresh() -> Result<HttpResponse, ServerError> {
-    let token = create_jwt("refreshed-user")?;
-    Ok(HttpResponse::Ok().json(serde_json::json!({"token": token})))
+    create_jwt("refreshed-user")
+        .map(|token| HttpResponse::Ok().json(serde_json::json!({"token": token})))
 }
 
 /// Invalidates the current session (`POST /auth/logout`).
@@ -201,6 +200,12 @@ mod tests {
         let claims = verify_jwt(token).expect("valid jwt");
         assert_eq!(claims.sub, "alice@example.com");
 
+        let req = test::TestRequest::post().uri("/auth/login").to_request();
+        let login_default: serde_json::Value = test::call_and_read_body_json(&app, req).await;
+        let default_claims =
+            verify_jwt(login_default["token"].as_str().expect("token")).expect("valid jwt");
+        assert_eq!(default_claims.sub, "default-user");
+
         let req = test::TestRequest::post().uri("/auth/refresh").to_request();
         let refresh_res: serde_json::Value = test::call_and_read_body_json(&app, req).await;
         assert!(verify_jwt(refresh_res["token"].as_str().expect("token")).is_ok());
@@ -212,6 +217,24 @@ mod tests {
 
     #[actix_web::test]
     async fn test_idp_register_with_concrete_and_failing_dao() {
+        let in_mem = InMemoryUserDao;
+        assert!(in_mem.get_user(Uuid::nil()).await.expect("ok").is_none());
+        assert!(in_mem.get_user_by_name("u").await.expect("ok").is_none());
+        assert!(in_mem
+            .update_user(Uuid::nil(), UpdateUsers::default())
+            .await
+            .is_err());
+        assert!(in_mem.delete_user(Uuid::nil()).await.is_err());
+
+        let failing = FailingUserDao;
+        assert!(failing.get_user(Uuid::nil()).await.is_err());
+        assert!(failing.get_user_by_name("u").await.is_err());
+        assert!(failing
+            .update_user(Uuid::nil(), UpdateUsers::default())
+            .await
+            .is_err());
+        assert!(failing.delete_user(Uuid::nil()).await.is_err());
+
         let daos = web::Data::new(AppDaos {
             user_dao: Arc::new(InMemoryUserDao),
         });

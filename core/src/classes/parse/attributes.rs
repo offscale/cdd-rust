@@ -35,20 +35,17 @@ pub fn extract_attributes(node: &SyntaxNode) -> AttrInfo {
 
     // Iterate over children that are attributes
     // Use generic casting iterator manually to work on SyntaxNode directly
-    let attributes = node.children().filter_map(ast::Attr::cast);
-
-    for attr in attributes {
-        // We only care about "serde" or "oai" attributes for schema generation
-        if let Some(meta) = attr.meta() {
-            if let Some(path) = meta.path() {
-                let ident = path.to_string();
-                if ident == "serde" || ident == "oai" {
-                    // Check the token tree content
-                    if let Some(tt) = meta.token_tree() {
-                        let content = tt.to_string();
-                        parse_attribute_content(&content, &mut info);
-                    }
-                }
+    for meta in node
+        .children()
+        .filter_map(ast::Attr::cast)
+        .filter_map(|a| a.meta())
+    {
+        let is_target = meta
+            .path()
+            .is_some_and(|p| matches!(p.to_string().as_str(), "serde" | "oai"));
+        if is_target {
+            if let Some(tt) = meta.token_tree() {
+                parse_attribute_content(&tt.to_string(), &mut info);
             }
         }
     }
@@ -87,16 +84,12 @@ fn parse_attribute_content(content: &str, info: &mut AttrInfo) {
     let deny_unknown_re = DENY_UNKNOWN_RE
         .get_or_init(|| Regex::new(r#"\bdeny_unknown_fields\b"#).expect("Invalid regex"));
 
-    if let Some(caps) = rename_re.captures(content) {
-        if let Some(val) = caps.get(1) {
-            info.rename = Some(val.as_str().to_string());
-        }
+    if let Some(val) = rename_re.captures(content).and_then(|c| c.get(1)) {
+        info.rename = Some(val.as_str().to_string());
     }
 
-    if let Some(caps) = rename_all_re.captures(content) {
-        if let Some(val) = caps.get(1) {
-            info.rename_all = RenameRule::parse(val.as_str());
-        }
+    if let Some(val) = rename_all_re.captures(content).and_then(|c| c.get(1)) {
+        info.rename_all = RenameRule::parse(val.as_str());
     }
 
     if skip_re.is_match(content) {
@@ -113,10 +106,8 @@ fn parse_attribute_content(content: &str, info: &mut AttrInfo) {
         info.skip_deserializing = true;
     }
 
-    if let Some(caps) = tag_re.captures(content) {
-        if let Some(val) = caps.get(1) {
-            info.tag = Some(val.as_str().to_string());
-        }
+    if let Some(val) = tag_re.captures(content).and_then(|c| c.get(1)) {
+        info.tag = Some(val.as_str().to_string());
     }
 
     if untagged_re.is_match(content) {
@@ -217,11 +208,9 @@ mod tests {
         "#;
         let s = parse_first_struct(code);
         let field = s
-            .field_list()
-            .and_then(|list| match list {
-                ast::FieldList::RecordFieldList(list) => list.fields().next(),
-                _ => None,
-            })
+            .syntax()
+            .descendants()
+            .find_map(ast::RecordField::cast)
             .expect("field missing");
         let info = extract_attributes(field.syntax());
         assert!(info.is_skipped);
@@ -239,11 +228,9 @@ mod tests {
         "#;
         let s = parse_first_struct(code);
         let field = s
-            .field_list()
-            .and_then(|list| match list {
-                ast::FieldList::RecordFieldList(list) => list.fields().next(),
-                _ => None,
-            })
+            .syntax()
+            .descendants()
+            .find_map(ast::RecordField::cast)
             .expect("field missing");
         let info = extract_attributes(field.syntax());
         assert!(!info.is_skipped);
@@ -261,11 +248,9 @@ mod tests {
         "#;
         let s = parse_first_struct(code);
         let field = s
-            .field_list()
-            .and_then(|list| match list {
-                ast::FieldList::RecordFieldList(list) => list.fields().next(),
-                _ => None,
-            })
+            .syntax()
+            .descendants()
+            .find_map(ast::RecordField::cast)
             .expect("field missing");
         let info = extract_attributes(field.syntax());
         assert!(!info.is_skipped);
@@ -277,6 +262,8 @@ mod tests {
     fn test_ignores_non_target_attributes() {
         let code = r#"
             #[derive(Debug)]
+            #[serde]
+            #[]
             struct Ignored {
                 #[doc = "not serde"]
                 value: String,
@@ -288,5 +275,15 @@ mod tests {
         assert!(!info.is_skipped);
         assert!(info.tag.is_none());
         assert!(!info.untagged);
+
+        let oai_code = r#"
+            #[oai(rename = "OaiModel")]
+            struct OaiUser {
+                id: i32,
+            }
+        "#;
+        let oai_s = parse_first_struct(oai_code);
+        let oai_info = extract_attributes(oai_s.syntax());
+        assert_eq!(oai_info.rename.as_deref(), Some("OaiModel"));
     }
 }

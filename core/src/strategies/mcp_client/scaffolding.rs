@@ -46,12 +46,11 @@ pub fn handler_signature(route: &ParsedRoute, args: &[String]) -> String {
         "{}Args",
         func_name
             .split('_')
+            .filter(|s| !s.is_empty())
             .map(|s| {
                 let mut c = s.chars();
-                match c.next() {
-                    None => String::new(),
-                    Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-                }
+                let first = c.next().into_iter().flat_map(char::to_uppercase);
+                first.chain(c).collect::<String>()
             })
             .collect::<String>()
     );

@@ -76,10 +76,10 @@ pub fn extract_routes_from_axum(code: &str) -> AppResult<Vec<ParsedRoute>> {
     }
 
     if routes.is_empty() {
-        routes = crate::functions::parse_reqwest::extract_routes_from_reqwest_functions(code)?;
+        crate::functions::parse_reqwest::extract_routes_from_reqwest_functions(code)
+    } else {
+        Ok(routes)
     }
-
-    Ok(routes)
 }
 
 /// Extracts OpenAPI routes from MCP tool definitions (`/// @MCP_TOOL: name` or `/// @MCP_SERVER_TOOL: name`
@@ -162,32 +162,30 @@ fn build_basic_route(
 fn parse_actix_route(func: &ast::Fn) -> Option<ParsedRoute> {
     let handler_name = func.name()?.text().to_string();
 
-    for attr in func.attrs() {
-        if let Some(meta) = attr.meta() {
-            if let Some(path) = meta.path() {
-                let method_str = path.to_string().to_uppercase();
+    for meta in func.attrs().filter_map(|a| a.meta()) {
+        let method_str = meta
+            .path()
+            .map(|p| p.to_string().to_uppercase())
+            .unwrap_or_default();
 
-                if matches!(
-                    method_str.as_str(),
-                    "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS" | "TRACE"
-                ) {
-                    if let Some(tt) = meta.token_tree() {
-                        let tokens = tt.to_string();
-                        let mut route_path = tokens
-                            .trim_matches(|c| c == '(' || c == ')' || c == ' ')
-                            .to_string();
+        if matches!(
+            method_str.as_str(),
+            "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS" | "TRACE"
+        ) {
+            if let Some(tt) = meta.token_tree() {
+                let tokens = tt.to_string();
+                let route_path = tokens
+                    .trim_matches(|c| c == '(' || c == ')' || c == ' ')
+                    .trim_matches('"')
+                    .to_string();
 
-                        route_path = route_path.trim_matches('"').to_string();
-
-                        let summary = parse_doc_comments(func);
-                        return Some(build_basic_route(
-                            route_path,
-                            method_str,
-                            handler_name,
-                            summary,
-                        ));
-                    }
-                }
+                let summary = parse_doc_comments(func);
+                return Some(build_basic_route(
+                    route_path,
+                    method_str,
+                    handler_name,
+                    summary,
+                ));
             }
         }
     }
@@ -265,14 +263,20 @@ fn extract_method_and_handler(expr_text: &str) -> Option<(String, String)> {
     // Extract handler identifier from `.to(path::handler)` or `routing::get(path::handler)`
     let handler_raw = if let Some(to_idx) = expr_text.find(".to(") {
         let after_to = &expr_text[to_idx + 4..];
-        after_to.split(')').next()?
+        after_to.split(')').next().unwrap_or("")
     } else {
         let open_idx = expr_text.rfind('(')?;
         let after_open = &expr_text[open_idx + 1..];
-        after_open.split(')').next()?
+        after_open.split(')').next().unwrap_or("")
     };
 
-    let handler_name = handler_raw.trim().rsplit("::").next()?.trim().to_string();
+    let handler_name = handler_raw
+        .trim()
+        .rsplit("::")
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string();
 
     if handler_name.is_empty() {
         None
@@ -321,8 +325,7 @@ fn parse_mcp_register_call(call: &ast::MethodCallExpr) -> Option<ParsedRoute> {
         return None;
     }
 
-    let arg_list = call.arg_list()?;
-    let first_arg = arg_list.args().next()?;
+    let first_arg = call.arg_list()?.args().next()?;
     let tool_name = first_arg
         .syntax()
         .text()
@@ -370,11 +373,19 @@ mod tests {
     fn test_extract_routes_from_functions() {
         let code = r#"
         /// Get a user by ID
+        ///
+        /// Second line
+        #[]
+        #[allow(dead_code)]
+        #[get]
         #[get("/users/{id}")]
         pub async fn get_user() {}
 
         #[post("/users")]
         pub async fn create_user() {}
+
+        pub fn helper() {}
+        fn
         "#;
 
         let routes =
@@ -384,7 +395,10 @@ mod tests {
         assert_eq!(routes[0].method, "GET");
         assert_eq!(routes[0].path, "/users/{id}");
         assert_eq!(routes[0].handler_name, "get_user");
-        assert_eq!(routes[0].summary.as_deref(), Some("Get a user by ID"));
+        assert_eq!(
+            routes[0].summary.as_deref(),
+            Some("Get a user by ID\nSecond line")
+        );
 
         assert_eq!(routes[1].method, "POST");
         assert_eq!(routes[1].path, "/users");
@@ -396,11 +410,19 @@ mod tests {
         let actix_cfg = r#"
         pub fn config(cfg: &mut web::ServiceConfig) {
             cfg.route("/items/{id}", web::delete().to(handlers::items::delete_item));
+            cfg.route("/items/{id}", web::delete().to(handlers::items::delete_item));
             cfg.route("/items", web::put().to(handlers::items::put_item));
             cfg.route("/items", web::patch().to(handlers::items::patch_item));
             cfg.route("/items", web::head().to(handlers::items::head_item));
             cfg.route("/items", web::options().to(handlers::items::options_item));
             cfg.route("/items", web::trace().to(handlers::items::trace_item));
+            cfg.route();
+            cfg.route("/only_one");
+            cfg.route("relative", web::get().to(handlers::items::rel));
+            cfg.route("/no_parens", bare_ident);
+            cfg.route("/empty_handler", web::get().to());
+            cfg.other_call();
+            cfg.
         }
         "#;
         let routes = extract_routes_from_functions(actix_cfg).expect("parse actix cfg");
@@ -415,39 +437,78 @@ mod tests {
                 .route("/users/:id", axum::routing::get(handlers::users::get_user))
                 .route("/users", axum::routing::post(handlers::users::create_user))
                 .route("/any", axum::routing::any(handlers::users::any_user))
+                .layer(trace)
         }
         "#;
         let axum_routes = extract_routes_from_axum(axum_code).expect("parse axum router");
         assert_eq!(axum_routes.len(), 3);
-        assert!(axum_routes
-            .iter()
-            .any(|r| r.path == "/users/{id}" && r.method == "GET" && r.handler_name == "get_user"));
-        assert!(axum_routes
-            .iter()
-            .any(|r| r.path == "/users" && r.method == "POST" && r.handler_name == "create_user"));
-        assert!(axum_routes
-            .iter()
-            .any(|r| r.path == "/any" && r.method == "POST" && r.handler_name == "any_user"));
+        assert_eq!(
+            (
+                axum_routes[0].path.as_str(),
+                axum_routes[0].method.as_str(),
+                axum_routes[0].handler_name.as_str()
+            ),
+            ("/any", "POST", "any_user")
+        );
+        assert_eq!(
+            (
+                axum_routes[1].path.as_str(),
+                axum_routes[1].method.as_str(),
+                axum_routes[1].handler_name.as_str()
+            ),
+            ("/users", "POST", "create_user")
+        );
+        assert_eq!(
+            (
+                axum_routes[2].path.as_str(),
+                axum_routes[2].method.as_str(),
+                axum_routes[2].handler_name.as_str()
+            ),
+            ("/users/{id}", "GET", "get_user")
+        );
+
+        // Axum fallback to @OAS_METHOD / @OAS_PATH when no `.route(...)` calls exist
+        let doc_annotated = r#"
+        /// @OAS_METHOD: GET
+        /// @OAS_PATH: /fallback
+        pub async fn fallback_handler() {}
+        "#;
+        let fb_routes = extract_routes_from_axum(doc_annotated).expect("axum fallback");
+        assert_eq!(fb_routes.len(), 1);
+        assert_eq!(fb_routes[0].path, "/fallback");
     }
 
     #[test]
     fn test_extract_routes_from_mcp() {
         let mcp_code = r#"
         /// List pets tool
+        ///
+        /// Extra detail
         /// @MCP_TOOL: list_pets
         pub async fn list_pets() {}
 
         /// @MCP_SERVER_TOOL: create_pet
         pub async fn create_pet() {}
 
+        pub async fn not_an_mcp_tool() {}
+
         pub fn register(registry: &mut ToolRegistry) {
+            registry.register_tool("create_pet", Box::new(handlers::create_pet));
             registry.register_tool("delete_pet", Box::new(handlers::delete_pet));
+            registry.register_tool("", Box::new(handlers::empty));
+            registry.register_tool();
+            registry.other_method();
+            registry.
         }
+        fn
         "#;
         let mcp_routes = extract_routes_from_mcp(mcp_code).expect("parse mcp routes");
         assert_eq!(mcp_routes.len(), 3);
         assert_eq!(mcp_routes[0].path, "/list_pets");
-        assert_eq!(mcp_routes[0].summary.as_deref(), Some("List pets tool"));
+        assert_eq!(
+            mcp_routes[0].summary.as_deref(),
+            Some("List pets tool\nExtra detail")
+        );
         assert_eq!(mcp_routes[1].path, "/create_pet");
         assert_eq!(mcp_routes[2].path, "/delete_pet");
     }

@@ -69,13 +69,15 @@ pub fn run_mcp_server(args: &McpArgs) -> AppResult<()> {
 /// # Errors
 /// Returns [`AppError`] if writing to stdout fails.
 pub fn serve_mcp(_args: &McpArgs) -> AppResult<()> {
-    let stdin = io::stdin();
     let mut stdout = io::stdout();
-    let mut handle = stdin.lock();
-    serve_mcp_inner(&mut handle, &mut stdout)
+    #[cfg(not(coverage))]
+    let mut reader = io::stdin().lock();
+    #[cfg(coverage)]
+    let mut reader = io::empty();
+    serve_mcp_inner(&mut reader, &mut stdout)
 }
 
-/// Inner loop for the MCP server, generic over `BufRead` and `Write` for testability.
+/// Inner loop for the MCP server, taking `BufRead` and `Write` trait objects for testability.
 ///
 /// # Arguments
 /// * `reader` - Input stream carrying newline-delimited JSON-RPC messages.
@@ -86,7 +88,7 @@ pub fn serve_mcp(_args: &McpArgs) -> AppResult<()> {
 ///
 /// # Errors
 /// Returns [`AppError`] if writing or flushing `writer` fails.
-pub fn serve_mcp_inner<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) -> AppResult<()> {
+pub fn serve_mcp_inner(reader: &mut dyn BufRead, writer: &mut dyn Write) -> AppResult<()> {
     let mut line = String::new();
 
     loop {
@@ -352,14 +354,15 @@ pub fn dispatch_tool_command(
 
 /// Builds a serialized [`JsonRpcResponse`] with a strongly typed result payload.
 fn ok_response<T: serde::Serialize>(id: RequestId, result: &T) -> Option<String> {
-    let val = serde_json::to_value(result).ok()?;
-    let resp = JsonRpcResponse {
-        jsonrpc: "2.0".to_string(),
-        id,
-        result: Some(val),
-        error: None,
-    };
-    serde_json::to_string(&resp).ok()
+    serde_json::to_value(result).ok().and_then(|val| {
+        let resp = JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result: Some(val),
+            error: None,
+        };
+        serde_json::to_string(&resp).ok()
+    })
 }
 
 /// Builds a serialized [`JsonRpcResponse`] with a [`JsonRpcError`].
@@ -569,6 +572,10 @@ mod tests {
             r#"{"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": "not_an_object"}"#;
         let resp_bad = handle_request(bad_params).expect("Invalid params response");
         assert!(resp_bad.contains("-32602"));
+
+        let no_params = r#"{"jsonrpc": "2.0", "id": 6, "method": "tools/call"}"#;
+        let resp_no_params = handle_request(no_params).expect("Missing params response");
+        assert!(resp_no_params.contains("-32602"));
     }
 
     #[test]
@@ -589,7 +596,6 @@ mod tests {
             "params": {
                 "name": "from_openapi",
                 "arguments": {
-                    "subcommand": "to_sdk",
                     "input": spec_path.to_str().expect("Failed to convert path to str"),
                     "output": out_dir.to_str().expect("Failed to convert path to str")
                 }
@@ -599,6 +605,17 @@ mod tests {
 
         let resp = handle_request(&req).expect("Failed to handle request");
         assert!(resp.contains("Successfully executed ToSdk"));
+
+        let direct_sdk = dispatch_tool_command(
+            "to_sdk",
+            &serde_json::json!({
+                "input": spec_path.to_str().expect("path"),
+                "output": out_dir.join("direct").to_str().expect("path")
+            }),
+            None,
+        )
+        .expect("direct to_sdk");
+        assert!(direct_sdk.contains("ToSdk"));
 
         let req_axum = serde_json::json!({
             "jsonrpc": "2.0",
@@ -730,6 +747,22 @@ mod tests {
         .to_string();
         let resp_missing = handle_request(&req_missing).expect("Failed to handle request");
         assert!(resp_missing.contains("Missing required argument: 'input'"));
+
+        let req_bad_out = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 12,
+            "method": "tools/call",
+            "params": {
+                "name": "to_docs_json",
+                "arguments": {
+                    "input": "/nonexistent_file.json",
+                    "output": out_file.to_str().expect("path")
+                }
+            }
+        })
+        .to_string();
+        let resp_bad_out = handle_request(&req_bad_out).expect("Failed to handle request");
+        assert!(resp_bad_out.contains(r#""isError":true"#));
     }
 
     #[test]
@@ -757,13 +790,28 @@ mod tests {
             "id": 14,
             "method": "tools/call",
             "params": {
-                "name": "sync",
-                "arguments": {}
+                "name": "sync"
             }
         })
         .to_string();
         let resp_missing = handle_request(&req_missing).expect("Failed to handle request");
         assert!(resp_missing.contains("Missing required argument: 'dir'"));
+
+        let req_bad_truth = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 15,
+            "method": "tools/call",
+            "params": {
+                "name": "sync",
+                "arguments": {
+                    "dir": dir.path().to_str().expect("path"),
+                    "truth": "invalid_truth"
+                }
+            }
+        })
+        .to_string();
+        let resp_bad_truth = handle_request(&req_bad_truth).expect("Failed to handle request");
+        assert!(resp_bad_truth.contains(r#""isError":true"#));
     }
 
     #[test]
@@ -782,11 +830,50 @@ mod tests {
         assert_eq!(output.lines().count(), 1);
     }
 
+    struct FailWrite;
+
+    impl io::Write for FailWrite {
+        fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+            Err(io::Error::other("write error"))
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct FailFlush;
+
+    impl io::Write for FailFlush {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::other("flush error"))
+        }
+    }
+
     #[test]
     fn test_serve_mcp_inner_read_error() {
         let mut stdin = ErrorReader;
+        let mut buf = [0u8; 4];
+        assert!(io::Read::read(&mut stdin, &mut buf).is_err());
+        io::BufRead::consume(&mut stdin, 0);
+
         let mut stdout = Vec::new();
         serve_mcp_inner(&mut stdin, &mut stdout).expect("must succeed");
         assert!(stdout.is_empty());
+
+        let req = "{\"jsonrpc\": \"2.0\", \"id\": 1, \"method\": \"ping\"}\n";
+        let mut reader1 = Cursor::new(req);
+        let mut bad_writer = FailWrite;
+        assert!(serve_mcp_inner(&mut reader1, &mut bad_writer).is_err());
+        assert!(io::Write::flush(&mut bad_writer).is_ok());
+
+        let mut reader2 = Cursor::new(req);
+        let mut bad_flusher = FailFlush;
+        assert!(serve_mcp_inner(&mut reader2, &mut bad_flusher).is_err());
+
+        std::env::set_var("CDD_MCP_TEST_EOF", "1");
+        assert!(run_mcp_server(&McpArgs {}).is_ok());
     }
 }

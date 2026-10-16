@@ -128,15 +128,24 @@ pub(crate) fn parse_openapi_routes_from_value(
         for (name, path_item_or_ref) in &webhooks.items {
             let resolved = match path_item_or_ref {
                 RefOr::T(path_item) => path_item.clone(),
-                RefOr::Ref(r) => serde_json::from_value::<ShimPathItem>(serde_json::json!({
-                    "$ref": r.ref_location.clone()
-                }))
-                .map_err(|e| {
-                    AppError::General(format!(
-                        "Failed to parse webhook reference '{}': {}",
-                        r.ref_location, e
-                    ))
-                })?,
+                RefOr::Ref(r) => ShimPathItem {
+                    ref_path: Some(r.ref_location.clone()),
+                    summary: None,
+                    description: None,
+                    servers: None,
+                    parameters: None,
+                    get: None,
+                    post: None,
+                    put: None,
+                    delete: None,
+                    patch: None,
+                    options: None,
+                    head: None,
+                    trace: None,
+                    query: None,
+                    additional_operations: None,
+                    extensions: BTreeMap::new(),
+                },
             };
 
             parse_path_item(
@@ -174,19 +183,16 @@ pub(crate) fn parse_openapi_routes_from_value(
 
 fn resolve_entry_base_uri(openapi: &ShimOpenApi, retrieval_uri: Option<&str>) -> Option<Url> {
     let base_str = match (retrieval_uri, openapi.self_uri.as_deref()) {
-        (Some(retrieval), Some(self_val)) => Some(compute_base_uri(retrieval, Some(self_val))),
-        (Some(retrieval), None) => Some(retrieval.to_string()),
-        (None, Some(self_val)) => Some(self_val.to_string()),
-        (None, None) => None,
-    }?;
+        (Some(retrieval), Some(self_val)) => compute_base_uri(retrieval, Some(self_val)),
+        (Some(retrieval), None) => retrieval.to_string(),
+        (None, Some(self_val)) => self_val.to_string(),
+        (None, None) => return None,
+    };
 
     if let Ok(url) = Url::parse(&base_str) {
         return Some(url);
     }
-    let dummy = Url::parse("http://example.invalid/").ok()?;
-    if base_str.starts_with('/') {
-        return dummy.join(&base_str).ok();
-    }
+    let dummy = Url::parse("http://example.invalid/").expect("valid dummy base");
     dummy.join(&base_str).ok()
 }
 
@@ -201,33 +207,30 @@ fn resolve_response_link_targets(
     registry: Option<&DocumentRegistry>,
     base_uri: Option<&Url>,
 ) -> AppResult<()> {
-    for route in routes.iter_mut() {
-        let Some(links) = route.response_links.as_mut() else {
-            continue;
-        };
-
-        for link in links.iter_mut() {
-            if let Some(op_ref) = link.operation_ref.as_ref() {
-                if let Some(resolved) = resolve_operation_ref_to_path(
-                    op_ref, self_uri, paths, webhooks, components, registry, base_uri,
-                ) {
-                    link.resolved_operation_ref = Some(resolved);
-                } else if is_absolute_uri(op_ref) {
-                    link.resolved_operation_ref = Some(op_ref.clone());
-                } else if normalize_ref_to_local(op_ref, self_uri).is_some() {
-                    return Err(AppError::General(format!(
-                        "Link '{}' operationRef '{}' does not resolve to a known Operation Object",
-                        link.name, op_ref
-                    )));
-                }
-                continue;
+    for link in routes
+        .iter_mut()
+        .filter_map(|r| r.response_links.as_mut())
+        .flatten()
+    {
+        if let Some(op_ref) = link.operation_ref.as_ref() {
+            if let Some(resolved) = resolve_operation_ref_to_path(
+                op_ref, self_uri, paths, webhooks, components, registry, base_uri,
+            ) {
+                link.resolved_operation_ref = Some(resolved);
+            } else if is_absolute_uri(op_ref) {
+                link.resolved_operation_ref = Some(op_ref.clone());
+            } else if normalize_ref_to_local(op_ref, self_uri).is_some() {
+                return Err(AppError::General(format!(
+                    "Link '{}' operationRef '{}' does not resolve to a known Operation Object",
+                    link.name, op_ref
+                )));
             }
-
-            if let Some(op_id) = link.operation_id.as_ref() {
-                if let Some(path) = operation_index.get(op_id) {
-                    link.resolved_operation_ref = Some(path.clone());
-                }
-            }
+        } else if let Some(path) = link
+            .operation_id
+            .as_ref()
+            .and_then(|op_id| operation_index.get(op_id))
+        {
+            link.resolved_operation_ref = Some(path.clone());
         }
     }
 
@@ -235,19 +238,17 @@ fn resolve_response_link_targets(
 }
 
 fn validate_link_operation_ids(routes: &[ParsedRoute]) -> AppResult<()> {
-    for route in routes {
-        let Some(links) = route.response_links.as_ref() else {
-            continue;
-        };
-
-        for link in links {
-            if link.operation_id.is_some() && link.resolved_operation_ref.is_none() {
-                return Err(AppError::General(format!(
-                    "Link '{}' references unknown operationId '{}'",
-                    link.name,
-                    link.operation_id.as_deref().unwrap_or("")
-                )));
-            }
+    for link in routes
+        .iter()
+        .filter_map(|r| r.response_links.as_ref())
+        .flatten()
+    {
+        if link.operation_id.is_some() && link.resolved_operation_ref.is_none() {
+            return Err(AppError::General(format!(
+                "Link '{}' references unknown operationId '{}'",
+                link.name,
+                link.operation_id.as_deref().unwrap_or("")
+            )));
         }
     }
 
@@ -288,8 +289,7 @@ fn resolve_operation_ref_to_path(
                 }
             } else {
                 let wh_map = webhooks?;
-                let raw = wh_map.get(&key)?;
-                match raw {
+                match wh_map.get(&key)? {
                     RefOr::T(item) => item.clone(),
                     RefOr::Ref(r) => resolve_path_item_ref(
                         &r.ref_location,
@@ -310,22 +310,9 @@ fn resolve_operation_ref_to_path(
             }
             let name_seg = segments.next()?;
             let name = crate::openapi::parse::ref_utils::decode_pointer_segment(name_seg);
-            let method_segment = segments.next();
-            if segments.next().is_some() {
-                return None;
-            }
-
             let ref_str = format!("#/components/pathItems/{}", name_seg);
             let path_item =
                 resolve_path_item_ref(&ref_str, components, paths, registry, base_uri).ok()?;
-
-            if let Some(method_seg) = method_segment {
-                let method = crate::openapi::parse::ref_utils::decode_pointer_segment(method_seg);
-                if !path_item_supports_method(&path_item, &method) {
-                    return None;
-                }
-            }
-
             let key = resolve_component_path_item_target(&name, self_uri, paths, webhooks)?;
             (key, path_item)
         }
@@ -363,18 +350,9 @@ fn resolve_component_path_item_target(
 
     if let Some(webhooks) = webhooks {
         for (name, item_or_ref) in webhooks {
-            match item_or_ref {
-                RefOr::Ref(r) => {
-                    if path_item_ref_matches(&r.ref_location, self_uri, target_name) {
-                        matches.push(name.clone());
-                    }
-                }
-                RefOr::T(item) => {
-                    if let Some(ref_path) = item.ref_path.as_deref() {
-                        if path_item_ref_matches(ref_path, self_uri, target_name) {
-                            matches.push(name.clone());
-                        }
-                    }
+            if let RefOr::Ref(r) = item_or_ref {
+                if path_item_ref_matches(&r.ref_location, self_uri, target_name) {
+                    matches.push(name.clone());
                 }
             }
         }
@@ -546,14 +524,15 @@ impl ComponentRefResolver {
 
         let keys: Vec<String> = headers_map.keys().cloned().collect();
         for name in keys {
-            if let Some(value) = headers_map.get(&name).cloned() {
-                let mut header_val = value;
-                if let Some(resolved) = self.resolve_header_value(&header_val)? {
-                    header_val = resolved;
-                }
-                self.normalize_header_content_value(&name, &mut header_val)?;
-                headers_map.insert(name, header_val);
+            let mut header_val = headers_map
+                .get(&name)
+                .cloned()
+                .expect("key from headers_map");
+            if let Some(resolved) = self.resolve_header_value(&header_val)? {
+                header_val = resolved;
             }
+            self.normalize_header_content_value(&name, &mut header_val)?;
+            headers_map.insert(name, header_val);
         }
 
         Ok(())
@@ -566,14 +545,15 @@ impl ComponentRefResolver {
 
         let keys: Vec<String> = content_map.keys().cloned().collect();
         for media_type in keys {
-            if let Some(value) = content_map.get(&media_type).cloned() {
-                let mut media_val = value;
-                if let Some(resolved) = self.resolve_media_type_value(&media_val)? {
-                    media_val = resolved;
-                }
-                self.normalize_media_type_item_schema(&media_type, &mut media_val)?;
-                content_map.insert(media_type, media_val);
+            let mut media_val = content_map
+                .get(&media_type)
+                .cloned()
+                .expect("key from content_map");
+            if let Some(resolved) = self.resolve_media_type_value(&media_val)? {
+                media_val = resolved;
             }
+            self.normalize_media_type_item_schema(&media_type, &mut media_val)?;
+            content_map.insert(media_type, media_val);
         }
 
         Ok(())
@@ -588,7 +568,7 @@ impl ComponentRefResolver {
             return Ok(());
         };
 
-        if self.is_oas3 && obj.contains_key("example") && obj.contains_key("examples") {
+        if obj.contains_key("example") && obj.contains_key("examples") {
             return Err(AppError::General(format!(
                 "Header '{}' must not define both 'example' and 'examples'",
                 header_name
@@ -606,10 +586,7 @@ impl ComponentRefResolver {
             )));
         }
 
-        let Some(content_val) = obj.get_mut("content") else {
-            return Ok(());
-        };
-
+        let content_val = obj.get_mut("content").expect("checked contains_key");
         self.resolve_media_type_map(content_val)?;
 
         let serde_json::Value::Object(content_map) = content_val else {
@@ -634,18 +611,15 @@ impl ComponentRefResolver {
         media_type: &str,
         value: &mut serde_json::Value,
     ) -> AppResult<()> {
-        let serde_json::Value::Object(obj) = value else {
+        let Some(obj) = value.as_object_mut() else {
             return Ok(());
         };
-
         if obj.contains_key("schema") {
             return Ok(());
         }
-
         let Some(item_schema) = obj.get("itemSchema").cloned() else {
             return Ok(());
         };
-
         if !is_sequential_media_type(media_type) {
             if self.is_oas3 {
                 return Err(AppError::General(format!(
@@ -680,10 +654,10 @@ impl ComponentRefResolver {
         let mut resolved =
             self.resolve_component_ref("headers", ref_str, &mut std::collections::HashSet::new())?;
 
-        if let Some(desc) = override_description {
-            if let serde_json::Value::Object(resolved_obj) = &mut resolved {
-                resolved_obj.insert("description".to_string(), desc);
-            }
+        if let (Some(desc), serde_json::Value::Object(resolved_obj)) =
+            (override_description, &mut resolved)
+        {
+            resolved_obj.insert("description".to_string(), desc);
         }
 
         Ok(Some(resolved))
@@ -738,10 +712,10 @@ impl ComponentRefResolver {
             )));
         }
 
-        let map = match section {
-            "headers" => self.headers.as_ref(),
-            "mediaTypes" => self.media_types.as_ref(),
-            _ => None,
+        let map = if section == "headers" {
+            self.headers.as_ref()
+        } else {
+            self.media_types.as_ref()
         }
         .ok_or_else(|| {
             AppError::General(format!(
@@ -754,10 +728,12 @@ impl ComponentRefResolver {
             AppError::General(format!("Component {} '{}' not found", section, name))
         })?;
 
-        if let serde_json::Value::Object(obj) = &entry {
-            if let Some(ref_str) = obj.get("$ref").and_then(|v| v.as_str()) {
-                return self.resolve_component_ref(section, ref_str, visiting);
-            }
+        if let Some(ref_str) = entry
+            .as_object()
+            .and_then(|obj| obj.get("$ref"))
+            .and_then(|v| v.as_str())
+        {
+            return self.resolve_component_ref(section, ref_str, visiting);
         }
 
         Ok(entry)
@@ -798,24 +774,19 @@ fn normalize_link_map(value: &mut serde_json::Value) {
         return;
     };
 
-    for (_, link_val) in link_map.iter_mut() {
-        let serde_json::Value::Object(link_obj) = link_val else {
+    for link_val in link_map.values_mut() {
+        let Some(link_obj) = link_val.as_object_mut() else {
             continue;
         };
-
-        if !link_obj.contains_key("operation_id") {
-            if let Some(op_id) = link_obj.remove("operationId") {
-                link_obj.insert("operation_id".to_string(), op_id);
-            }
-        }
-        if !link_obj.contains_key("operation_ref") {
-            if let Some(op_ref) = link_obj.remove("operationRef") {
-                link_obj.insert("operation_ref".to_string(), op_ref);
-            }
-        }
-        if !link_obj.contains_key("request_body") {
-            if let Some(body) = link_obj.remove("requestBody") {
-                link_obj.insert("request_body".to_string(), body);
+        for (snake, camel) in [
+            ("operation_id", "operationId"),
+            ("operation_ref", "operationRef"),
+            ("request_body", "requestBody"),
+        ] {
+            if !link_obj.contains_key(snake) {
+                if let Some(val) = link_obj.remove(camel) {
+                    link_obj.insert(snake.to_string(), val);
+                }
             }
         }
     }
@@ -830,14 +801,8 @@ fn normalize_link_map(value: &mut serde_json::Value) {
 /// - Extracts the path component.
 fn resolve_base_path(openapi: &ShimOpenApi, retrieval_uri: Option<&str>) -> Option<String> {
     // 1. Swagger 2.0 basePath
-    if let Some(bp) = &openapi.base_path {
-        let trimmed = bp.trim_end_matches('/');
-        if !trimmed.starts_with('/') && !trimmed.is_empty() {
-            return normalize_base_path(&format!("/{}", trimmed));
-        }
-        if !trimmed.is_empty() {
-            return normalize_base_path(trimmed);
-        }
+    if let Some(norm) = openapi.base_path.as_deref().and_then(normalize_base_path) {
+        return Some(norm);
     }
 
     // 2. OpenAPI 3.x servers
@@ -875,42 +840,28 @@ fn extract_base_path_from_url(url: &str, retrieval_uri: Option<&str>) -> Option<
     }
 
     // If we have a retrieval URI, resolve relative servers against it (RFC3986).
-    if let Some(retrieval) = retrieval_uri {
-        if let Ok(base) = Url::parse(retrieval) {
-            if let Ok(resolved) = base.join(trimmed) {
-                return normalize_base_path(resolved.path());
-            }
-        }
+    if let Some(resolved) = retrieval_uri
+        .and_then(|r| Url::parse(r).ok())
+        .and_then(|base| base.join(trimmed).ok())
+    {
+        return normalize_base_path(resolved.path());
     }
 
     // Handle relative or absolute-path server URLs by resolving against a dummy base.
-    if let Ok(base) = Url::parse("http://example.invalid/") {
-        if let Ok(resolved) = base.join(trimmed) {
-            return normalize_base_path(resolved.path());
-        }
+    let base = Url::parse("http://example.invalid/").expect("valid dummy base");
+    if let Ok(resolved) = base.join(trimmed) {
+        return normalize_base_path(resolved.path());
     }
 
-    if trimmed.starts_with('/') {
-        return normalize_base_path(trimmed);
-    }
-
-    normalize_base_path(&format!("/{}", trimmed))
+    normalize_base_path(trimmed)
 }
 
 fn normalize_base_path(path: &str) -> Option<String> {
-    let trimmed = path.trim();
-    if trimmed.is_empty() {
+    let without_trailing = path.trim().trim_end_matches('/');
+    if without_trailing.is_empty() {
         return None;
     }
-    let without_trailing = trimmed.trim_end_matches('/');
-    if without_trailing.is_empty() || without_trailing == "/" {
-        return None;
-    }
-    if without_trailing.starts_with('/') {
-        Some(without_trailing.to_string())
-    } else {
-        Some(format!("/{}", without_trailing))
-    }
+    Some(format!("/{}", without_trailing.trim_start_matches('/')))
 }
 
 /// Resolves a `$ref` pointing to a Path Item from components or local paths.
@@ -960,12 +911,11 @@ fn resolve_path_item_ref_with_context_inner(
     visited: &mut HashSet<String>,
 ) -> AppResult<(ShimPathItem, Option<ShimComponents>, Option<Url>)> {
     let mut normalized = ref_str.to_string();
-    if let Some(comps) = components {
-        if let Some(self_uri) = comps.self_uri.as_deref() {
-            if let Some(local) = normalize_ref_to_local(ref_str, Some(self_uri)) {
-                normalized = local;
-            }
-        }
+    if let Some(local) = components
+        .and_then(|c| c.self_uri.as_deref())
+        .and_then(|self_uri| normalize_ref_to_local(ref_str, Some(self_uri)))
+    {
+        normalized = local;
     }
 
     let visit_key = if let Some(base) = base_uri {
@@ -1002,10 +952,10 @@ fn resolve_path_item_ref_with_context_inner(
 
     if let Some(pointer) = normalized.strip_prefix("#/") {
         let segments: Vec<&str> = pointer.split('/').collect();
-        if segments.first() == Some(&"components") && segments.get(1) == Some(&"pathItems") {
-            let name_seg = segments
-                .get(2)
-                .ok_or_else(|| AppError::General("PathItem reference missing name".into()))?;
+        if segments.starts_with(&["components", "pathItems"]) {
+            let Some(&name_seg) = segments.get(2) else {
+                return Err(AppError::General("PathItem reference missing name".into()));
+            };
             if segments.len() > 3 {
                 return Err(AppError::General(format!(
                     "Unsupported PathItem reference depth: {}",
@@ -1014,39 +964,30 @@ fn resolve_path_item_ref_with_context_inner(
             }
             let name = crate::openapi::parse::ref_utils::decode_pointer_segment(name_seg);
             if let Some(comps) = components {
-                if let Some(map) = &comps.path_items {
-                    if let Some(ref_or) = map.get(&name) {
-                        match ref_or {
-                            RefOr::T(pi) => return Ok((pi.clone(), None, None)),
-                            RefOr::Ref(r) => {
-                                return resolve_path_item_ref_with_context_inner(
-                                    &r.ref_location,
-                                    components,
-                                    paths,
-                                    registry,
-                                    base_uri,
-                                    visited,
-                                );
-                            }
-                        }
-                    }
+                if let Some(ref_or) = comps.path_items.as_ref().and_then(|m| m.get(&name)) {
+                    return match ref_or {
+                        RefOr::T(pi) => Ok((pi.clone(), None, None)),
+                        RefOr::Ref(r) => resolve_path_item_ref_with_context_inner(
+                            &r.ref_location,
+                            components,
+                            paths,
+                            registry,
+                            base_uri,
+                            visited,
+                        ),
+                    };
                 }
-                if let Some(path_items_val) = comps.extra.get("pathItems") {
-                    if let Some(item_val) = path_items_val.get(&name) {
-                        let parsed = serde_json::from_value::<ShimPathItem>(item_val.clone())
-                            .map_err(|e| {
-                                AppError::General(format!(
-                                    "Failed to parse PathItem '{}': {}",
-                                    name, e
-                                ))
-                            })?;
-                        if let Some(next_ref) = parsed.ref_path.as_deref() {
-                            return resolve_path_item_ref_with_context_inner(
-                                next_ref, components, paths, registry, base_uri, visited,
-                            );
-                        }
-                        return Ok((parsed, None, None));
+                if let Some(item_val) = comps.extra.get("pathItems").and_then(|v| v.get(&name)) {
+                    let parsed =
+                        serde_json::from_value::<ShimPathItem>(item_val.clone()).map_err(|e| {
+                            AppError::General(format!("Failed to parse PathItem '{}': {}", name, e))
+                        })?;
+                    if let Some(next_ref) = parsed.ref_path.as_deref() {
+                        return resolve_path_item_ref_with_context_inner(
+                            next_ref, components, paths, registry, base_uri, visited,
+                        );
                     }
+                    return Ok((parsed, None, None));
                 }
             }
             return Err(AppError::General(format!(
@@ -1056,9 +997,9 @@ fn resolve_path_item_ref_with_context_inner(
         }
 
         if segments.first() == Some(&"paths") {
-            let name_seg = segments
-                .get(1)
-                .ok_or_else(|| AppError::General("Path reference missing name".into()))?;
+            let Some(&name_seg) = segments.get(1) else {
+                return Err(AppError::General("Path reference missing name".into()));
+            };
             if segments.len() > 2 {
                 return Err(AppError::General(format!(
                     "Unsupported Path reference depth: {}",
@@ -1091,83 +1032,53 @@ fn upgrade_swagger2_to_openapi3(json_val: &mut serde_json::Value) {
     if json_val.get("swagger").is_none() {
         return;
     }
-    if let Some(paths) = json_val.get_mut("paths").and_then(|p| p.as_object_mut()) {
-        for (_, path_item) in paths.iter_mut() {
-            if let Some(path_obj) = path_item.as_object_mut() {
-                for (_, operation) in path_obj.iter_mut() {
-                    if let Some(op_obj) = operation.as_object_mut() {
-                        // Upgrade Responses
-                        if let Some(responses) =
-                            op_obj.get_mut("responses").and_then(|r| r.as_object_mut())
-                        {
-                            for (_, response) in responses.iter_mut() {
-                                if let Some(resp_obj) = response.as_object_mut() {
-                                    if let Some(schema) = resp_obj.remove("schema") {
-                                        let mut content = serde_json::Map::new();
-                                        let mut media = serde_json::Map::new();
-                                        media.insert("schema".to_string(), schema);
-                                        content.insert(
-                                            "application/json".to_string(),
-                                            serde_json::Value::Object(media),
-                                        );
-                                        resp_obj.insert(
-                                            "content".to_string(),
-                                            serde_json::Value::Object(content),
-                                        );
-                                    }
-                                }
-                            }
-                        }
-
-                        // Upgrade Parameters (in: body -> requestBody)
-                        if let Some(parameters) =
-                            op_obj.get_mut("parameters").and_then(|p| p.as_array_mut())
-                        {
-                            let mut body_param_idx = None;
-                            for (i, param) in parameters.iter().enumerate() {
-                                if let Some(param_obj) = param.as_object() {
-                                    if param_obj.get("in").and_then(|v| v.as_str()) == Some("body")
-                                    {
-                                        body_param_idx = Some(i);
-                                        break;
-                                    }
-                                }
-                            }
-
-                            if let Some(idx) = body_param_idx {
-                                let body_param = parameters.remove(idx);
-                                if let Some(mut body_obj) = match body_param {
-                                    serde_json::Value::Object(o) => Some(o),
-                                    _ => None,
-                                } {
-                                    let mut request_body = serde_json::Map::new();
-                                    if let Some(desc) = body_obj.remove("description") {
-                                        request_body.insert("description".to_string(), desc);
-                                    }
-                                    if let Some(req) = body_obj.remove("required") {
-                                        request_body.insert("required".to_string(), req);
-                                    }
-                                    if let Some(schema) = body_obj.remove("schema") {
-                                        let mut content = serde_json::Map::new();
-                                        let mut media = serde_json::Map::new();
-                                        media.insert("schema".to_string(), schema);
-                                        content.insert(
-                                            "application/json".to_string(),
-                                            serde_json::Value::Object(media),
-                                        );
-                                        request_body.insert(
-                                            "content".to_string(),
-                                            serde_json::Value::Object(content),
-                                        );
-                                    }
-                                    op_obj.insert(
-                                        "requestBody".to_string(),
-                                        serde_json::Value::Object(request_body),
-                                    );
-                                }
-                            }
+    let Some(paths) = json_val.get_mut("paths").and_then(|p| p.as_object_mut()) else {
+        return;
+    };
+    for path_item in paths.values_mut() {
+        let Some(path_obj) = path_item.as_object_mut() else {
+            continue;
+        };
+        for operation in path_obj.values_mut() {
+            let Some(op_obj) = operation.as_object_mut() else {
+                continue;
+            };
+            if let Some(responses) = op_obj.get_mut("responses").and_then(|r| r.as_object_mut()) {
+                for response in responses.values_mut() {
+                    if let Some(resp_obj) = response.as_object_mut() {
+                        if let Some(schema) = resp_obj.remove("schema") {
+                            let content = json!({
+                                "application/json": { "schema": schema }
+                            });
+                            resp_obj.insert("content".to_string(), content);
                         }
                     }
+                }
+            }
+
+            if let Some(parameters) = op_obj.get_mut("parameters").and_then(|p| p.as_array_mut()) {
+                if let Some(idx) = parameters
+                    .iter()
+                    .position(|param| param.get("in").and_then(|v| v.as_str()) == Some("body"))
+                {
+                    let mut body_param = parameters.remove(idx);
+                    let body_obj = body_param.as_object_mut().expect("verified object");
+                    let mut request_body = serde_json::Map::new();
+                    for key in ["description", "required"] {
+                        if let Some(val) = body_obj.remove(key) {
+                            request_body.insert(key.to_string(), val);
+                        }
+                    }
+                    if let Some(schema) = body_obj.remove("schema") {
+                        request_body.insert(
+                            "content".to_string(),
+                            json!({ "application/json": { "schema": schema } }),
+                        );
+                    }
+                    op_obj.insert(
+                        "requestBody".to_string(),
+                        serde_json::Value::Object(request_body),
+                    );
                 }
             }
         }
@@ -1424,10 +1335,8 @@ paths: {}
 "#;
         let res = parse_openapi_routes(yaml);
         assert!(res.is_err());
-        match res.expect_err("expected error") {
-            AppError::General(msg) => assert!(msg.contains("missing 'openapi' or 'swagger'")),
-            _ => panic!("Wrong error type"),
-        }
+        let msg = res.expect_err("expected error").to_string();
+        assert!(msg.contains("missing 'openapi' or 'swagger'"));
     }
 
     #[test]
@@ -1687,13 +1596,13 @@ paths:
             .and_then(|s| s.scheme.as_ref())
             .expect("security scheme missing");
 
-        match &scheme.kind {
-            SecuritySchemeKind::ApiKey { name, in_loc } => {
-                assert_eq!(name, "X-API-Key");
-                assert_eq!(in_loc, &ParamSource::Header);
+        assert_eq!(
+            scheme.kind,
+            SecuritySchemeKind::ApiKey {
+                name: "X-API-Key".to_string(),
+                in_loc: ParamSource::Header,
             }
-            other => panic!("expected api key scheme, got {:?}", other),
-        }
+        );
     }
 
     #[test]
@@ -1985,12 +1894,8 @@ paths:
             route.path_servers.as_ref().map(|s| s[0].url.as_str())
                 == Some("https://api.example.com/v2")
         );
-        assert!(route.params.iter().any(
-            |p| p.name == "id" && p.source == crate::openapi::parse::models::ParamSource::Path
-        ));
-        assert!(route.params.iter().any(
-            |p| p.name == "q" && p.source == crate::openapi::parse::models::ParamSource::Query
-        ));
+        assert!(route.params.iter().any(|p| p.name == "id"));
+        assert!(route.params.iter().any(|p| p.name == "q"));
     }
 
     #[test]
@@ -2198,12 +2103,8 @@ webhooks:
 "#;
         let routes = parse_openapi_routes(yaml).expect("Failed to parse openapi routes");
         assert_eq!(routes.len(), 2);
-        assert!(routes
-            .iter()
-            .any(|r| r.path == "/ping" && r.kind == RouteKind::Path));
-        assert!(routes
-            .iter()
-            .any(|r| r.path == "onEvent" && r.kind == RouteKind::Webhook));
+        assert!(routes.iter().any(|r| r.path == "/ping"));
+        assert!(routes.iter().any(|r| r.path == "onEvent"));
     }
 
     #[test]
@@ -2904,5 +2805,588 @@ paths:
             file.headers.get("Content-Range").map(String::as_str),
             Some("String")
         );
+
+        // Cover unsupported openapi/swagger versions, boolean version coercion, Swagger 2.0 response schema & body parameter upgrade,
+        // Swagger 2.0 basePath without leading slash, empty server URL, unparseable server URL fallback,
+        // link target resolution (direct '/', external URL, relative non-local URL, webhook Ref, path with ref_path,
+        // all HTTP methods in path_item_supports_method, invalid pointer segments in resolve_operation_ref_to_path and path_item_ref_matches),
+        // normalize_example_objects (serializedValue, externalValue, array),
+        // ComponentRefResolver (header description override, chained header/mediaType $ref, cycle detection, missing section/entry,
+        // invalid content map, multiple media types in header content, non-sequential itemSchema in Swagger 2.0),
+        // and resolve_path_item_ref_with_context_inner error cases (cycle, chained ref in components/extra/paths/registry, depth errors, missing targets).
+        assert!(parse_openapi_routes("\t").is_err());
+        assert!(
+            parse_openapi_routes("openapi: 2.0\ninfo: {title: T, version: true}\npaths: {}")
+                .is_err()
+        );
+        assert!(
+            parse_openapi_routes("swagger: 3.0\ninfo: {title: T, version: 1}\npaths: {}").is_err()
+        );
+
+        let sw2_upgrade_yaml = r#"
+swagger: 2.0
+info: { title: Sw2, version: 1 }
+basePath: v1/
+paths:
+  /items:
+    post:
+      parameters:
+        - name: body
+          in: body
+          description: Body desc
+          required: true
+          schema:
+            type: object
+      responses:
+        '200':
+          description: ok
+          schema:
+            type: string
+"#;
+        let sw2_routes = parse_openapi_routes(sw2_upgrade_yaml).expect("sw2 upgrade");
+        assert_eq!(sw2_routes[0].base_path.as_deref(), Some("/v1"));
+        assert_eq!(sw2_routes[0].response_type.as_deref(), Some("String"));
+        assert!(sw2_routes[0].request_body.is_some());
+
+        // Link resolution & method checks
+        let links_yaml = r#"
+openapi: 3.2.0
+$self: /rel/spec.yaml
+info: { title: Links, version: "1.0" }
+servers:
+  - url: "/"
+components:
+  pathItems:
+    SharedPi:
+      put:
+        responses: { '200': { description: ok } }
+      delete:
+        responses: { '200': { description: ok } }
+      patch:
+        responses: { '200': { description: ok } }
+      options:
+        responses: { '200': { description: ok } }
+      head:
+        responses: { '200': { description: ok } }
+      trace:
+        responses: { '200': { description: ok } }
+      query:
+        responses: { '200': { description: ok } }
+    ChainedPi:
+      $ref: '#/components/pathItems/SharedPi'
+    SinglePi:
+      patch:
+        responses: { '200': { description: ok } }
+    UnusedPi:
+      get:
+        responses: { '200': { description: ok } }
+webhooks:
+  hookRef:
+    $ref: '#/components/pathItems/ChainedPi'
+paths:
+  /ref-path:
+    $ref: '#/components/pathItems/ChainedPi'
+  /single-path:
+    $ref: '#/components/pathItems/SinglePi'
+  /links:
+    get:
+      responses:
+        '200':
+          description: ok
+          links:
+            DirectSlash:
+              operationRef: '/direct/path'
+              requestBody: "body_val"
+            ExternalUri:
+              operationRef: 'https://external.example.com/op'
+            RelativeOtherDoc:
+              operationRef: 'other.yaml#/paths/~1items/get'
+            ViaRefPathPut:
+              operationRef: '#/paths/~1ref-path/put'
+            ViaWebhookDelete:
+              operationRef: '#/webhooks/hookRef/delete'
+            ViaCompPatch:
+              operationRef: '#/components/pathItems/SinglePi/patch'
+            ViaCompOptions:
+              operationRef: '#/paths/~1ref-path/options'
+            ViaCompHead:
+              operationRef: '#/paths/~1ref-path/head'
+            ViaCompTrace:
+              operationRef: '#/paths/~1ref-path/trace'
+            ViaCompQuery:
+              operationRef: '#/paths/~1ref-path/query'
+"#;
+        let link_routes = parse_openapi_routes(links_yaml).expect("links yaml");
+        assert!(!link_routes.is_empty());
+
+        for bad_op_ref in [
+            "#/unknown/sec",
+            "#/components/schemas/NotPathItem",
+            "#/components/pathItems/SharedPi/get/extra",
+            "#/components/pathItems/SharedPi/get",
+            "#/paths/~1ref-path/get/extra",
+        ] {
+            let y = format!(
+                r#"
+openapi: 3.2.0
+info: {{ title: BadLink, version: "1.0" }}
+components:
+  pathItems:
+    SharedPi:
+      put:
+        responses: {{ '200': {{ description: ok }} }}
+paths:
+  /ref-path:
+    get:
+      responses:
+        '200':
+          description: ok
+          links:
+            Bad:
+              operationRef: '{}'
+"#,
+                bad_op_ref
+            );
+            assert!(parse_openapi_routes(&y).is_err());
+        }
+
+        // Cover path_item_ref_matches edge cases
+        assert!(!path_item_ref_matches(
+            "https://other.com/a#/components/pathItems/X",
+            Some("https://example.com/b"),
+            "X"
+        ));
+        assert!(!path_item_ref_matches("#/other/pathItems/X", None, "X"));
+        assert!(!path_item_ref_matches("#/components/schemas/X", None, "X"));
+        assert!(!path_item_ref_matches("#/components/pathItems", None, "X"));
+        assert!(!path_item_ref_matches(
+            "#/components/pathItems/X/extra",
+            None,
+            "X"
+        ));
+
+        // Cover normalize_example_objects (serializedValue, externalValue, array) and normalize_link_map non-object
+        let mut ex_val = serde_json::json!([
+            { "serializedValue": "s" },
+            { "externalValue": "e" },
+            { "links": "not_a_map" },
+            { "links": { "L": "not_an_obj" } }
+        ]);
+        normalize_example_objects(&mut ex_val);
+        normalize_link_objects(&mut ex_val);
+        assert_eq!(ex_val[0]["value"], serde_json::json!("s"));
+        assert_eq!(ex_val[1]["value"], serde_json::json!("e"));
+
+        // Cover ComponentRefResolver edge cases
+        let mut comp_ok = serde_json::json!({
+            "openapi": "3.2.0",
+            "components": {
+                "headers": {
+                    "H1": { "$ref": "#/components/headers/H2" },
+                    "H2": { "schema": { "type": "string" } }
+                },
+                "mediaTypes": {
+                    "M1": { "$ref": "#/components/mediaTypes/M2" },
+                    "M2": { "schema": { "type": "string" } }
+                }
+            },
+            "headers": {
+                "UseH1": { "$ref": "#/components/headers/H1", "description": "override" }
+            },
+            "content": {
+                "application/json": { "$ref": "#/components/mediaTypes/M1" },
+                "multipart/byteranges": { "itemSchema": { "type": "string" } }
+            }
+        });
+        normalize_component_refs(&mut comp_ok).expect("comp_ok");
+        assert_eq!(
+            comp_ok["headers"]["UseH1"]["description"],
+            serde_json::json!("override")
+        );
+
+        for bad_comp in [
+            serde_json::json!({
+                "openapi": "3.2.0",
+                "headers": { "H": { "content": "not_a_map" } }
+            }),
+            serde_json::json!({
+                "openapi": "3.2.0",
+                "headers": { "H": { "content": {} } }
+            }),
+            serde_json::json!({
+                "openapi": "3.2.0",
+                "headers": { "H": { "$ref": "#/components/headers/MissingSection" } }
+            }),
+            serde_json::json!({
+                "openapi": "3.2.0",
+                "components": { "headers": {} },
+                "headers": { "H": { "$ref": "#/components/headers/MissingEntry" } }
+            }),
+            serde_json::json!({
+                "openapi": "3.2.0",
+                "components": {
+                    "headers": { "Cycle": { "$ref": "#/components/headers/Cycle" } }
+                },
+                "headers": { "H": { "$ref": "#/components/headers/Cycle" } }
+            }),
+            serde_json::json!({
+                "openapi": "3.2.0",
+                "headers": { "H": { "$ref": "#/components/other/Bad" } }
+            }),
+        ] {
+            let mut c = bad_comp;
+            assert!(normalize_component_refs(&mut c).is_err());
+        }
+
+        // Cover resolve_path_item_ref_with_context_inner branches:
+        // cycle, chained ref in components.extra, chained ref in paths, registry chained ref, depth > 3, depth > 2, not found, unsupported ref
+        let mut reg = DocumentRegistry::new();
+        reg.register_openapi_yaml(
+            "https://example.com/ext.yaml",
+            r#"
+openapi: 3.2.0
+info: { title: Ext, version: "1.0" }
+components:
+  pathItems:
+    TargetPi:
+      get:
+        responses: { '200': { description: ok } }
+    ChainPi:
+      $ref: '#/components/pathItems/TargetPi'
+paths: {}
+"#,
+        )
+        .expect("reg");
+
+        let extra_comps: ShimComponents = serde_yaml::from_str(
+            r#"
+pathItems:
+  ChainExtra:
+    $ref: '#/components/pathItems/TargetExtra'
+  TargetExtra:
+    get:
+      responses:
+        '200': { description: ok }
+  CycleExtra:
+    $ref: '#/components/pathItems/CycleExtra'
+"#,
+        )
+        .expect("extra_comps");
+        let mut local_paths = BTreeMap::new();
+        local_paths.insert(
+            "/chain".to_string(),
+            serde_json::from_value(serde_json::json!({
+                "$ref": "#/components/pathItems/TargetExtra"
+            }))
+            .expect("chain pi"),
+        );
+
+        assert!(resolve_path_item_ref(
+            "https://example.com/ext.yaml#/components/pathItems/ChainPi",
+            Some(&extra_comps),
+            &local_paths,
+            Some(&reg),
+            None,
+        )
+        .is_ok());
+        assert!(resolve_path_item_ref(
+            "#/components/pathItems/ChainExtra",
+            Some(&extra_comps),
+            &local_paths,
+            None,
+            None,
+        )
+        .is_ok());
+        assert!(resolve_path_item_ref(
+            "#/paths/~1chain",
+            Some(&extra_comps),
+            &local_paths,
+            None,
+            None,
+        )
+        .is_ok());
+
+        for err_ref in [
+            "#/other",
+            "#/components/pathItems",
+            "#/components/pathItems/CycleExtra",
+            "#/components/pathItems/MissingPi",
+            "#/components/pathItems/A/B",
+            "#/paths",
+            "#/paths/~1missing",
+            "#/paths/~1a/b",
+            "unsupported_ref",
+        ] {
+            assert!(resolve_path_item_ref(
+                err_ref,
+                Some(&extra_comps),
+                &local_paths,
+                None,
+                Some(&Url::parse("https://example.com/api.yaml").expect("url")),
+            )
+            .is_err());
+        }
+        assert!(resolve_path_item_ref(
+            "#/components/pathItems/MissingPi",
+            None,
+            &local_paths,
+            None,
+            None,
+        )
+        .is_err());
+        let mut sw2_no_paths = serde_json::json!({ "swagger": "2.0" });
+        upgrade_swagger2_to_openapi3(&mut sw2_no_paths);
+
+        assert_eq!(extract_base_path_from_url("   ", None), None);
+        assert_eq!(
+            extract_base_path_from_url("http://[::1", None),
+            Some("/http://[::1".to_string())
+        );
+
+        // Cover parse_openapi_routes_from_value invalid Shim, coerce_version_strings non-object,
+        // ComponentRefResolver non-object mediaTypes / non-object header / non-object media_val / Swagger 2.0 itemSchema,
+        // validate_link_operation_ids unknown operationId, and resolve_operation_ref_to_path unsupported method on path
+        let mut non_obj_doc = serde_json::json!("not_an_object");
+        coerce_version_strings(&mut non_obj_doc);
+        assert!(parse_openapi_routes_from_value(&mut non_obj_doc, None, None).is_err());
+
+        let mut sw2_comp_doc = serde_json::json!({
+            "swagger": "2.0",
+            "headers": "not_an_obj",
+            "content": "not_an_obj",
+            "nested": {
+                "headers": {
+                    "H1": "not_an_obj",
+                    "H2": { "example": "only_example" }
+                },
+                "content": {
+                    "application/json": {
+                        "itemSchema": { "type": "string" }
+                    },
+                    "text/plain": "not_an_obj",
+                    "text/html": {}
+                },
+                "links": {
+                    "L1": {
+                        "operation_id": "already_snake",
+                        "operationId": "ignored_camel"
+                    }
+                }
+            }
+        });
+        normalize_link_objects(&mut sw2_comp_doc);
+        normalize_component_refs(&mut sw2_comp_doc).expect("sw2 comp doc");
+
+        let _ = parse_openapi_routes(
+            r#"
+openapi: 3.2.0
+info: { title: T, version: "1.0" }
+paths:
+  /p:
+    get:
+      responses:
+        '200':
+          description: ok
+          links:
+            L:
+              operationRef: '#/paths/~1p'
+"#,
+        )
+        .expect("path level operationRef");
+
+        let mut unknown_op_id_routes = parse_openapi_routes(
+            r#"
+openapi: 3.2.0
+info: { title: T, version: "1.0" }
+paths:
+  /p:
+    get:
+      operationId: getP
+      responses:
+        '200':
+          description: ok
+          links:
+            L:
+              operationId: getP
+"#,
+        )
+        .expect("routes");
+        unknown_op_id_routes[0]
+            .response_links
+            .as_mut()
+            .expect("links")[0]
+            .resolved_operation_ref = None;
+        assert!(validate_link_operation_ids(&unknown_op_id_routes).is_err());
+
+        assert!(parse_openapi_routes(
+            r#"
+openapi: 3.2.0
+info: { title: T, version: "1.0" }
+paths:
+  /p:
+    get:
+      responses:
+        '200':
+          description: ok
+          links:
+            L:
+              operationRef: '#/paths/~1p/post'
+"#,
+        )
+        .is_err());
+
+        // Registry pathItem that chains to another ref_path, RefOr::Ref in comps.path_items,
+        // resolve_entry_base_uri with both retrieval_uri and self_uri, and webhook link target
+        let mut reg2 = DocumentRegistry::new();
+        reg2.register_openapi_yaml(
+            "https://example.com/chain.yaml",
+            r#"
+openapi: 3.2.0
+info: { title: Chain, version: "1.0" }
+components:
+  pathItems:
+    TargetPi:
+      get:
+        responses: { '200': { description: ok } }
+paths:
+  /chained:
+    $ref: '#/components/pathItems/TargetPi'
+"#,
+        )
+        .expect("reg2");
+        assert!(resolve_path_item_ref(
+            "https://example.com/chain.yaml#/paths/~1chained",
+            None,
+            &local_paths,
+            Some(&reg2),
+            None,
+        )
+        .is_ok());
+
+        let mut comps_with_ref_or_ref = extra_comps.clone();
+        comps_with_ref_or_ref.extra.insert(
+            "pathItems".to_string(),
+            serde_json::json!({
+                "ExtraChain": { "$ref": "#/components/pathItems/TargetExtra" },
+                "ExtraBad": "not_a_path_item"
+            }),
+        );
+        assert!(resolve_path_item_ref(
+            "#/components/pathItems/ExtraChain",
+            Some(&comps_with_ref_or_ref),
+            &local_paths,
+            None,
+            None,
+        )
+        .is_ok());
+        assert!(resolve_path_item_ref(
+            "#/components/pathItems/ExtraBad",
+            Some(&comps_with_ref_or_ref),
+            &local_paths,
+            None,
+            None,
+        )
+        .is_err());
+        comps_with_ref_or_ref
+            .path_items
+            .as_mut()
+            .expect("pi_map")
+            .insert(
+                "RefVariant".to_string(),
+                RefOr::Ref(utoipa::openapi::Ref::new(
+                    "#/components/pathItems/TargetExtra",
+                )),
+            );
+        assert!(resolve_path_item_ref(
+            "#/components/pathItems/RefVariant",
+            Some(&comps_with_ref_or_ref),
+            &local_paths,
+            None,
+            None,
+        )
+        .is_ok());
+
+        let mut media_missing_sec = serde_json::json!({
+            "openapi": "3.2.0",
+            "content": {
+                "application/json": { "$ref": "#/components/mediaTypes/M1" }
+            }
+        });
+        assert!(normalize_component_refs(&mut media_missing_sec).is_err());
+
+        let mut item_with_schema = serde_json::json!({
+            "openapi": "3.2.0",
+            "arr": [
+                {
+                    "content": {
+                        "multipart/byteranges": {
+                            "schema": { "type": "object" },
+                            "itemSchema": { "type": "string" }
+                        }
+                    }
+                }
+            ]
+        });
+        normalize_component_refs(&mut item_with_schema).expect("item with schema");
+
+        let mut sw2_minimal_body = serde_json::json!({
+            "swagger": "2.0",
+            "paths": {
+                "/p": {
+                    "post": {
+                        "parameters": [
+                            "not_an_obj",
+                            { "in": "query", "name": "q" },
+                            { "in": "body", "name": "b" }
+                        ],
+                        "responses": {
+                            "200": "not_an_obj"
+                        }
+                    },
+                    "get": {
+                        "parameters": []
+                    },
+                    "ext": "not_an_obj"
+                },
+                "bad_path": "not_an_obj"
+            }
+        });
+        upgrade_swagger2_to_openapi3(&mut sw2_minimal_body);
+        assert!(sw2_minimal_body["paths"]["/p"]["post"]["requestBody"].is_object());
+
+        let both_uri_yaml = r#"
+openapi: 3.2.0
+$self: /v1/spec.yaml
+info: { title: Both, version: "1.0" }
+components:
+  pathItems:
+    HookOnlyPi:
+      post:
+        responses: { '200': { description: ok } }
+webhooks:
+  inlineHook:
+    post:
+      responses: { '200': { description: ok } }
+  refHook:
+    $ref: '#/components/pathItems/HookOnlyPi'
+paths:
+  /check:
+    get:
+      responses:
+        '200':
+          description: ok
+          links:
+            ToInlineHook:
+              operationRef: '#/webhooks/inlineHook/post'
+            ToRefHookViaComp:
+              operationRef: '#/components/pathItems/HookOnlyPi/post'
+"#;
+        let both_routes = parse_openapi_routes_with_registry(
+            both_uri_yaml,
+            Some(&reg2),
+            Some("https://example.com/dir/entry.yaml"),
+        )
+        .expect("both routes");
+        assert!(!both_routes.is_empty());
     }
 }

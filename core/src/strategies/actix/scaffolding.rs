@@ -31,7 +31,7 @@ pub fn handler_signature(route: &crate::openapi::parse::ParsedRoute, args: &[Str
     let args_str = args.join(", ");
 
     let has_headers = !response_headers.is_empty();
-    let has_links = response_links.map(|l| !l.is_empty()).unwrap_or(false);
+    let has_links = response_links.is_some_and(|l| !l.is_empty());
 
     let return_type = if has_headers || has_links {
         "actix_web::Result<HttpResponse>".to_string()
@@ -44,26 +44,24 @@ pub fn handler_signature(route: &crate::openapi::parse::ParsedRoute, args: &[Str
     let mut body = String::new();
 
     // Generate logic for links (Runtime Variables)
-    if has_links {
-        if let Some(links) = response_links {
-            body.push_str("    // -- Generated Links --\n");
-            for link in links {
-                let (code, var_name) = generate_link_construction(link);
-                body.push_str(&code);
-                // Append header using the constructed variable
-                body.push_str(&format!(
-                    "    // .append_header((\"Link\", format!(\"<{{}}>; rel=\\\"{}\\\"\", {})))\n",
-                    link.name, var_name
-                ));
-                if let Some(request_body) = &link.request_body {
-                    body.push_str(&format!("    // Link requestBody: {:?}\n", request_body));
-                }
-                if let Some(server_url) = &link.server_url {
-                    body.push_str(&format!("    // Link server override: {}\n", server_url));
-                }
+    if let Some(links) = response_links.filter(|l| !l.is_empty()) {
+        body.push_str("    // -- Generated Links --\n");
+        for link in links {
+            let (code, var_name) = generate_link_construction(link);
+            body.push_str(&code);
+            // Append header using the constructed variable
+            body.push_str(&format!(
+                "    // .append_header((\"Link\", format!(\"<{{}}>; rel=\\\"{}\\\"\", {})))\n",
+                link.name, var_name
+            ));
+            if let Some(request_body) = &link.request_body {
+                body.push_str(&format!("    // Link requestBody: {:?}\n", request_body));
             }
-            body.push_str("    // ---------------------\n\n");
+            if let Some(server_url) = &link.server_url {
+                body.push_str(&format!("    // Link server override: {}\n", server_url));
+            }
         }
+        body.push_str("    // ---------------------\n\n");
     }
 
     if has_headers {
@@ -87,20 +85,16 @@ pub fn handler_signature(route: &crate::openapi::parse::ParsedRoute, args: &[Str
         }
     }
 
-    if response_type.is_none() && !has_headers && !has_links {
-        body.push_str("    actix_web::HttpResponse::Ok().finish()");
-    } else if has_headers || has_links {
+    if has_headers || has_links {
         body.push_str("    Ok(HttpResponse::Ok().finish())");
-    } else {
-        if let Some(t) = response_type {
-            if t.contains("Vec<") {
-                body.push_str("    Ok(web::Json(vec![]))");
-            } else {
-                body.push_str("    Ok(web::Json(Default::default()))");
-            }
+    } else if let Some(t) = response_type {
+        if t.contains("Vec<") {
+            body.push_str("    Ok(web::Json(vec![]))");
         } else {
-            body.push_str("    Ok(HttpResponse::Ok().finish())");
+            body.push_str("    Ok(web::Json(Default::default()))");
         }
+    } else {
+        body.push_str("    actix_web::HttpResponse::Ok().finish()");
     }
 
     format!(
@@ -225,5 +219,49 @@ mod tests {
         let route = dummy_route("ping", None, vec![], None);
         let sig = handler_signature(&route, &[]);
         assert!(sig.contains("-> impl Responder"));
+
+        let vec_route = dummy_route("list_users", Some("Vec<User>"), vec![], Some(vec![]));
+        let vec_sig = handler_signature(&vec_route, &[]);
+        assert!(vec_sig.contains("Ok(web::Json(vec![]))"));
+
+        let hdr_only_route = dummy_route(
+            "head_op",
+            None,
+            vec![ResponseHeader {
+                name: "X-Custom".to_string(),
+                description: None,
+                required: false,
+                deprecated: false,
+                style: None,
+                explode: None,
+                ty: "String".to_string(),
+                content_media_type: None,
+                example: None,
+                extensions: BTreeMap::new(),
+            }],
+            None,
+        );
+        let hdr_sig = handler_signature(&hdr_only_route, &[]);
+        assert!(hdr_sig.contains("No description"));
+        assert!(hdr_sig.contains("//     .finish()"));
+
+        let simple_link_route = dummy_route(
+            "link_op",
+            None,
+            vec![],
+            Some(vec![ParsedLink {
+                name: "Next".to_string(),
+                description: None,
+                operation_id: None,
+                operation_ref: Some("/next".to_string()),
+                resolved_operation_ref: None,
+                parameters: HashMap::new(),
+                request_body: None,
+                server: None,
+                server_url: None,
+            }]),
+        );
+        let link_sig = handler_signature(&simple_link_route, &[]);
+        assert!(link_sig.contains("let link_next = \"/next\";"));
     }
 }

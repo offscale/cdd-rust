@@ -148,21 +148,18 @@ fn build_openapi_info(shim: &ShimOpenApi) -> AppResult<OpenApiInfo> {
     Ok(out)
 }
 
-fn resolve_entry_base_uri(openapi: &ShimOpenApi, retrieval_uri: Option<&str>) -> Option<Url> {
-    let base_str = match (retrieval_uri, openapi.self_uri.as_deref()) {
-        (Some(retrieval), Some(self_val)) => Some(compute_base_uri(retrieval, Some(self_val))),
-        (Some(retrieval), None) => Some(retrieval.to_string()),
-        (None, Some(self_val)) => Some(self_val.to_string()),
-        (None, None) => None,
-    }?;
+fn resolve_entry_base_uri(shim: &ShimOpenApi, retrieval_uri: Option<&str>) -> Option<Url> {
+    let base_str = match (retrieval_uri, shim.self_uri.as_deref()) {
+        (Some(retrieval), Some(self_val)) => compute_base_uri(retrieval, Some(self_val)),
+        (Some(retrieval), None) => retrieval.to_string(),
+        (None, Some(self_val)) => self_val.to_string(),
+        (None, None) => return None,
+    };
 
     if let Ok(url) = Url::parse(&base_str) {
         return Some(url);
     }
-    let dummy = Url::parse("http://example.invalid/").ok()?;
-    if base_str.starts_with('/') {
-        return dummy.join(&base_str).ok();
-    }
+    let dummy = Url::parse("http://example.invalid/").expect("valid dummy base url");
     dummy.join(&base_str).ok()
 }
 
@@ -357,5 +354,91 @@ webhooks:
             Some("https://example.com/accounts")
         );
         assert_eq!(parsed.routes.len(), 2);
+
+        // Cover parse_openapi_document_with_registry with retrieval_uri + self_uri, retrieval_uri only, relative self_uri,
+        // no security/components/servers/tags/paths/webhooks, invalid YAML, invalid Shim, and build_openapi_info missing info
+        let reg = DocumentRegistry::new();
+        let minimal_yaml = r#"
+openapi: 3.2.0
+info:
+  title: Minimal
+  version: "1.0"
+servers:
+  - url: https://example.com
+security:
+  - {}
+paths: {}
+"#;
+        let parsed_min = parse_openapi_document_with_registry(
+            minimal_yaml,
+            Some(&reg),
+            Some("https://example.com/min.yaml"),
+        )
+        .expect("min");
+        assert_eq!(parsed_min.info.title, "Minimal");
+
+        let rel_self_yaml = r#"
+openapi: 3.2.0
+$self: /relative/spec.yaml
+info:
+  title: Rel
+  version: "1.0"
+security:
+  - {}
+paths: {}
+"#;
+        let parsed_rel =
+            parse_openapi_document_with_registry(rel_self_yaml, Some(&reg), None).expect("rel");
+        assert_eq!(
+            parsed_rel.info.self_uri.as_deref(),
+            Some("/relative/spec.yaml")
+        );
+
+        let parsed_both = parse_openapi_document_with_registry(
+            rel_self_yaml,
+            Some(&reg),
+            Some("https://example.com/dir/entry.yaml"),
+        )
+        .expect("both");
+        assert_eq!(parsed_both.info.title, "Rel");
+
+        let no_uri_sec_yaml = r#"
+openapi: 3.2.0
+info:
+  title: NoUri
+  version: "1.0"
+components:
+  securitySchemes:
+    api_key:
+      type: apiKey
+      name: X-API-Key
+      in: header
+security:
+  - api_key: []
+paths: {}
+"#;
+        assert!(parse_openapi_document(no_uri_sec_yaml).is_ok());
+
+        let no_sec_yaml = r#"
+openapi: 3.2.0
+info:
+  title: NoSec
+  version: "1.0"
+webhooks:
+  hook:
+    post:
+      responses:
+        "200":
+          description: ok
+"#;
+        assert!(parse_openapi_document(no_sec_yaml).is_ok());
+
+        assert!(parse_openapi_document("\t").is_err());
+        assert!(parse_openapi_document("openapi: [1, 2]").is_err());
+        assert!(parse_openapi_document("info: { title: T, version: '1' }\npaths: {}").is_err());
+
+        let shim_no_info: ShimOpenApi =
+            serde_yaml::from_str("openapi: 3.2.0\npaths: {}").expect("shim");
+        assert!(build_openapi_info(&shim_no_info).is_err());
     }
 }

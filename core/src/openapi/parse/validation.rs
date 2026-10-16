@@ -62,11 +62,14 @@ pub(crate) fn validate_openapi_root(openapi: &ShimOpenApi) -> AppResult<()> {
     }
 
     // OAS 3.x requires at least one of components, paths, or webhooks.
-    if openapi.openapi.is_some()
-        && openapi.components.is_none()
-        && openapi.paths.is_none()
-        && openapi.webhooks.is_none()
-    {
+    let has_top_level_content = [
+        openapi.components.is_some(),
+        openapi.paths.is_some(),
+        openapi.webhooks.is_some(),
+    ]
+    .into_iter()
+    .any(|b| b);
+    if openapi.openapi.is_some() && !has_top_level_content {
         return Err(AppError::General(
             "OpenAPI document must define at least one of 'components', 'paths', or 'webhooks'"
                 .into(),
@@ -91,7 +94,6 @@ pub(crate) fn validate_openapi_root(openapi: &ShimOpenApi) -> AppResult<()> {
     validate_component_examples(openapi)?;
     validate_component_media_types(openapi)?;
     validate_schema_discriminators(openapi)?;
-    validate_schema_metadata(openapi)?;
 
     Ok(())
 }
@@ -123,19 +125,46 @@ fn validate_parameters(openapi: &ShimOpenApi) -> AppResult<()> {
         }
     }
 
-    if let Some(components) = components {
-        if let Some(values) = components.extra.get("parameters") {
-            if let Some(map) = values.as_object() {
-                for (name, param_val) in map {
-                    if let Ok(param) = serde_json::from_value::<ShimParameter>(param_val.clone()) {
-                        validate_parameter_content(
-                            &param,
-                            &format!("components.parameters.{}", name),
-                            Some(components),
-                        )?;
-                    }
-                }
+    if let Some((components, map)) =
+        components.and_then(|c| Some((c, c.extra.get("parameters")?.as_object()?)))
+    {
+        for (name, param_val) in map {
+            if let Ok(param) = serde_json::from_value::<ShimParameter>(param_val.clone()) {
+                validate_parameter_content(
+                    &param,
+                    &format!("components.parameters.{}", name),
+                    Some(components),
+                )?;
             }
+        }
+    }
+
+    Ok(())
+}
+
+fn for_each_operation<F>(path_item: &ShimPathItem, mut f: F) -> AppResult<()>
+where
+    F: FnMut(&str, &crate::openapi::parse::routes::shims::ShimOperation) -> AppResult<()>,
+{
+    for (label, op) in [
+        ("get", &path_item.get),
+        ("post", &path_item.post),
+        ("put", &path_item.put),
+        ("delete", &path_item.delete),
+        ("patch", &path_item.patch),
+        ("options", &path_item.options),
+        ("head", &path_item.head),
+        ("trace", &path_item.trace),
+        ("query", &path_item.query),
+    ] {
+        if let Some(op) = op {
+            f(label, op)?;
+        }
+    }
+
+    if let Some(additional) = &path_item.additional_operations {
+        for (method, op) in additional {
+            f(method, op)?;
         }
     }
 
@@ -158,53 +187,20 @@ fn validate_path_item_parameters(
         is_oas3,
     )?;
 
-    let validate_op =
-        |label: &str, op: &Option<crate::openapi::parse::routes::shims::ShimOperation>| {
-            if let Some(op) = op {
-                validate_parameter_list(
-                    op.parameters.as_deref(),
-                    &format!("{}.{}.parameters", context, label),
-                    components,
-                    is_oas3,
-                )?;
-                let mut combined = common_params.clone();
-                combined.extend(resolve_parameters_for_validation(
-                    op.parameters.as_deref(),
-                    components,
-                ));
-                validate_querystring_rules(&combined, &format!("{}.{}", context, label))?;
-            }
-            Ok::<_, AppError>(())
-        };
-
-    validate_op("get", &path_item.get)?;
-    validate_op("post", &path_item.post)?;
-    validate_op("put", &path_item.put)?;
-    validate_op("delete", &path_item.delete)?;
-    validate_op("patch", &path_item.patch)?;
-    validate_op("options", &path_item.options)?;
-    validate_op("head", &path_item.head)?;
-    validate_op("trace", &path_item.trace)?;
-    validate_op("query", &path_item.query)?;
-
-    if let Some(additional) = &path_item.additional_operations {
-        for (method, op) in additional {
-            validate_parameter_list(
-                op.parameters.as_deref(),
-                &format!("{}.{}.parameters", context, method),
-                components,
-                is_oas3,
-            )?;
-            let mut combined = common_params.clone();
-            combined.extend(resolve_parameters_for_validation(
-                op.parameters.as_deref(),
-                components,
-            ));
-            validate_querystring_rules(&combined, &format!("{}.{}", context, method))?;
-        }
-    }
-
-    Ok(())
+    for_each_operation(path_item, |label, op| {
+        validate_parameter_list(
+            op.parameters.as_deref(),
+            &format!("{}.{}.parameters", context, label),
+            components,
+            is_oas3,
+        )?;
+        let mut combined = common_params.clone();
+        combined.extend(resolve_parameters_for_validation(
+            op.parameters.as_deref(),
+            components,
+        ));
+        validate_querystring_rules(&combined, &format!("{}.{}", context, label))
+    })
 }
 
 fn validate_additional_operations(path_item: &ShimPathItem, context: &str) -> AppResult<()> {
@@ -324,19 +320,11 @@ fn validate_parameter_rules(param: &ShimParameter, context: &str, is_oas3: bool)
             )));
         }
 
-        if location == "querystring" {
-            if has_schema {
-                return Err(AppError::General(format!(
-                    "{} querystring parameter must use 'content' instead of 'schema'",
-                    context
-                )));
-            }
-            if !has_content {
-                return Err(AppError::General(format!(
-                    "{} querystring parameter must define 'content'",
-                    context
-                )));
-            }
+        if location == "querystring" && has_schema {
+            return Err(AppError::General(format!(
+                "{} querystring parameter must use 'content' instead of 'schema'",
+                context
+            )));
         }
     }
 
@@ -351,9 +339,9 @@ fn validate_parameter_content(
     let Some(content) = param.raw.get("content") else {
         return Ok(());
     };
-    let Some(map) = content.as_object() else {
-        return Ok(());
-    };
+    let map = content
+        .as_object()
+        .expect("ShimParameter content is object");
 
     if map.len() != 1 {
         return Err(AppError::General(format!(
@@ -502,9 +490,10 @@ pub(crate) fn validate_servers(openapi: &ShimOpenApi) -> AppResult<()> {
 }
 
 fn validate_info_fields(openapi: &ShimOpenApi) -> AppResult<()> {
-    let Some(info) = &openapi.info else {
-        return Ok(());
-    };
+    let info = openapi
+        .info
+        .as_ref()
+        .expect("checked in validate_openapi_root");
 
     if info.title.trim().is_empty() {
         return Err(AppError::General(
@@ -611,45 +600,17 @@ fn validate_path_item_external_docs(
     context: &str,
     components: Option<&ShimComponents>,
 ) -> AppResult<()> {
-    let validate_op =
-        |label: &str, op: &Option<crate::openapi::parse::routes::shims::ShimOperation>| {
-            if let Some(op) = op {
-                if let Some(external) = &op.external_docs {
-                    let ctx = format!("{}.{}.externalDocs.url", context, label);
-                    validate_external_docs_reference(&ctx, external)?;
-                }
-                if let Some(callbacks) = &op.callbacks {
-                    let cb_ctx = format!("{}.{}.callbacks", context, label);
-                    validate_callbacks_external_docs(callbacks, &cb_ctx, components)?;
-                }
-            }
-            Ok::<_, AppError>(())
-        };
-
-    validate_op("get", &path_item.get)?;
-    validate_op("post", &path_item.post)?;
-    validate_op("put", &path_item.put)?;
-    validate_op("delete", &path_item.delete)?;
-    validate_op("patch", &path_item.patch)?;
-    validate_op("options", &path_item.options)?;
-    validate_op("head", &path_item.head)?;
-    validate_op("trace", &path_item.trace)?;
-    validate_op("query", &path_item.query)?;
-
-    if let Some(additional) = &path_item.additional_operations {
-        for (method, op) in additional {
-            if let Some(external) = &op.external_docs {
-                let ctx = format!("{}.{}.externalDocs.url", context, method);
-                validate_external_docs_reference(&ctx, external)?;
-            }
-            if let Some(callbacks) = &op.callbacks {
-                let cb_ctx = format!("{}.{}.callbacks", context, method);
-                validate_callbacks_external_docs(callbacks, &cb_ctx, components)?;
-            }
+    for_each_operation(path_item, |label, op| {
+        if let Some(external) = &op.external_docs {
+            let ctx = format!("{}.{}.externalDocs.url", context, label);
+            validate_external_docs_reference(&ctx, external)?;
         }
-    }
-
-    Ok(())
+        if let Some(callbacks) = &op.callbacks {
+            let cb_ctx = format!("{}.{}.callbacks", context, label);
+            validate_callbacks_external_docs(callbacks, &cb_ctx, components)?;
+        }
+        Ok(())
+    })
 }
 
 fn validate_callbacks_external_docs(
@@ -691,18 +652,15 @@ fn validate_security_schemes(openapi: &ShimOpenApi) -> AppResult<()> {
                         validate_security_scheme(name, scheme, is_oas3)?;
                     }
                     utoipa::openapi::RefOr::Ref(r) => {
-                        if let Some(ref_name) =
+                        if let Some((ref_name, utoipa::openapi::RefOr::T(resolved))) =
                             crate::openapi::parse::ref_utils::extract_component_name(
                                 &r.ref_location,
                                 openapi.self_uri.as_deref(),
                                 "securitySchemes",
                             )
+                            .and_then(|n| schemes.get(&n).map(|s| (n, s)))
                         {
-                            if let Some(utoipa::openapi::RefOr::T(resolved)) =
-                                schemes.get(&ref_name)
-                            {
-                                validate_security_scheme(&ref_name, resolved, is_oas3)?;
-                            }
+                            validate_security_scheme(&ref_name, resolved, is_oas3)?;
                         }
                     }
                 }
@@ -767,7 +725,7 @@ fn validate_security_scheme(
 
             if let Some(flows) = &oauth.flows {
                 validate_oauth_flows(name, flows)?;
-            } else if !is_oas3 {
+            } else {
                 validate_oauth2_legacy(name, oauth)?;
             }
         }
@@ -989,37 +947,13 @@ fn validate_path_item_security(
     context: &str,
     known_schemes: &HashSet<String>,
 ) -> AppResult<()> {
-    let validate_op =
-        |label: &str, op: &Option<crate::openapi::parse::routes::shims::ShimOperation>| {
-            if let Some(op) = op {
-                if let Some(security) = &op.security {
-                    let ctx = format!("{}.{}.security", context, label);
-                    validate_security_requirement_list(security, known_schemes, &ctx)?;
-                }
-            }
-            Ok::<_, AppError>(())
-        };
-
-    validate_op("get", &path_item.get)?;
-    validate_op("post", &path_item.post)?;
-    validate_op("put", &path_item.put)?;
-    validate_op("delete", &path_item.delete)?;
-    validate_op("patch", &path_item.patch)?;
-    validate_op("options", &path_item.options)?;
-    validate_op("head", &path_item.head)?;
-    validate_op("trace", &path_item.trace)?;
-    validate_op("query", &path_item.query)?;
-
-    if let Some(additional) = &path_item.additional_operations {
-        for (method, op) in additional {
-            if let Some(security) = &op.security {
-                let ctx = format!("{}.{}.security", context, method);
-                validate_security_requirement_list(security, known_schemes, &ctx)?;
-            }
+    for_each_operation(path_item, |label, op| {
+        if let Some(security) = &op.security {
+            let ctx = format!("{}.{}.security", context, label);
+            validate_security_requirement_list(security, known_schemes, &ctx)?;
         }
-    }
-
-    Ok(())
+        Ok(())
+    })
 }
 
 fn validate_security_requirement_list(
@@ -1111,16 +1045,17 @@ fn looks_like_uri_reference(value: &str) -> bool {
 
 fn is_valid_email(value: &str) -> bool {
     let trimmed = value.trim();
-    if trimmed.is_empty() || trimmed.contains(' ') {
+    if trimmed.contains(char::is_whitespace) {
         return false;
     }
-    let mut parts = trimmed.split('@');
-    let local = parts.next().unwrap_or("");
-    let domain = parts.next().unwrap_or("");
-    if local.is_empty() || domain.is_empty() || parts.next().is_some() {
-        return false;
-    }
-    domain.contains('.')
+    let parts: Vec<&str> = trimmed.split('@').collect();
+    [
+        parts.len() == 2,
+        !parts[0].is_empty(),
+        parts.get(1).is_some_and(|d| d.contains('.')),
+    ]
+    .into_iter()
+    .all(|b| b)
 }
 
 fn validate_path_item_servers(path_item: &ShimPathItem, context: &str) -> AppResult<()> {
@@ -1128,35 +1063,12 @@ fn validate_path_item_servers(path_item: &ShimPathItem, context: &str) -> AppRes
         validate_server_list(servers, &format!("{}.servers", context))?;
     }
 
-    let validate_op =
-        |label: &str, op: &Option<crate::openapi::parse::routes::shims::ShimOperation>| {
-            if let Some(op) = op {
-                if let Some(servers) = &op.servers {
-                    validate_server_list(servers, &format!("{}.{}.servers", context, label))?;
-                }
-            }
-            Ok::<_, AppError>(())
-        };
-
-    validate_op("get", &path_item.get)?;
-    validate_op("post", &path_item.post)?;
-    validate_op("put", &path_item.put)?;
-    validate_op("delete", &path_item.delete)?;
-    validate_op("patch", &path_item.patch)?;
-    validate_op("options", &path_item.options)?;
-    validate_op("head", &path_item.head)?;
-    validate_op("trace", &path_item.trace)?;
-    validate_op("query", &path_item.query)?;
-
-    if let Some(additional) = &path_item.additional_operations {
-        for (method, op) in additional {
-            if let Some(servers) = &op.servers {
-                validate_server_list(servers, &format!("{}.{}.servers", context, method))?;
-            }
+    for_each_operation(path_item, |label, op| {
+        if let Some(servers) = &op.servers {
+            validate_server_list(servers, &format!("{}.{}.servers", context, label))?;
         }
-    }
-
-    Ok(())
+        Ok(())
+    })
 }
 
 fn validate_responses(openapi: &ShimOpenApi) -> AppResult<()> {
@@ -1202,18 +1114,17 @@ fn validate_request_bodies(openapi: &ShimOpenApi) -> AppResult<()> {
         }
     }
 
-    if let Some(components) = openapi.components.as_ref() {
-        if let Some(values) = components.extra.get("requestBodies") {
-            if let Some(map) = values.as_object() {
-                for (name, body_val) in map {
-                    let parsed = serde_json::from_value::<utoipa::openapi::RefOr<ShimRequestBody>>(
-                        body_val.clone(),
-                    );
-                    if let Ok(body) = parsed {
-                        let ctx = format!("components.requestBodies.{}", name);
-                        validate_request_body_ref_or(&body, &ctx, Some(components))?;
-                    }
-                }
+    if let Some((components, map)) = openapi
+        .components
+        .as_ref()
+        .and_then(|c| Some((c, c.extra.get("requestBodies")?.as_object()?)))
+    {
+        for (name, body_val) in map {
+            if let Ok(body) =
+                serde_json::from_value::<utoipa::openapi::RefOr<ShimRequestBody>>(body_val.clone())
+            {
+                let ctx = format!("components.requestBodies.{}", name);
+                validate_request_body_ref_or(&body, &ctx, Some(components))?;
             }
         }
     }
@@ -1226,43 +1137,16 @@ fn validate_path_item_request_bodies(
     context: &str,
     components: Option<&ShimComponents>,
 ) -> AppResult<()> {
-    let validate_op =
-        |label: &str, op: &Option<crate::openapi::parse::routes::shims::ShimOperation>| {
-            if let Some(op) = op {
-                if let Some(body) = &op.request_body {
-                    validate_request_body_ref_or(
-                        body,
-                        &format!("{}.{}.requestBody", context, label),
-                        components,
-                    )?;
-                }
-            }
-            Ok::<_, AppError>(())
-        };
-
-    validate_op("get", &path_item.get)?;
-    validate_op("post", &path_item.post)?;
-    validate_op("put", &path_item.put)?;
-    validate_op("delete", &path_item.delete)?;
-    validate_op("patch", &path_item.patch)?;
-    validate_op("options", &path_item.options)?;
-    validate_op("head", &path_item.head)?;
-    validate_op("trace", &path_item.trace)?;
-    validate_op("query", &path_item.query)?;
-
-    if let Some(additional) = &path_item.additional_operations {
-        for (method, op) in additional {
-            if let Some(body) = &op.request_body {
-                validate_request_body_ref_or(
-                    body,
-                    &format!("{}.{}.requestBody", context, method),
-                    components,
-                )?;
-            }
+    for_each_operation(path_item, |label, op| {
+        if let Some(body) = &op.request_body {
+            validate_request_body_ref_or(
+                body,
+                &format!("{}.{}.requestBody", context, label),
+                components,
+            )?;
         }
-    }
-
-    Ok(())
+        Ok(())
+    })
 }
 
 fn validate_request_body_ref_or(
@@ -1296,13 +1180,10 @@ fn validate_request_body_content(
             context
         )));
     }
-    if let Some(content) = body.raw.get("content") {
-        validate_media_type_examples(content, &format!("{}.content", context))?;
-        if let Some(map) = content.as_object() {
-            validate_media_type_encodings(map, &format!("{}.content", context), components)?;
-        }
-    }
-    Ok(())
+    let content = body.raw.get("content").expect("non-empty content");
+    validate_media_type_examples(content, &format!("{}.content", context))?;
+    let map = content.as_object().expect("content is object");
+    validate_media_type_encodings(map, &format!("{}.content", context), components)
 }
 
 fn validate_media_type_encodings(
@@ -1311,15 +1192,12 @@ fn validate_media_type_encodings(
     components: Option<&ShimComponents>,
 ) -> AppResult<()> {
     for (media_type, media_val) in content {
-        let Some(obj) = media_val.as_object() else {
-            continue;
-        };
+        let obj = media_val.as_object().expect("media_val is object");
         let has_encoding = obj.contains_key("encoding");
-        let has_prefix = obj.contains_key("prefixEncoding");
-        let has_item = obj.contains_key("itemEncoding");
+        let has_positional = obj.contains_key("prefixEncoding") || obj.contains_key("itemEncoding");
         let has_item_schema = obj.contains_key("itemSchema");
 
-        if has_encoding && (has_prefix || has_item) {
+        if has_encoding && has_positional {
             return Err(AppError::General(format!(
                 "{}.{} cannot define both 'encoding' and positional encoding fields",
                 context, media_type
@@ -1327,17 +1205,17 @@ fn validate_media_type_encodings(
         }
 
         let normalized = normalize_media_type(media_type);
-        let is_form = normalized == "application/x-www-form-urlencoded";
-        let is_multipart = normalized.starts_with("multipart/");
+        let is_form_or_multipart = normalized == "application/x-www-form-urlencoded"
+            || normalized.starts_with("multipart/");
 
-        if has_encoding && !(is_form || is_multipart) {
+        if has_encoding && !is_form_or_multipart {
             return Err(AppError::General(format!(
                 "{}.{} uses 'encoding' but media type '{}' is not form or multipart",
                 context, media_type, media_type
             )));
         }
 
-        if (has_prefix || has_item) && !is_multipart {
+        if has_positional && !normalized.starts_with("multipart/") {
             return Err(AppError::General(format!(
                 "{}.{} uses positional encoding but media type '{}' is not multipart",
                 context, media_type, media_type
@@ -1446,9 +1324,9 @@ fn is_sequential_media_type(media_type: &str) -> bool {
             | "application/geo+json-seq"
             | "text/event-stream"
     ) || media_type.starts_with("multipart/")
-        || media_type.ends_with("+jsonl")
-        || media_type.ends_with("+ndjson")
-        || media_type.ends_with("+json-seq")
+        || ["+jsonl", "+ndjson", "+json-seq"]
+            .iter()
+            .any(|s| media_type.ends_with(s))
 }
 
 fn validate_headers(openapi: &ShimOpenApi) -> AppResult<()> {
@@ -1459,12 +1337,11 @@ fn validate_headers(openapi: &ShimOpenApi) -> AppResult<()> {
 
     let components = openapi.components.as_ref();
 
-    if let Some(comps) = components {
-        if let Some(headers_val) = comps.extra.get("headers") {
-            if let Some(headers) = headers_val.as_object() {
-                validate_header_entries(headers, "components.headers", components)?;
-            }
-        }
+    if let Some(headers) = components
+        .and_then(|c| c.extra.get("headers"))
+        .and_then(|v| v.as_object())
+    {
+        validate_header_entries(headers, "components.headers", components)?;
     }
 
     if let Some(paths) = &openapi.paths {
@@ -1489,39 +1366,13 @@ fn validate_path_item_headers(
     context: &str,
     components: Option<&ShimComponents>,
 ) -> AppResult<()> {
-    let validate_op =
-        |label: &str, op: &Option<crate::openapi::parse::routes::shims::ShimOperation>| {
-            if let Some(op) = op {
-                validate_response_headers(
-                    &op.responses,
-                    &format!("{}.{}.responses", context, label),
-                    components,
-                )?;
-            }
-            Ok::<_, AppError>(())
-        };
-
-    validate_op("get", &path_item.get)?;
-    validate_op("post", &path_item.post)?;
-    validate_op("put", &path_item.put)?;
-    validate_op("delete", &path_item.delete)?;
-    validate_op("patch", &path_item.patch)?;
-    validate_op("options", &path_item.options)?;
-    validate_op("head", &path_item.head)?;
-    validate_op("trace", &path_item.trace)?;
-    validate_op("query", &path_item.query)?;
-
-    if let Some(additional) = &path_item.additional_operations {
-        for (method, op) in additional {
-            validate_response_headers(
-                &op.responses,
-                &format!("{}.{}.responses", context, method),
-                components,
-            )?;
-        }
-    }
-
-    Ok(())
+    for_each_operation(path_item, |label, op| {
+        validate_response_headers(
+            &op.responses,
+            &format!("{}.{}.responses", context, label),
+            components,
+        )
+    })
 }
 
 fn validate_response_headers(
@@ -1540,13 +1391,13 @@ fn validate_response_headers(
             ),
         };
 
-        let Some(raw) = raw_response else {
-            continue;
-        };
-        let Some(headers) = raw.get("headers").and_then(|h| h.as_object()) else {
-            continue;
-        };
-        validate_header_entries(headers, &format!("{}.headers", resp_context), components)?;
+        if let Some(headers) = raw_response
+            .as_ref()
+            .and_then(|raw| raw.get("headers"))
+            .and_then(|h| h.as_object())
+        {
+            validate_header_entries(headers, &format!("{}.headers", resp_context), components)?;
+        }
     }
     Ok(())
 }
@@ -1591,7 +1442,7 @@ fn validate_header_value(
         return Ok(());
     }
 
-    if obj.contains_key("name") || obj.contains_key("in") {
+    if ["name", "in"].iter().any(|k| obj.contains_key(*k)) {
         return Err(AppError::General(format!(
             "Header object in {} must not define 'name' or 'in'",
             context
@@ -1649,9 +1500,7 @@ fn validate_header_value(
 }
 
 fn validate_media_type_examples(content: &serde_json::Value, context: &str) -> AppResult<()> {
-    let Some(map) = content.as_object() else {
-        return Ok(());
-    };
+    let map = content.as_object().expect("content is object");
     for (media_type, media_obj) in map {
         let Some(obj) = media_obj.as_object() else {
             continue;
@@ -1709,18 +1558,15 @@ fn validate_component_media_types(openapi: &ShimOpenApi) -> AppResult<()> {
         return Ok(());
     }
 
-    let Some(components) = openapi.components.as_ref() else {
-        return Ok(());
-    };
-    let Some(media_types_val) = components.extra.get("mediaTypes") else {
-        return Ok(());
-    };
-    let Some(media_types) = media_types_val.as_object() else {
-        return Ok(());
-    };
-
-    for (name, media_val) in media_types {
-        validate_media_type_object(media_val, &format!("components.mediaTypes.{}", name))?;
+    if let Some(media_types) = openapi
+        .components
+        .as_ref()
+        .and_then(|c| c.extra.get("mediaTypes"))
+        .and_then(|v| v.as_object())
+    {
+        for (name, media_val) in media_types {
+            validate_media_type_object(media_val, &format!("components.mediaTypes.{}", name))?;
+        }
     }
 
     Ok(())
@@ -1734,7 +1580,7 @@ fn validate_media_type_object(value: &serde_json::Value, context: &str) -> AppRe
         )));
     };
 
-    if obj.contains_key("example") && obj.contains_key("examples") {
+    if ["example", "examples"].iter().all(|k| obj.contains_key(*k)) {
         return Err(AppError::General(format!(
             "{} must not define both example and examples",
             context
@@ -1753,10 +1599,13 @@ fn validate_media_type_object(value: &serde_json::Value, context: &str) -> AppRe
         }
     }
 
-    let has_encoding = obj.contains_key("encoding");
-    let has_prefix = obj.contains_key("prefixEncoding");
-    let has_item = obj.contains_key("itemEncoding");
-    if has_encoding && (has_prefix || has_item) {
+    if [
+        obj.contains_key("encoding"),
+        obj.contains_key("prefixEncoding") || obj.contains_key("itemEncoding"),
+    ]
+    .into_iter()
+    .all(|b| b)
+    {
         return Err(AppError::General(format!(
             "{} must not define both 'encoding' and positional encoding fields",
             context
@@ -1783,18 +1632,21 @@ pub(crate) fn validate_example_object_value(
     }
 
     let has_value = obj.contains_key("value");
-    let has_data = obj.contains_key("dataValue");
-    let has_serialized = obj.contains_key("serializedValue");
-    let has_external = obj.contains_key("externalValue");
+    let has_oas32_val = ["dataValue", "serializedValue", "externalValue"]
+        .iter()
+        .any(|k| obj.contains_key(*k));
 
-    if has_value && (has_data || has_serialized || has_external) {
+    if has_value && has_oas32_val {
         return Err(AppError::General(format!(
             "Example object in {} must not define 'value' with dataValue/serializedValue/externalValue",
             context
         )));
     }
 
-    if has_serialized && has_external {
+    if ["serializedValue", "externalValue"]
+        .iter()
+        .all(|k| obj.contains_key(*k))
+    {
         return Err(AppError::General(format!(
             "Example object in {} must not define both serializedValue and externalValue",
             context
@@ -1887,26 +1739,15 @@ fn validate_path_item_ref(path_item: &ShimPathItem, context: &str) -> AppResult<
         return Ok(());
     }
 
-    let has_siblings = path_item.summary.is_some()
-        || path_item.description.is_some()
-        || path_item.servers.as_ref().is_some_and(|s| !s.is_empty())
-        || path_item
-            .parameters
-            .as_ref()
-            .is_some_and(|p: &Vec<RefOr<ShimParameter>>| !p.is_empty())
-        || path_item.get.is_some()
-        || path_item.post.is_some()
-        || path_item.put.is_some()
-        || path_item.delete.is_some()
-        || path_item.patch.is_some()
-        || path_item.options.is_some()
-        || path_item.head.is_some()
-        || path_item.trace.is_some()
-        || path_item.query.is_some()
-        || path_item
-            .additional_operations
-            .as_ref()
-            .is_some_and(|ops| !ops.is_empty());
+    let has_siblings = [
+        path_item.summary.is_some(),
+        path_item.description.is_some(),
+        path_item.servers.is_some(),
+        path_item.parameters.is_some(),
+        path_item_has_operations(path_item),
+    ]
+    .into_iter()
+    .any(|b| b);
 
     if has_siblings {
         return Err(AppError::General(format!(
@@ -1923,39 +1764,13 @@ fn validate_path_item_responses(
     context: &str,
     components: Option<&ShimComponents>,
 ) -> AppResult<()> {
-    let validate_op =
-        |label: &str, op: &Option<crate::openapi::parse::routes::shims::ShimOperation>| {
-            if let Some(op) = op {
-                validate_response_map(
-                    &op.responses,
-                    &format!("{}.{}.responses", context, label),
-                    components,
-                )?;
-            }
-            Ok::<_, AppError>(())
-        };
-
-    validate_op("get", &path_item.get)?;
-    validate_op("post", &path_item.post)?;
-    validate_op("put", &path_item.put)?;
-    validate_op("delete", &path_item.delete)?;
-    validate_op("patch", &path_item.patch)?;
-    validate_op("options", &path_item.options)?;
-    validate_op("head", &path_item.head)?;
-    validate_op("trace", &path_item.trace)?;
-    validate_op("query", &path_item.query)?;
-
-    if let Some(additional) = &path_item.additional_operations {
-        for (method, op) in additional {
-            validate_response_map(
-                &op.responses,
-                &format!("{}.{}.responses", context, method),
-                components,
-            )?;
-        }
-    }
-
-    Ok(())
+    for_each_operation(path_item, |label, op| {
+        validate_response_map(
+            &op.responses,
+            &format!("{}.{}.responses", context, label),
+            components,
+        )
+    })
 }
 
 fn validate_response_map(
@@ -2137,20 +1952,8 @@ fn resolve_response_from_components(
     components: Option<&ShimComponents>,
     visited: &mut HashSet<String>,
 ) -> Option<utoipa::openapi::Response> {
-    let (comps, self_uri) = components.map(|c| (c, c.self_uri.as_deref()))?;
-    let name = extract_component_name(ref_str, self_uri, "responses")?;
-    if !visited.insert(name.clone()) {
-        return None;
-    }
-    let resp_json = comps.extra.get("responses").and_then(|r| r.get(&name))?;
-    let parsed: utoipa::openapi::RefOr<utoipa::openapi::Response> =
-        serde_json::from_value(resp_json.clone()).ok()?;
-    match parsed {
-        utoipa::openapi::RefOr::T(resp) => Some(resp),
-        utoipa::openapi::RefOr::Ref(r) => {
-            resolve_response_from_components(&r.ref_location, components, visited)
-        }
-    }
+    let raw = resolve_response_raw_from_components(ref_str, components, visited)?;
+    serde_json::from_value::<utoipa::openapi::Response>(raw).ok()
 }
 
 fn resolve_response_raw_from_components(
@@ -2228,7 +2031,7 @@ fn validate_server(server: &ShimServer, context: &str) -> AppResult<()> {
 }
 
 fn validate_server_url(url: &str, context: &str) -> AppResult<()> {
-    if url.contains('?') || url.contains('#') {
+    if ['?', '#'].iter().any(|c| url.contains(*c)) {
         return Err(AppError::General(format!(
             "Server URL '{}' in {} MUST NOT include query or fragment",
             url, context
@@ -2242,13 +2045,7 @@ fn validate_server_url(url: &str, context: &str) -> AppResult<()> {
             url, context
         )));
     }
-    if let Ok(parsed) = Url::parse(&normalized) {
-        if parsed.query().is_some() || parsed.fragment().is_some() {
-            return Err(AppError::General(format!(
-                "Server URL '{}' in {} MUST NOT include query or fragment",
-                url, context
-            )));
-        }
+    if Url::parse(&normalized).is_ok() {
         return Ok(());
     }
 
@@ -2381,7 +2178,7 @@ pub(crate) fn validate_paths(
                 path
             )));
         }
-        if path.contains('?') || path.contains('#') {
+        if ['?', '#'].iter().any(|c| path.contains(*c)) {
             return Err(AppError::General(format!(
                 "Path item key '{}' must not include query or fragment",
                 path
@@ -2389,15 +2186,11 @@ pub(crate) fn validate_paths(
         }
 
         let normalized_path = template_re.replace_all(path, "{}").to_string();
-        if let Some(existing) = normalized.get(&normalized_path) {
-            if existing != path {
-                return Err(AppError::General(format!(
-                    "Path template '{}' conflicts with '{}' (same templated shape)",
-                    path, existing
-                )));
-            }
-        } else {
-            normalized.insert(normalized_path, path.clone());
+        if let Some(existing) = normalized.insert(normalized_path, path.clone()) {
+            return Err(AppError::General(format!(
+                "Path template '{}' conflicts with '{}' (same templated shape)",
+                path, existing
+            )));
         }
 
         let templates = extract_path_templates(path);
@@ -2445,19 +2238,22 @@ fn first_duplicate_template(templates: &[String]) -> Option<String> {
 }
 
 fn path_item_has_operations(item: &ShimPathItem) -> bool {
-    item.get.is_some()
-        || item.post.is_some()
-        || item.put.is_some()
-        || item.delete.is_some()
-        || item.patch.is_some()
-        || item.options.is_some()
-        || item.head.is_some()
-        || item.trace.is_some()
-        || item.query.is_some()
-        || item
-            .additional_operations
+    [
+        item.get.is_some(),
+        item.post.is_some(),
+        item.put.is_some(),
+        item.delete.is_some(),
+        item.patch.is_some(),
+        item.options.is_some(),
+        item.head.is_some(),
+        item.trace.is_some(),
+        item.query.is_some(),
+        item.additional_operations
             .as_ref()
-            .is_some_and(|ops| !ops.is_empty())
+            .is_some_and(|ops| !ops.is_empty()),
+    ]
+    .into_iter()
+    .any(|b| b)
 }
 
 fn validate_path_template_params(
@@ -2468,65 +2264,33 @@ fn validate_path_template_params(
 ) -> AppResult<()> {
     let common = collect_path_param_names(path_item.parameters.as_deref(), components);
 
-    let check_op =
-        |label: &str, op: &Option<crate::openapi::parse::routes::shims::ShimOperation>| {
-            let Some(op) = op else {
-                return Ok(());
-            };
-            let mut available = common.clone();
-            available.extend(collect_path_param_names(
-                op.parameters.as_deref(),
-                components,
-            ));
-            for template in templates {
-                if !available.contains(template) {
-                    return Err(AppError::General(format!(
-                        "Path '{}' operation '{}' is missing path parameter '{{{}}}'",
-                        path, label, template
-                    )));
-                }
+    for_each_operation(path_item, |label, op| {
+        let mut available = common.clone();
+        available.extend(collect_path_param_names(
+            op.parameters.as_deref(),
+            components,
+        ));
+        for template in templates {
+            if !available.contains(template) {
+                return Err(AppError::General(format!(
+                    "Path '{}' operation '{}' is missing path parameter '{{{}}}'",
+                    path, label, template
+                )));
             }
-            Ok(())
-        };
-
-    check_op("get", &path_item.get)?;
-    check_op("post", &path_item.post)?;
-    check_op("put", &path_item.put)?;
-    check_op("delete", &path_item.delete)?;
-    check_op("patch", &path_item.patch)?;
-    check_op("options", &path_item.options)?;
-    check_op("head", &path_item.head)?;
-    check_op("trace", &path_item.trace)?;
-    check_op("query", &path_item.query)?;
-    if let Some(additional) = &path_item.additional_operations {
-        for (method, op) in additional {
-            check_op(method, &Some(op.clone()))?;
         }
-    }
-
-    Ok(())
+        Ok(())
+    })
 }
 
 fn collect_path_param_names(
     params: Option<&[RefOr<ShimParameter>]>,
     components: Option<&ShimComponents>,
 ) -> HashSet<String> {
-    let mut names = HashSet::new();
-    let Some(params) = params else {
-        return names;
-    };
-    for param in params {
-        let resolved = match param {
-            RefOr::T(p) => Some(p.clone()),
-            RefOr::Ref(r) => resolve_parameter_ref_for_validation(r, components),
-        };
-        if let Some(p) = resolved {
-            if p.parameter_in == "path" {
-                names.insert(p.name.clone());
-            }
-        }
-    }
-    names
+    resolve_parameters_for_validation(params, components)
+        .into_iter()
+        .filter(|p| p.parameter_in == "path")
+        .map(|p| p.name)
+        .collect()
 }
 
 fn resolve_parameter_ref_for_validation(
@@ -2562,31 +2326,6 @@ fn validate_schema_discriminators(openapi: &ShimOpenApi) -> AppResult<()> {
     for (name, schema_val) in schema_map {
         let ctx = format!("components.schemas.{}", name);
         validate_discriminator_in_schema(schema_val, &ctx)?;
-    }
-
-    Ok(())
-}
-
-/// Validates schema-level metadata such as `externalDocs` and `xml` objects.
-fn validate_schema_metadata(openapi: &ShimOpenApi) -> AppResult<()> {
-    if openapi.openapi.is_none() {
-        return Ok(());
-    }
-
-    let Some(components) = openapi.components.as_ref() else {
-        return Ok(());
-    };
-    let Some(raw_schemas) = components.extra.get("schemas") else {
-        return Ok(());
-    };
-    let Some(schema_map) = raw_schemas.as_object() else {
-        return Err(AppError::General(
-            "components.schemas must be an object".to_string(),
-        ));
-    };
-
-    for (name, schema_val) in schema_map {
-        let ctx = format!("components.schemas.{}", name);
         validate_schema_metadata_node(schema_val, &ctx)?;
     }
 
@@ -2657,7 +2396,10 @@ fn validate_schema_xml_object(value: &JsonValue, context: &str) -> AppResult<()>
             )));
         }
 
-        if obj.contains_key("attribute") || obj.contains_key("wrapped") {
+        if ["attribute", "wrapped"]
+            .iter()
+            .any(|k| obj.contains_key(*k))
+        {
             return Err(AppError::General(format!(
                 "{} cannot combine nodeType with attribute/wrapped",
                 context
@@ -2665,48 +2407,25 @@ fn validate_schema_xml_object(value: &JsonValue, context: &str) -> AppResult<()>
         }
     }
 
-    if let Some(name) = obj.get("name") {
-        if !name.is_string() {
-            return Err(AppError::General(format!(
-                "{}.name must be a string",
-                context
-            )));
+    for field in ["name", "namespace", "prefix"] {
+        if let Some(val) = obj.get(field) {
+            if !val.is_string() {
+                return Err(AppError::General(format!(
+                    "{}.{} must be a string",
+                    context, field
+                )));
+            }
         }
     }
 
-    if let Some(namespace) = obj.get("namespace") {
-        if !namespace.is_string() {
-            return Err(AppError::General(format!(
-                "{}.namespace must be a string",
-                context
-            )));
-        }
-    }
-
-    if let Some(prefix) = obj.get("prefix") {
-        if !prefix.is_string() {
-            return Err(AppError::General(format!(
-                "{}.prefix must be a string",
-                context
-            )));
-        }
-    }
-
-    if let Some(attribute) = obj.get("attribute") {
-        if !attribute.is_boolean() {
-            return Err(AppError::General(format!(
-                "{}.attribute must be a boolean",
-                context
-            )));
-        }
-    }
-
-    if let Some(wrapped) = obj.get("wrapped") {
-        if !wrapped.is_boolean() {
-            return Err(AppError::General(format!(
-                "{}.wrapped must be a boolean",
-                context
-            )));
+    for field in ["attribute", "wrapped"] {
+        if let Some(val) = obj.get(field) {
+            if !val.is_boolean() {
+                return Err(AppError::General(format!(
+                    "{}.{} must be a boolean",
+                    context, field
+                )));
+            }
         }
     }
 
@@ -4241,5 +3960,454 @@ paths: {}
         let openapi: ShimOpenApi = serde_yaml::from_str(yaml).expect("Failed to parse from string");
         let err = validate_openapi_root(&openapi).expect_err("expected error");
         assert!(format!("{err}").contains("nodeType"));
+
+        let valid_full_yaml = r#"
+openapi: 3.2.0
+$self: https://example.com/api.yaml
+jsonSchemaDialect: https://spec.openapis.org/oas/3.1/dialect/base
+info:
+  title: Full
+  version: "1.0"
+  termsOfService: https://example.com/tos
+  contact:
+    url: https://example.com/contact
+    email: dev@example.com
+  license:
+    name: MIT
+    identifier: MIT
+externalDocs:
+  url: https://example.com/docs
+tags:
+  - name: root
+    externalDocs:
+      url: https://example.com/tag-docs
+  - name: child1
+    parent: root
+  - name: child2
+    parent: root
+servers:
+  - url: /v1
+security:
+  - {}
+  - ApiKeyH: []
+  - ./sec.yaml#ext: []
+  - ../sec.yaml#ext: []
+  - /sec.yaml#ext: []
+  - '#ext': []
+webhooks:
+  onHook:
+    parameters:
+      - name: h_q
+        in: query
+        allowEmptyValue: true
+        schema: { type: string }
+      - $ref: '#/components/parameters/MissingParam'
+    servers:
+      - url: https://{env}.hook.example.com
+        variables:
+          env:
+            default: prod
+            enum: [prod, staging]
+    get:
+      externalDocs:
+        url: https://example.com/hook-docs
+      servers:
+        - url: https://hook2.example.com
+      security:
+        - ApiKeyQ: []
+      requestBody:
+        $ref: '#/components/requestBodies/ChainBody'
+      responses:
+        '2XX':
+          $ref: '#/components/responses/ChainResp'
+        '3XX':
+          $ref: '#/components/responses/CycleResp'
+        '4XX':
+          $ref: '#/components/responses/MissingResp'
+    post:
+      parameters: []
+      responses:
+        '200': { description: ok }
+  qsHook:
+    post:
+      parameters:
+        - name: qs_only
+          in: querystring
+          content:
+            application/x-www-form-urlencoded:
+              example: "a=1"
+              schema: { type: string }
+      responses:
+        '200': { description: ok }
+    put:
+      requestBody:
+        $ref: '#/components/requestBodies/CycleBody'
+      responses:
+        '200':
+          description: ok
+          headers:
+            X-Cyc:
+              $ref: '#/components/headers/CycleHdr'
+    additionalOperations:
+      CUSTOM:
+        externalDocs:
+          url: https://example.com/custom-docs
+        servers:
+          - url: https://hook3.example.com
+        security:
+          - ApiKeyC: []
+        parameters:
+          - name: c_q
+            in: query
+            content:
+              application/json:
+                schema: { type: string }
+        requestBody:
+          content:
+            multipart/mixed:
+              itemSchema: { type: string }
+              prefixEncoding:
+                - contentType: text/plain
+                  headers:
+                    Content-Type:
+                      schema: { type: string }
+                    X-H:
+                      $ref: '#/components/headers/ChainHdr'
+              itemEncoding:
+                contentType: text/plain
+                encoding:
+                  sub:
+                    contentType: text/plain
+                prefixEncoding:
+                  - contentType: text/plain
+                itemEncoding:
+                  contentType: text/plain
+        responses:
+          '200':
+            description: ok
+            headers:
+              Content-Type:
+                schema: { type: string }
+              X-Missing-Ref:
+                $ref: '#/components/headers/DoesNotExist'
+            links:
+              L1:
+                $ref: '#/components/links/ValidLink'
+              L2:
+                operationId: getSomething
+        callbacks:
+          cb1:
+            '{$request.query.url}':
+              get:
+                responses:
+                  '200': { description: ok }
+  refHook:
+    $ref: '#/components/pathItems/SharedPi'
+paths:
+  /ref-path/{id}:
+    $ref: '#/components/pathItems/SharedPi'
+components:
+  x-ext: 123
+  unknownSection: {}
+  pathItems:
+    SharedPi:
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      put:
+        responses: { '200': { description: ok } }
+      delete:
+        responses: { '200': { description: ok } }
+      patch:
+        responses: { '200': { description: ok } }
+      options:
+        responses: { '200': { description: ok } }
+      head:
+        responses: { '200': { description: ok } }
+      trace:
+        responses: { '200': { description: ok } }
+      query:
+        responses: { '200': { description: ok } }
+      additionalOperations:
+        CUSTOM:
+          responses: { '200': { description: ok } }
+    RefPi:
+      $ref: '#/components/pathItems/SharedPi'
+  parameters:
+    ValidContentParam:
+      name: vcp
+      in: query
+      content:
+        application/x-www-form-urlencoded:
+          schema: { type: object }
+          encoding:
+            a:
+              contentType: text/plain
+    BadParam: "not_a_param"
+  requestBodies:
+    ChainBody:
+      $ref: '#/components/requestBodies/TargetBody'
+    TargetBody:
+      content:
+        application/jsonl:
+          itemSchema: { type: string }
+        application/x-ndjson:
+          itemSchema: { type: string }
+        application/json-seq:
+          itemSchema: { type: string }
+        application/geo+json-seq:
+          itemSchema: { type: string }
+        application/vnd.custom+ndjson:
+          itemSchema: { type: string }
+        application/vnd.custom+json-seq:
+          itemSchema: { type: string }
+    CycleBody:
+      $ref: '#/components/requestBodies/CycleBody'
+    BadBody: "not_a_body"
+  responses:
+    ChainResp:
+      $ref: '#/components/responses/TargetResp'
+    TargetResp:
+      description: target
+      headers:
+        X-H:
+          style: simple
+          content:
+            text/plain:
+              schema: { type: string }
+    CycleResp:
+      $ref: '#/components/responses/CycleResp'
+  headers:
+    ChainHdr:
+      $ref: '#/components/headers/TargetHdr'
+    TargetHdr:
+      schema: { type: string }
+    CycleHdr:
+      $ref: '#/components/headers/CycleHdr'
+  links:
+    ValidLink:
+      operationRef: /ref-path/1
+      server:
+        url: https://example.com
+  examples:
+    RefEx:
+      $ref: '#/components/examples/ValEx'
+    ValEx:
+      value: 1
+  mediaTypes:
+    M1:
+      schema: { type: string }
+      examples:
+        e1:
+          value: "ok"
+  securitySchemes:
+    ApiKeyH:
+      type: apiKey
+      name: X-Key
+      in: header
+    ApiKeyQ:
+      type: apiKey
+      name: q_key
+      in: query
+    ApiKeyC:
+      type: apiKey
+      name: c_key
+      in: cookie
+    HttpBearer:
+      type: http
+      scheme: bearer
+    OAuthFull:
+      type: oauth2
+      oauth2MetadataUrl: https://example.com/.well-known/oauth
+      flows:
+        implicit:
+          authorizationUrl: https://example.com/auth
+          refreshUrl: https://example.com/refresh
+          scopes: {}
+        password:
+          tokenUrl: https://example.com/token
+          scopes: {}
+        clientCredentials:
+          tokenUrl: https://example.com/token
+          scopes: {}
+        authorizationCode:
+          authorizationUrl: https://example.com/auth
+          tokenUrl: https://example.com/token
+          scopes: {}
+        deviceAuthorization:
+          deviceAuthorizationUrl: https://example.com/device
+          tokenUrl: https://example.com/token
+          scopes: {}
+    Oidc:
+      type: openIdConnect
+      openIdConnectUrl: https://example.com/.well-known/openid
+    OAuthNoDevice:
+      type: oauth2
+      flows: {}
+    Mtls:
+      type: mutualTLS
+    RefScheme:
+      $ref: '#/components/securitySchemes/Mtls'
+    RefUnresolved:
+      $ref: '#/components/securitySchemes/Missing'
+  schemas:
+    ArrMeta:
+      allOf:
+        - type: string
+          externalDocs:
+            url: https://example.com/s-doc
+          xml:
+            nodeType: element
+            name: item
+            namespace: https://example.com/ns
+            prefix: ex
+        - type: string
+          xml:
+            attribute: false
+            wrapped: true
+"#;
+        let full_doc: ShimOpenApi = serde_yaml::from_str(valid_full_yaml).expect("full_doc");
+        validate_openapi_root(&full_doc).expect("valid full_doc");
+        validate_component_keys(full_doc.components.as_ref().expect("comps")).expect("keys");
+
+        let valid_sw2_yaml = r#"
+swagger: "2.0"
+info:
+  title: Sw2
+  version: "1.0"
+  contact: {}
+  license:
+    name: Apache
+    url: https://example.com/lic
+securityDefinitions:
+  BasicAuth:
+    type: basic
+  OAuthImp:
+    type: oauth2
+    flow: implicit
+    authorizationUrl: https://example.com/auth
+  OAuthPwd:
+    type: oauth2
+    flow: password
+    tokenUrl: https://example.com/token
+  OAuthApp:
+    type: oauth2
+    flow: application
+    tokenUrl: https://example.com/token
+  OAuthCode:
+    type: oauth2
+    flow: accessCode
+    authorizationUrl: https://example.com/auth
+    tokenUrl: https://example.com/token
+security:
+  - BasicAuth: []
+paths:
+  /p:
+    get:
+      parameters:
+        - name: q
+          in: query
+          type: string
+      responses:
+        '200': { description: ok }
+"#;
+        let sw2_doc: ShimOpenApi = serde_yaml::from_str(valid_sw2_yaml).expect("sw2_doc");
+        validate_openapi_root(&sw2_doc).expect("valid sw2_doc");
+
+        let error_yamls = [
+            "openapi: 3.2.0\npaths: {}\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\n",
+            "openapi: 3.2.0\n$self: '   '\ninfo: { title: T, version: '1.0' }\npaths: {}\n",
+            "openapi: 3.2.0\njsonSchemaDialect: 'http://[::1'\ninfo: { title: T, version: '1.0' }\npaths: {}\n",
+            "openapi: 3.2.0\ninfo: { title: '  ', version: '1.0' }\npaths: {}\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '  ' }\npaths: {}\n",
+            "openapi: 3.2.0\ninfo:\n  title: T\n  version: '1.0'\n  contact: { url: 'bad url' }\npaths: {}\n",
+            "openapi: 3.2.0\ninfo:\n  title: T\n  version: '1.0'\n  contact: { email: 'a b@c.com' }\npaths: {}\n",
+            "openapi: 3.2.0\ninfo:\n  title: T\n  version: '1.0'\n  contact: { email: '' }\npaths: {}\n",
+            "openapi: 3.2.0\ninfo:\n  title: T\n  version: '1.0'\n  contact: { email: 'a@b@c.com' }\npaths: {}\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\npaths:\n  /p:\n    get:\n      responses:\n        '200':\n          $ref: '#/components/responses/EmptyDescResp'\ncomponents:\n  responses:\n    EmptyDescResp:\n      description: '  '\n",
+            "openapi: 3.2.0\ninfo:\n  title: T\n  version: '1.0'\n  license: { name: '  ' }\npaths: {}\n",
+            "openapi: 3.2.0\ninfo:\n  title: T\n  version: '1.0'\n  license: { name: MIT, url: 'bad url' }\npaths: {}\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\nexternalDocs: { url: 'bad url' }\npaths: {}\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ntags:\n  - name: t1\n    externalDocs: { url: 'bad url' }\npaths: {}\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  securitySchemes:\n    K:\n      type: apiKey\n      name: ' '\n      in: header\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  securitySchemes:\n    K:\n      type: apiKey\n      name: k\n      in: bad_in\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  securitySchemes:\n    H:\n      type: http\n      scheme: ' '\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  securitySchemes:\n    O:\n      type: oauth2\n      oauth2MetadataUrl: http://insecure.example.com\n      flows: {}\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  securitySchemes:\n    O:\n      type: oauth2\n      flows:\n        implicit: {}\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  securitySchemes:\n    O:\n      type: oauth2\n      flows:\n        password: {}\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\npaths:\n  /p:\n    post:\n      requestBody:\n        content:\n          multipart/mixed:\n            encoding: {}\n            prefixEncoding: []\n      responses:\n        '200': { description: ok }\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\nservers:\n  - url: https://{undef}.example.com\n    variables:\n      other: { default: x }\npaths: {}\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  securitySchemes:\n    O:\n      type: oauth2\n      flows:\n        deviceAuthorization:\n          tokenUrl: https://example.com/token\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  securitySchemes:\n    O:\n      type: oauth2\n      flows:\n        implicit:\n          authorizationUrl: https://example.com/auth\n          refreshUrl: 'not a url'\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  securitySchemes:\n    Oidc:\n      type: openIdConnect\n      openIdConnectUrl: http://insecure.example.com\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  securitySchemes:\n    B:\n      type: basic\n",
+            "swagger: '2.0'\ninfo: { title: T, version: '1.0' }\nsecurityDefinitions:\n  O:\n    type: oauth2\n",
+            "swagger: '2.0'\ninfo: { title: T, version: '1.0' }\nsecurityDefinitions:\n  O:\n    type: oauth2\n    flow: implicit\n",
+            "swagger: '2.0'\ninfo: { title: T, version: '1.0' }\nsecurityDefinitions:\n  O:\n    type: oauth2\n    flow: password\n",
+            "swagger: '2.0'\ninfo: { title: T, version: '1.0' }\nsecurityDefinitions:\n  O:\n    type: oauth2\n    flow: accessCode\n",
+            "swagger: '2.0'\ninfo: { title: T, version: '1.0' }\nsecurityDefinitions:\n  O:\n    type: oauth2\n    flow: accessCode\n    authorizationUrl: https://example.com/auth\n",
+            "swagger: '2.0'\ninfo: { title: T, version: '1.0' }\nsecurityDefinitions:\n  O:\n    type: oauth2\n    flow: unknown_flow\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0', license: { name: Apache } }\nsecurity:\n  - 'not_an_object'\npaths: {}\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\nsecurity:\n  - 'http://[::1': []\npaths: {}\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\npaths:\n  /p:\n    get:\n      parameters:\n        - name: qs\n          in: querystring\n          schema: { type: string }\n      responses:\n        '200': { description: ok }\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\npaths:\n  /p:\n    get:\n      parameters:\n        - name: q\n          in: query\n          content:\n            application/json: {}\n            text/plain: {}\n      responses:\n        '200': { description: ok }\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  headers:\n    H1: 'not_an_obj'\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  headers:\n    H1: { name: bad, schema: { type: string } }\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  headers:\n    H1: { schema: { type: string }, content: { 'text/plain': {} } }\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  headers:\n    H1: {}\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  headers:\n    H1: { content: 'not_an_obj' }\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  headers:\n    H1: { content: {} }\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  headers:\n    H1:\n      content:\n        text/plain:\n          examples: 'not_an_obj'\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  examples: 'not_an_obj'\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  examples:\n    E1: 'not_an_obj'\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  examples:\n    E1:\n      serializedValue: 'a'\n      externalValue: 'b'\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  mediaTypes:\n    M1: 'not_an_obj'\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  mediaTypes:\n    M1:\n      examples: 'not_an_obj'\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\npaths:\n  /p:\n    get:\n      responses:\n        '200':\n          description: ok\n          links: 'not_an_obj'\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\npaths:\n  /p:\n    get:\n      responses:\n        '200':\n          description: ok\n          links:\n            L1: 'not_an_obj'\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\npaths:\n  /p:\n    get:\n      responses:\n        '200':\n          description: ok\n          links:\n            L1:\n              $ref: '#/components/links/Missing'\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\npaths:\n  /p:\n    get:\n      responses:\n        '200':\n          description: ok\n          links:\n            L1:\n              operationId: op1\n              server: 'not_a_server'\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\npaths:\n  no_slash:\n    get:\n      responses:\n        '200': { description: ok }\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\npaths:\n  /a/{x}:\n    parameters:\n      - { name: x, in: path, required: true, schema: { type: string } }\n    get:\n      responses: { '200': { description: ok } }\n  /a/{y}:\n    parameters:\n      - { name: y, in: path, required: true, schema: { type: string } }\n    get:\n      responses: { '200': { description: ok } }\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  schemas: 'not_an_obj'\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  schemas:\n    S1:\n      externalDocs: 'not_an_obj'\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  schemas:\n    S1:\n      externalDocs: {}\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  schemas:\n    S1:\n      xml: 'not_an_obj'\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  schemas:\n    S1:\n      xml: { nodeType: 123 }\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  schemas:\n    S1:\n      xml: { name: 123 }\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  schemas:\n    S1:\n      xml: { attribute: 123 }\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  schemas:\n    S1:\n      allOf:\n        - discriminator: 'not_an_obj'\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  schemas:\n    S1:\n      discriminator: { propertyName: '  ' }\n",
+        ];
+
+        for bad_yaml in error_yamls {
+            let doc: ShimOpenApi = serde_yaml::from_str(bad_yaml).expect("parse bad_yaml");
+            assert!(
+                validate_openapi_root(&doc).is_err(),
+                "expected error for:\n{bad_yaml}"
+            );
+        }
+
+        for bad_comp_yaml in [
+            "securitySchemes:\n  'bad key': { type: mutualTLS }\n",
+            "pathItems:\n  'bad key': {}\n",
+            "schemas:\n  'bad key': {}\n",
+        ] {
+            let comps: ShimComponents = serde_yaml::from_str(bad_comp_yaml).expect("bad_comp");
+            assert!(validate_component_keys(&comps).is_err());
+        }
+        let comps_non_obj: ShimComponents =
+            serde_yaml::from_str("schemas: 'not_an_obj'\n").expect("comps_non_obj");
+        assert!(validate_component_keys(&comps_non_obj).is_ok());
+        assert!(validate_encoding_headers(&serde_json::json!("not_obj"), "ctx", None).is_ok());
+        assert!(validate_media_type_examples(
+            &serde_json::json!({ "text/plain": "not_obj" }),
+            "ctx"
+        )
+        .is_ok());
+        assert!(validate_server_url("http://[::1", "ctx").is_err());
     }
 }

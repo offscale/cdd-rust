@@ -319,5 +319,68 @@ mod tests {
 
         let (code, _var_name) = generate_link_construction(&link);
         assert!(code.contains("replace(\"{id}\", &format!(\"{}\", id))"));
+
+        // Cover resolved_operation_ref, relative operation_ref without '/', join_server_and_path empty server/path, and literal types (number, bool, null, object)
+        let mut params2 = HashMap::new();
+        params2.insert(
+            "query.n".to_string(),
+            LinkParamValue::Literal(serde_json::json!(123)),
+        );
+        params2.insert(
+            "header.b".to_string(),
+            LinkParamValue::Literal(serde_json::json!(true)),
+        );
+        params2.insert(
+            "cookie.nl".to_string(),
+            LinkParamValue::Literal(serde_json::Value::Null),
+        );
+        params2.insert(
+            "querystring.obj".to_string(),
+            LinkParamValue::Literal(serde_json::json!({"k": "v"})),
+        );
+
+        let link2 = ParsedLink {
+            name: "Complex".to_string(),
+            description: None,
+            operation_id: None,
+            operation_ref: Some("relative_no_slash".to_string()),
+            resolved_operation_ref: Some("/{n}/{b}/{nl}/{obj}".to_string()),
+            parameters: params2,
+            request_body: None,
+            server: None,
+            server_url: Some("/".to_string()),
+        };
+        let (code2, _) = generate_link_construction(&link2);
+        assert!(code2.contains("123"));
+        assert!(code2.contains("true"));
+        assert!(code2.contains("\"null\""));
+
+        let link3 = ParsedLink {
+            name: "RelativeRef".to_string(),
+            description: None,
+            operation_id: None,
+            operation_ref: Some("relative_no_slash".to_string()),
+            resolved_operation_ref: None,
+            parameters: HashMap::new(),
+            request_body: None,
+            server: None,
+            server_url: None,
+        };
+        let (code3, _) = generate_link_construction(&link3);
+        assert!(code3.contains("/TODO/unknown-path"));
+
+        let link4 = ParsedLink {
+            name: "EmptyPath".to_string(),
+            description: None,
+            operation_id: None,
+            operation_ref: None,
+            resolved_operation_ref: Some("/".to_string()),
+            parameters: HashMap::new(),
+            request_body: None,
+            server: None,
+            server_url: Some("https://api.example.com/".to_string()),
+        };
+        let (code4, _) = generate_link_construction(&link4);
+        assert!(code4.contains("https://api.example.com"));
     }
 }

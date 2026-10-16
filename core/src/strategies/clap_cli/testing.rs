@@ -370,5 +370,67 @@ Code:
         assert!(custom.contains("augment_args"));
         assert!(custom.contains("--id"));
         assert!(custom.contains("00000000-0000-0000-0000-000000000000"));
+
+        let empty_req = test_request_builder("GET", "/users", "");
+        assert!(!empty_req.contains(".json("));
+
+        let mut route2 = route.clone();
+        route2.handler_name = "do__work".to_string();
+        route2.tags.clear();
+        route2.params = vec![
+            RouteParam {
+                name: "flag".to_string(),
+                source: ParamSource::Path,
+                ty: "bool".to_string(),
+                description: None,
+                example: None,
+                style: None,
+                explode: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                content_media_type: None,
+                raw_schema: None,
+                deprecated: false,
+                extensions: BTreeMap::new(),
+            },
+            RouteParam {
+                name: "name".to_string(),
+                source: ParamSource::Header,
+                ty: "String".to_string(),
+                description: None,
+                example: None,
+                style: None,
+                explode: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                content_media_type: None,
+                raw_schema: None,
+                deprecated: false,
+                extensions: BTreeMap::new(),
+            },
+            RouteParam {
+                name: "ignored".to_string(),
+                source: ParamSource::Query,
+                ty: "String".to_string(),
+                description: None,
+                example: None,
+                style: None,
+                explode: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                content_media_type: None,
+                raw_schema: None,
+                deprecated: false,
+                extensions: BTreeMap::new(),
+            },
+        ];
+        let custom2 = generate_custom_test(&route2, "crate::create_app");
+        assert_valid_rust_syntax(&custom2);
+        assert!(custom2.contains("crate::handlers::default::DoWorkArgs"));
+        assert!(custom2.contains("\"true\""));
+        assert!(custom2.contains("\"test_val\""));
+
+        let custom3 = generate_custom_test(&route2, "");
+        assert!(custom3.contains("crate::handlers::default::DoWorkArgs"));
     }
 }

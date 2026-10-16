@@ -34,9 +34,11 @@ pub fn extract_test_functions(source: &str) -> AppResult<Vec<String>> {
                 .unwrap_or(false)
         });
         if is_test {
-            if let Some(name) = func.name() {
-                names.push(name.text().to_string());
-            }
+            let name = func
+                .name()
+                .map(|n| n.text().to_string())
+                .unwrap_or_default();
+            names.push(name);
         }
     }
 
@@ -56,6 +58,7 @@ mod tests {
         #[actix_web::test]
         async fn async_test_two() {}
 
+        #[allow(dead_code)]
         fn helper_not_a_test() {}
         "#;
         let tests = extract_test_functions(code).expect("must parse");

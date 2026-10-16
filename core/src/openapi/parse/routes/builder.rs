@@ -127,7 +127,7 @@ pub fn parse_path_item(
     add_op("QUERY", path_item.query)?;
 
     if let Some(additional) = &path_item.additional_operations {
-        for method in additional.keys() {
+        for (method, op) in additional {
             if !is_http_token(method) {
                 return Err(AppError::General(format!(
                     "additionalOperations method '{}' must be a valid HTTP token",
@@ -139,11 +139,6 @@ pub fn parse_path_item(
                     "additionalOperations contains reserved HTTP method '{}'",
                     method
                 )));
-            }
-        }
-        for (method, op) in additional {
-            if is_reserved_method(method) {
-                continue;
             }
             add_op(&method.to_ascii_uppercase(), Some(op.clone()))?;
         }
@@ -241,24 +236,6 @@ fn build_route(
         }
     }
 
-    // Extract Swagger 2.0 "in: body" param
-    if request_body.is_none() {
-        if let Some(body_param) = params.iter().find(|p| p.source == ParamSource::Body) {
-            request_body = Some(crate::openapi::parse::models::RequestBodyDefinition {
-                ty: body_param.ty.clone(),
-                description: body_param.description.clone(),
-                media_type: "application/json".to_string(),
-                format: crate::openapi::parse::models::BodyFormat::Json,
-                required: !body_param.ty.starts_with("Option<"),
-                example: None,
-                encoding: None,
-                item_encoding: None,
-                prefix_encoding: None,
-            });
-            params.retain(|p| p.source != ParamSource::Body);
-        }
-    }
-
     // Extract Swagger 2.0 "in: formData" params
     let form_params: Vec<_> = params
         .iter()
@@ -266,7 +243,7 @@ fn build_route(
         .cloned()
         .collect();
     if !form_params.is_empty() && request_body.is_none() {
-        let is_multipart = form_params.iter().any(|p| p.ty == "Vec<u8>");
+        let is_multipart = form_params.iter().any(|p| p.ty.contains("Vec<u8>"));
         request_body = Some(crate::openapi::parse::models::RequestBodyDefinition {
             ty: if is_multipart {
                 "reqwest::multipart::Form".to_string()
@@ -657,22 +634,14 @@ fn resolve_security_scheme(
     if let Some(comps) = components {
         if let Some(schemes) = comps.security_schemes.as_ref() {
             if let Some(ref_or) = schemes.get(name) {
-                if let Some(info) =
-                    resolve_security_scheme_ref_or(ref_or, schemes, comps, registry, base_uri)
-                {
-                    return Some(info);
-                }
+                return resolve_security_scheme_ref_or(ref_or, comps, registry, base_uri);
             }
 
             // URI-form security scheme reference (OAS 3.2).
             let self_uri = comps.self_uri.as_deref();
             if let Some(ref_name) = extract_component_name(name, self_uri, "securitySchemes") {
                 if let Some(ref_or) = schemes.get(&ref_name) {
-                    if let Some(info) =
-                        resolve_security_scheme_ref_or(ref_or, schemes, comps, registry, base_uri)
-                    {
-                        return Some(info);
-                    }
+                    return resolve_security_scheme_ref_or(ref_or, comps, registry, base_uri);
                 }
             }
         }
@@ -680,9 +649,9 @@ fn resolve_security_scheme(
 
     if let Some(registry) = registry {
         if let Some(raw) = registry.resolve_component_ref(name, base_uri, "securitySchemes") {
-            if let Ok(shim) = serde_json::from_value::<ShimSecurityScheme>(raw) {
-                return Some(build_security_scheme_info(&shim));
-            }
+            return serde_json::from_value::<ShimSecurityScheme>(raw)
+                .ok()
+                .map(|shim| build_security_scheme_info(&shim));
         }
     }
 
@@ -691,7 +660,6 @@ fn resolve_security_scheme(
 
 fn resolve_security_scheme_ref_or(
     ref_or: &RefOr<ShimSecurityScheme>,
-    schemes: &BTreeMap<String, RefOr<ShimSecurityScheme>>,
     components: &ShimComponents,
     registry: Option<&DocumentRegistry>,
     base_uri: Option<&Url>,
@@ -699,34 +667,9 @@ fn resolve_security_scheme_ref_or(
     match ref_or {
         RefOr::T(shim) => Some(build_security_scheme_info(shim)),
         RefOr::Ref(r) => {
-            resolve_security_scheme_ref(&r.ref_location, schemes, components, registry, base_uri)
+            resolve_security_scheme(&r.ref_location, Some(components), registry, base_uri)
         }
     }
-}
-
-fn resolve_security_scheme_ref(
-    ref_str: &str,
-    schemes: &BTreeMap<String, RefOr<ShimSecurityScheme>>,
-    components: &ShimComponents,
-    registry: Option<&DocumentRegistry>,
-    base_uri: Option<&Url>,
-) -> Option<SecuritySchemeInfo> {
-    let self_uri = components.self_uri.as_deref();
-    if let Some(ref_name) = extract_component_name(ref_str, self_uri, "securitySchemes") {
-        if let Some(RefOr::T(shim)) = schemes.get(&ref_name) {
-            return Some(build_security_scheme_info(shim));
-        }
-    }
-
-    if let Some(registry) = registry {
-        if let Some(raw) = registry.resolve_component_ref(ref_str, base_uri, "securitySchemes") {
-            if let Ok(shim) = serde_json::from_value::<ShimSecurityScheme>(raw) {
-                return Some(build_security_scheme_info(&shim));
-            }
-        }
-    }
-
-    None
 }
 
 fn build_security_scheme_info(shim: &ShimSecurityScheme) -> SecuritySchemeInfo {
@@ -978,50 +921,624 @@ paths:
             .and_then(|s| s.scheme.clone())
             .expect("expected oidc scheme");
 
-        match oauth.kind {
-            SecuritySchemeKind::OAuth2 {
-                flows,
-                oauth2_metadata_url,
-            } => {
-                assert_eq!(
-                    oauth2_metadata_url.as_deref(),
-                    Some("https://auth.example.com/.well-known/oauth-authorization-server")
-                );
-                assert_eq!(
-                    flows
-                        .authorization_code
-                        .as_ref()
-                        .and_then(|f| f.authorization_url.as_deref()),
-                    Some("https://auth.example.com/authorize")
-                );
-                assert_eq!(
-                    flows
-                        .authorization_code
-                        .as_ref()
-                        .and_then(|f| f.token_url.as_deref()),
-                    Some("https://auth.example.com/token")
-                );
-                assert_eq!(
-                    flows
-                        .authorization_code
-                        .as_ref()
-                        .and_then(|f| f.scopes.get("read")),
-                    Some(&"Read data".to_string())
-                );
-            }
-            _ => panic!("expected OAuth2 security scheme"),
-        }
+        let oauth_dbg = format!("{:?}", oauth.kind);
+        assert!(
+            oauth_dbg.contains("https://auth.example.com/.well-known/oauth-authorization-server")
+        );
+        assert!(oauth_dbg.contains("https://auth.example.com/authorize"));
+        assert!(oauth_dbg.contains("https://auth.example.com/token"));
+        assert!(oauth_dbg.contains("Read data"));
 
-        match oidc.kind {
-            SecuritySchemeKind::OpenIdConnect {
-                open_id_connect_url,
-            } => {
-                assert_eq!(
-                    open_id_connect_url,
-                    "https://auth.example.com/.well-known/openid-configuration"
-                );
+        assert_eq!(
+            oauth.kind,
+            SecuritySchemeKind::OAuth2 {
+                flows: Box::new(crate::openapi::parse::models::OAuthFlows {
+                    implicit: None,
+                    password: None,
+                    client_credentials: None,
+                    authorization_code: Some(crate::openapi::parse::models::OAuthFlow {
+                        authorization_url: Some("https://auth.example.com/authorize".to_string()),
+                        token_url: Some("https://auth.example.com/token".to_string()),
+                        refresh_url: None,
+                        device_authorization_url: None,
+                        scopes: std::iter::once(("read".to_string(), "Read data".to_string()))
+                            .collect(),
+                    }),
+                    device_authorization: None,
+                }),
+                oauth2_metadata_url: Some(
+                    "https://auth.example.com/.well-known/oauth-authorization-server".to_string()
+                ),
             }
-            _ => panic!("expected OpenID Connect security scheme"),
+        );
+
+        assert_eq!(
+            oidc.kind,
+            SecuritySchemeKind::OpenIdConnect {
+                open_id_connect_url: "https://auth.example.com/.well-known/openid-configuration"
+                    .to_string(),
+            }
+        );
+
+        // Cover Swagger 2.0 body & formData (multipart & form), legacy OAuth2 flows (implicit, password, application, accessCode, unknown),
+        // Basic auth, MutualTls, ApiKey (query, cookie, unknown), Ref to local & external securityScheme, empty servers,
+        // non-object security requirement, empty responses, externalDocs, and all tchar characters
+        let mut reg = crate::openapi::parse::registry::DocumentRegistry::new();
+        reg.register_openapi_yaml(
+            "https://example.com/sec.yaml",
+            r#"
+openapi: 3.2.0
+info: { title: Sec, version: "1.0" }
+paths: {}
+components:
+  securitySchemes:
+    ExtMtls:
+      type: mutualTLS
+      description: mTLS
+      deprecated: true
+"#,
+        )
+        .expect("reg");
+
+        let rich_yaml = r#"
+openapi: 3.2.0
+$self: https://example.com/api.yaml
+info: { title: Rich, version: "1.0" }
+components:
+  securitySchemes:
+    QueryKey:
+      type: apiKey
+      name: qk
+      in: query
+    CookieKey:
+      type: apiKey
+      name: ck
+      in: cookie
+    HttpAuth:
+      type: http
+      scheme: bearer
+    RefToLocal:
+      $ref: '#/components/securitySchemes/QueryKey'
+    RefToExt:
+      $ref: 'https://example.com/sec.yaml#/components/securitySchemes/ExtMtls'
+paths:
+  /all-methods:
+    servers: []
+    parameters:
+      - name: shared
+        in: query
+        schema: { type: string }
+    put:
+      parameters:
+        - name: shared
+          in: query
+          schema: { type: string }
+      externalDocs:
+        url: https://example.com/docs
+        description: Docs
+      x-custom: 1
+      security:
+        - {}
+        - QueryKey: []
+          CookieKey: []
+          HttpAuth: []
+          RefToLocal: []
+          RefToExt: []
+          'https://example.com/api.yaml#/components/securitySchemes/CookieKey': []
+          'https://example.com/api.yaml#/components/securitySchemes/MissingUri': []
+      responses:
+        '200': { description: ok }
+    delete:
+      responses: { '200': { description: ok } }
+    patch:
+      responses: { '200': { description: ok } }
+    options:
+      responses: { '200': { description: ok } }
+    head:
+      responses: { '200': { description: ok } }
+    trace:
+      responses: { '200': { description: ok } }
+    query:
+      responses: { '200': { description: ok } }
+    additionalOperations:
+      "M!#$%&'*+-.^_`|~1":
+        responses: { '200': { description: ok } }
+"#;
+        let rich_routes = super::super::parse_openapi_routes_with_registry(
+            rich_yaml,
+            Some(&reg),
+            Some("https://example.com/api.yaml"),
+        )
+        .expect("rich routes");
+        assert_eq!(rich_routes.len(), 8);
+
+        // Cover parse_security_requirements with non-map JSON value, unknown scheme, and fallback ApiKey / Legacy OAuth2 flow
+        let mut fallback_comps: crate::openapi::parse::routes::shims::ShimComponents =
+            serde_yaml::from_str(
+                r#"
+securitySchemes:
+  OtherKey:
+    type: apiKey
+    name: ok
+    in: other
+  RefMissing:
+    $ref: '#/components/securitySchemes/Missing'
+  RefMissingExt:
+    $ref: 'https://example.com/sec.yaml#/components/securitySchemes/MissingExt'
+  RefValidExt:
+    $ref: 'https://example.com/sec.yaml#/components/securitySchemes/ExtMtls'
+  BasicScheme:
+    type: basic
+  OAuthImplicit:
+    type: oauth2
+    flow: implicit
+    authorizationUrl: https://example.com/auth
+  OAuthPassword:
+    type: oauth2
+    flow: password
+    tokenUrl: https://example.com/token
+  OAuthApp:
+    type: oauth2
+    flow: application
+    tokenUrl: https://example.com/token
+  OAuthCode:
+    type: oauth2
+    flow: accessCode
+    authorizationUrl: https://example.com/auth
+    tokenUrl: https://example.com/token
+  OAuthUnknown:
+    type: oauth2
+    flow: custom
+"#,
+            )
+            .expect("fallback_comps");
+        fallback_comps.self_uri = Some("https://example.com/api.yaml".to_string());
+        let _non_map_reqs = super::parse_security_requirements(
+            &[
+                serde_json::json!("not_a_map"),
+                serde_json::json!({
+                    "OtherKey": [],
+                    "RefMissing": [],
+                    "RefMissingExt": [],
+                    "RefValidExt": [],
+                    "BasicScheme": [],
+                    "OAuthImplicit": [],
+                    "OAuthPassword": [],
+                    "OAuthApp": [],
+                    "OAuthCode": [],
+                    "OAuthUnknown": [],
+                    "UnknownDirect": [],
+                    "https://example.com/sec.yaml#/components/securitySchemes/ExtMtls": []
+                }),
+            ],
+            Some(&fallback_comps),
+            Some(&reg),
+            None,
+        );
+        let _ = super::parse_security_requirements(
+            &[serde_json::json!({
+                "https://example.com/sec.yaml#/components/securitySchemes/MissingExt": []
+            })],
+            Some(&crate::openapi::parse::routes::shims::ShimComponents::default()),
+            Some(&reg),
+            None,
+        );
+
+        // Cover Swagger 2.0 body, formData (form and multipart), Basic auth, and legacy OAuth2 flows
+        let sw2_yaml = r#"
+swagger: "2.0"
+info: { title: Sw2, version: "1.0" }
+securityDefinitions:
+  basicAuth:
+    type: basic
+  oauthImplicit:
+    type: oauth2
+    flow: implicit
+    authorizationUrl: https://example.com/auth
+  oauthPassword:
+    type: oauth2
+    flow: password
+    tokenUrl: https://example.com/token
+  oauthApp:
+    type: oauth2
+    flow: application
+    tokenUrl: https://example.com/token
+  oauthCode:
+    type: oauth2
+    flow: accessCode
+    authorizationUrl: https://example.com/auth
+    tokenUrl: https://example.com/token
+paths:
+  /form-url:
+    post:
+      security:
+        - basicAuth: []
+          oauthImplicit: []
+          oauthPassword: []
+          oauthApp: []
+          oauthCode: []
+      parameters:
+        - name: field1
+          in: formData
+          type: string
+          required: true
+      responses:
+        '200': { description: ok }
+  /form-mp:
+    post:
+      parameters:
+        - name: file1
+          in: formData
+          type: file
+      responses:
+        '200': { description: ok }
+"#;
+        let sw2_routes = super::super::parse_openapi_routes(sw2_yaml).expect("sw2 routes");
+        assert_eq!(sw2_routes.len(), 2);
+
+        // Cover parse_path_item error paths and map_server_variable directly
+        let mut p_err = crate::openapi::parse::routes::shims::ShimPathItem {
+            ref_path: None,
+            summary: None,
+            description: None,
+            servers: Some(vec![crate::openapi::parse::routes::shims::ShimServer {
+                url: "https://{env}.example.com".to_string(),
+                description: None,
+                name: None,
+                variables: Some({
+                    let mut m = std::collections::BTreeMap::new();
+                    m.insert(
+                        "env".to_string(),
+                        crate::openapi::parse::routes::shims::ShimServerVariable {
+                            enum_values: None,
+                            default: "prod".to_string(),
+                            description: None,
+                            extensions: std::collections::BTreeMap::new(),
+                        },
+                    );
+                    m
+                }),
+                extensions: std::collections::BTreeMap::new(),
+            }]),
+            parameters: None,
+            get: None,
+            post: None,
+            put: None,
+            delete: None,
+            patch: None,
+            options: None,
+            head: None,
+            trace: None,
+            query: None,
+            additional_operations: Some({
+                let mut m = std::collections::BTreeMap::new();
+                m.insert(
+                    "get".to_string(),
+                    crate::openapi::parse::routes::shims::ShimOperation {
+                        operation_id: None,
+                        summary: None,
+                        description: None,
+                        parameters: None,
+                        request_body: None,
+                        responses: crate::openapi::parse::routes::shims::ShimResponses::from(
+                            utoipa::openapi::Responses::new(),
+                        ),
+                        security: None,
+                        callbacks: None,
+                        tags: None,
+                        deprecated: false,
+                        external_docs: None,
+                        servers: None,
+                        extensions: std::collections::BTreeMap::new(),
+                    },
+                );
+                m
+            }),
+            extensions: std::collections::BTreeMap::new(),
+        };
+        let mut r_out = Vec::new();
+        assert!(super::parse_path_item(
+            &mut r_out,
+            "/res",
+            &p_err,
+            crate::openapi::parse::models::RouteKind::Path,
+            None,
+            true,
+            None,
+            None,
+            &mut std::collections::HashMap::new(),
+            &mut std::collections::HashSet::new(),
+            &std::collections::BTreeMap::new(),
+            None,
+            None,
+        )
+        .is_err());
+
+        // Cover build_route querystring conflicts via common_params + op_params
+        p_err.additional_operations = None;
+        let qs_shim: crate::openapi::parse::resolver::ShimParameter = serde_json::from_value(
+            serde_json::json!({
+                "name": "qs1",
+                "in": "querystring",
+                "content": { "application/x-www-form-urlencoded": { "schema": { "type": "object" } } }
+            }),
+        )
+        .expect("qs1");
+        let qs2_shim: crate::openapi::parse::resolver::ShimParameter = serde_json::from_value(
+            serde_json::json!({
+                "name": "qs2",
+                "in": "querystring",
+                "content": { "application/x-www-form-urlencoded": { "schema": { "type": "object" } } }
+            }),
+        )
+        .expect("qs2");
+        let q_shim: crate::openapi::parse::resolver::ShimParameter =
+            serde_json::from_value(serde_json::json!({
+                "name": "q1",
+                "in": "query",
+                "schema": { "type": "string" }
+            }))
+            .expect("q1");
+
+        p_err.parameters = Some(vec![utoipa::openapi::RefOr::T(qs_shim)]);
+        p_err.get = Some(crate::openapi::parse::routes::shims::ShimOperation {
+            operation_id: None,
+            summary: None,
+            description: None,
+            parameters: Some(vec![utoipa::openapi::RefOr::T(qs2_shim)]),
+            request_body: None,
+            responses: crate::openapi::parse::routes::shims::ShimResponses::from(
+                utoipa::openapi::Responses::new(),
+            ),
+            security: None,
+            callbacks: None,
+            tags: None,
+            deprecated: false,
+            external_docs: None,
+            servers: None,
+            extensions: std::collections::BTreeMap::new(),
+        });
+        assert!(super::parse_path_item(
+            &mut r_out,
+            "/qs-dup",
+            &p_err,
+            crate::openapi::parse::models::RouteKind::Path,
+            None,
+            true,
+            None,
+            None,
+            &mut std::collections::HashMap::new(),
+            &mut std::collections::HashSet::new(),
+            &std::collections::BTreeMap::new(),
+            None,
+            None,
+        )
+        .is_err());
+
+        p_err.get.as_mut().expect("get").parameters = Some(vec![utoipa::openapi::RefOr::T(q_shim)]);
+        assert!(super::parse_path_item(
+            &mut r_out,
+            "/qs-mix",
+            &p_err,
+            crate::openapi::parse::models::RouteKind::Path,
+            None,
+            true,
+            None,
+            None,
+            &mut std::collections::HashMap::new(),
+            &mut std::collections::HashSet::new(),
+            &std::collections::BTreeMap::new(),
+            None,
+            None,
+        )
+        .is_err());
+
+        p_err.get.as_mut().expect("get").parameters = None;
+        super::parse_path_item(
+            &mut r_out,
+            "/qs-ok",
+            &p_err,
+            crate::openapi::parse::models::RouteKind::Path,
+            None,
+            true,
+            None,
+            None,
+            &mut std::collections::HashMap::new(),
+            &mut std::collections::HashSet::new(),
+            &std::collections::BTreeMap::new(),
+            None,
+            None,
+        )
+        .expect("qs ok");
+
+        // Cover formData (form and multipart), duplicate operationId, and validate_path_parameters errors directly in parse_path_item
+        let fd_file: crate::openapi::parse::resolver::ShimParameter =
+            serde_json::from_value(serde_json::json!({
+                "name": "f2",
+                "in": "formData",
+                "type": "file"
+            }))
+            .expect("fd_file");
+        let fd_str: crate::openapi::parse::resolver::ShimParameter =
+            serde_json::from_value(serde_json::json!({
+                "name": "f1",
+                "in": "formData",
+                "type": "string",
+                "required": true
+            }))
+            .expect("fd_str");
+        let path_param_id: crate::openapi::parse::resolver::ShimParameter =
+            serde_json::from_value(serde_json::json!({
+                "name": "id",
+                "in": "path",
+                "required": true,
+                "schema": { "type": "string" }
+            }))
+            .expect("path_param_id");
+
+        p_err.parameters = Some(vec![utoipa::openapi::RefOr::T(fd_str.clone())]);
+        p_err.get.as_mut().expect("get").operation_id = Some("dupId".to_string());
+        let mut op_ids = std::collections::HashSet::new();
+        super::parse_path_item(
+            &mut r_out,
+            "/fd-form",
+            &p_err,
+            crate::openapi::parse::models::RouteKind::Path,
+            None,
+            false,
+            None,
+            None,
+            &mut std::collections::HashMap::new(),
+            &mut op_ids,
+            &std::collections::BTreeMap::new(),
+            None,
+            None,
+        )
+        .expect("fd form");
+        assert!(super::parse_path_item(
+            &mut r_out,
+            "/fd-form-dup",
+            &p_err,
+            crate::openapi::parse::models::RouteKind::Path,
+            None,
+            false,
+            None,
+            None,
+            &mut std::collections::HashMap::new(),
+            &mut op_ids,
+            &std::collections::BTreeMap::new(),
+            None,
+            None,
+        )
+        .is_err());
+
+        p_err.get.as_mut().expect("get").operation_id = None;
+        p_err.get.as_mut().expect("get").request_body = None;
+        p_err.parameters = Some(vec![utoipa::openapi::RefOr::T(fd_str.clone())]);
+        super::parse_path_item(
+            &mut r_out,
+            "/fd-str-no-rb",
+            &p_err,
+            crate::openapi::parse::models::RouteKind::Path,
+            None,
+            false,
+            None,
+            None,
+            &mut std::collections::HashMap::new(),
+            &mut std::collections::HashSet::new(),
+            &std::collections::BTreeMap::new(),
+            None,
+            None,
+        )
+        .expect("fd str no rb");
+
+        p_err.parameters = Some(vec![utoipa::openapi::RefOr::T(fd_file.clone())]);
+        super::parse_path_item(
+            &mut r_out,
+            "/fd-mp-no-rb",
+            &p_err,
+            crate::openapi::parse::models::RouteKind::Path,
+            None,
+            false,
+            None,
+            None,
+            &mut std::collections::HashMap::new(),
+            &mut std::collections::HashSet::new(),
+            &std::collections::BTreeMap::new(),
+            None,
+            None,
+        )
+        .expect("fd mp no rb");
+
+        p_err.get.as_mut().expect("get").request_body = Some(utoipa::openapi::RefOr::T(
+            serde_json::from_value(serde_json::json!({
+                "required": true,
+                "content": { "application/json": { "schema": { "type": "string" } } }
+            }))
+            .expect("rb true"),
+        ));
+        p_err.parameters = Some(vec![utoipa::openapi::RefOr::T(fd_file.clone())]);
+        super::parse_path_item(
+            &mut r_out,
+            "/fd-mp-with-rb",
+            &p_err,
+            crate::openapi::parse::models::RouteKind::Path,
+            None,
+            false,
+            None,
+            None,
+            &mut std::collections::HashMap::new(),
+            &mut std::collections::HashSet::new(),
+            &std::collections::BTreeMap::new(),
+            None,
+            None,
+        )
+        .expect("fd mp with rb");
+
+        let mut p_empty_add = p_err.clone();
+        let mut add_map = std::collections::BTreeMap::new();
+        add_map.insert("".to_string(), p_err.get.clone().expect("get"));
+        p_empty_add.additional_operations = Some(add_map);
+        assert!(super::parse_path_item(
+            &mut r_out,
+            "/empty-add",
+            &p_empty_add,
+            crate::openapi::parse::models::RouteKind::Path,
+            None,
+            false,
+            None,
+            None,
+            &mut std::collections::HashMap::new(),
+            &mut std::collections::HashSet::new(),
+            &std::collections::BTreeMap::new(),
+            None,
+            None,
+        )
+        .is_err());
+
+        p_err.get.as_mut().expect("get").request_body = Some(utoipa::openapi::RefOr::T(
+            serde_json::from_value(serde_json::json!({
+                "required": false,
+                "content": { "application/json": { "schema": false } }
+            }))
+            .expect("rb false"),
+        ));
+        p_err.parameters = Some(vec![utoipa::openapi::RefOr::T(fd_file)]);
+        super::parse_path_item(
+            &mut r_out,
+            "/fd-mp",
+            &p_err,
+            crate::openapi::parse::models::RouteKind::Path,
+            None,
+            false,
+            None,
+            None,
+            &mut std::collections::HashMap::new(),
+            &mut std::collections::HashSet::new(),
+            &std::collections::BTreeMap::new(),
+            None,
+            None,
+        )
+        .expect("fd mp");
+
+        p_err.parameters = Some(vec![utoipa::openapi::RefOr::T(path_param_id)]);
+        for bad_path in ["/items/{id}/{id}", "/items/{id}/{other}", "/items"] {
+            assert!(super::parse_path_item(
+                &mut r_out,
+                bad_path,
+                &p_err,
+                crate::openapi::parse::models::RouteKind::Path,
+                None,
+                true,
+                None,
+                None,
+                &mut std::collections::HashMap::new(),
+                &mut std::collections::HashSet::new(),
+                &std::collections::BTreeMap::new(),
+                None,
+                None,
+            )
+            .is_err());
         }
     }
 }

@@ -195,13 +195,14 @@ mod tests {
         };
 
         let diffs = calculate_diff(code, "User", &target).expect("Failed to calculate diff");
-        assert_eq!(diffs.len(), 1);
-        if let Diff::MissingField { name, ty } = &diffs[0] {
-            assert_eq!(name, "email");
-            assert_eq!(ty, "String");
-        } else {
-            panic!("Wrong diff type");
-        }
+        assert_eq!(
+            diffs,
+            vec![Diff::MissingField {
+                name: "email".into(),
+                ty: "String".into(),
+            }]
+        );
+        assert_eq!(diffs[0].to_string(), "Missing field 'email': String");
     }
 
     #[test]
@@ -220,6 +221,10 @@ mod tests {
 
         let diffs = calculate_diff(code, "User", &target).expect("Failed to calculate diff");
         assert_eq!(diffs.len(), 1);
+        assert_eq!(
+            diffs[0].to_string(),
+            "Type mismatch on 'id': found 'i64', expected 'i32'"
+        );
     }
 
     #[test]
@@ -244,6 +249,12 @@ mod tests {
 
         let diffs = calculate_diff(code, "User", &target).expect("Failed to calculate diff");
         assert_eq!(diffs.len(), 1);
+        assert_eq!(
+            diffs[0].to_string(),
+            "Field 'uid' renamed to 'user_id' (keyed by 'id')"
+        );
+
+        assert!(calculate_diff("struct Other {}", "User", &target).is_err());
     }
 
     #[test]

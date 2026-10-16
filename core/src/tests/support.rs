@@ -141,9 +141,7 @@ pub fn select_media_type(content: &Map<String, Value>) -> Option<(String, &Value
 
     if let Some((key, media)) = content.iter().find(|(k, _)| {
         let normalized = normalize_media_type(k);
-        normalized.ends_with("+json")
-            || normalized == "application/*+json"
-            || is_sequential_json_media_type(&normalized)
+        normalized.ends_with("+json") || is_sequential_json_media_type(&normalized)
     }) {
         return Some((key.clone(), media));
     }
@@ -401,10 +399,18 @@ mod tests {
             media_type_specificity("application/*", "application/json"),
             Some(1)
         );
+        assert_eq!(
+            media_type_specificity("*+json", "application/problem+json"),
+            Some(1)
+        );
         assert_eq!(media_type_specificity("*/*", "application/json"), Some(0));
         assert_eq!(media_type_specificity("text/*", "application/json"), None);
         assert_eq!(
             media_type_specificity("application/*+xml", "application/json"),
+            None
+        );
+        assert_eq!(
+            media_type_specificity("application/xml", "application/json"),
             None
         );
     }
@@ -422,6 +428,17 @@ mod tests {
             select_media_type_for_response(map, "application/problem+json").expect("matched");
         assert_eq!(matched_key, "application/problem+json");
 
+        let reverse_order_val = json!({
+            "application/problem+json": {"schema": {"type": "object"}},
+            "*/*": {"schema": {"type": "string"}}
+        });
+        let (rev_key, _) = select_media_type_for_response(
+            reverse_order_val.as_object().expect("map"),
+            "application/problem+json",
+        )
+        .expect("matched");
+        assert_eq!(rev_key, "application/problem+json");
+
         let (default_key, _) = select_media_type(map).expect("selected");
         assert_eq!(default_key, "application/json");
 
@@ -431,6 +448,22 @@ mod tests {
                 .expect("selected")
                 .0,
             "application/vnd+json"
+        );
+
+        let wildcard_json_map = json!({"application/*+json": {}});
+        assert_eq!(
+            select_media_type(wildcard_json_map.as_object().expect("map"))
+                .expect("selected")
+                .0,
+            "application/*+json"
+        );
+
+        let seq_json_map = json!({"application/jsonl": {}});
+        assert_eq!(
+            select_media_type(seq_json_map.as_object().expect("map"))
+                .expect("selected")
+                .0,
+            "application/jsonl"
         );
 
         let text_plain_map = json!({"text/plain": {}});
@@ -495,6 +528,7 @@ mod tests {
             select_response_for_status(&responses, 500).expect("500")["description"],
             "fallback"
         );
+        assert!(select_response_for_status(&json!("not-an-object"), 200).is_none());
     }
 
     #[test]
@@ -502,10 +536,12 @@ mod tests {
         let openapi = json!({
             "components": {
                 "responses": {
-                    "NotFound": {"description": "orig", "summary": "orig_sum"}
+                    "NotFound": {"description": "orig", "summary": "orig_sum"},
+                    "NonObj": "scalar-resp"
                 },
                 "headers": {
-                    "X-Rate": {"description": "rate", "schema": {"type": "integer"}}
+                    "X-Rate": {"description": "rate", "schema": {"type": "integer"}},
+                    "NonObjHdr": "scalar-hdr"
                 }
             },
             "responses": {
@@ -517,6 +553,12 @@ mod tests {
         let resolved_resp = resolve_response_ref(&resp_ref, &openapi);
         assert_eq!(resolved_resp["description"], "override");
         assert_eq!(resolved_resp["summary"], "sum_override");
+
+        let resp_non_obj = json!({"$ref": "#/components/responses/NonObj"});
+        assert_eq!(
+            resolve_response_ref(&resp_non_obj, &openapi),
+            json!("scalar-resp")
+        );
 
         let legacy_ref = json!({"$ref": "#/responses/Legacy"});
         assert_eq!(
@@ -534,10 +576,22 @@ mod tests {
         let resolved_hdr = resolve_header_ref(&hdr_ref, &openapi);
         assert_eq!(resolved_hdr["description"], "hdr_override");
         assert_eq!(resolved_hdr["summary"], "hdr_sum");
+
+        let hdr_ref_no_overrides = json!({"$ref": "#/components/headers/X-Rate"});
+        let resolved_hdr_plain = resolve_header_ref(&hdr_ref_no_overrides, &openapi);
+        assert_eq!(resolved_hdr_plain["description"], "rate");
+
+        let hdr_non_obj = json!({"$ref": "#/components/headers/NonObjHdr"});
+        assert_eq!(
+            resolve_header_ref(&hdr_non_obj, &openapi),
+            json!("scalar-hdr")
+        );
+
         assert_eq!(resolve_header_ref(&unknown_ref, &openapi), unknown_ref);
         assert_eq!(resolve_header_ref(&non_ref, &openapi), non_ref);
 
         let seq_lines = r#"{"a":1}
+not-json
 
 {"b":2}"#;
         assert_eq!(
@@ -552,8 +606,11 @@ mod tests {
 event: update
 id: 42
 retry: 1000
+unknown: ignored
 data: line1
-data: line2
+data:line2
+
+event: nodata
 
 retry: bad_int
 data: second
@@ -564,8 +621,15 @@ data: second
             events,
             json!([
                 {"event": "update", "id": "42", "retry": 1000, "data": expected_data},
+                {"event": "nodata"},
                 {"retry": "bad_int", "data": "second"}
             ])
+        );
+
+        let sse_empty_trailing = "\n\nevent: ping\n\n";
+        assert_eq!(
+            parse_event_stream(sse_empty_trailing),
+            json!([{"event": "ping"}])
         );
     }
 }

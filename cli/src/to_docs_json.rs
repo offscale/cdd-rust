@@ -124,33 +124,22 @@ fn build_strategy_snippet(
         .trim();
 
     // Split function signature line (`pub async fn ... {`) from inner body and closing `}`
-    let (sig_wrapper, inner_body, closing) = if let Some(open_brace) = handler_part.find('{') {
-        let before_brace = handler_part[..=open_brace].trim().to_string();
-        let after_brace = &handler_part[open_brace + 1..];
-        let body_trimmed = after_brace
-            .trim_end()
-            .strip_suffix('}')
-            .unwrap_or(after_brace)
-            .trim()
-            .to_string();
-        (before_brace, body_trimmed, "}".to_string())
-    } else {
-        (
-            default_wrapper_start.to_string(),
-            handler_part.to_string(),
-            "}".to_string(),
-        )
-    };
+    let open_brace = handler_part.find('{').unwrap_or(0);
+    let sig_wrapper = handler_part[..=open_brace].trim().to_string();
+    let after_brace = &handler_part[open_brace + 1..];
+    let inner_body = after_brace
+        .trim_end()
+        .strip_suffix('}')
+        .unwrap_or(after_brace)
+        .trim()
+        .to_string();
+    let closing = "}".to_string();
 
-    let wrapper_start_str = if default_wrapper_start.is_empty() {
-        sig_wrapper
-    } else {
-        format!(
-            "{}
-{}",
-            default_wrapper_start, sig_wrapper
-        )
-    };
+    let wrapper_start_str = [default_wrapper_start, sig_wrapper.as_str()]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
 
     Ok(CodeComponents {
         imports: if no_imports { None } else { Some(raw_imports) },
@@ -329,6 +318,8 @@ webhooks:
           text/plain:
             schema:
               type: string
+      servers:
+        - url: https://hooks.api.com
       responses:
         '200':
           description: OK
@@ -426,5 +417,15 @@ paths: {}
             output: Some("/nonexistent_dir_xyz/output.json".to_string()),
         };
         assert!(run_to_docs_json(&bad_out).is_err());
+
+        let mut bad_yaml = NamedTempFile::new().expect("Failed to create temp file");
+        write!(bad_yaml, "not_openapi: [").expect("Failed to write");
+        let bad_parse = ToDocsJsonArgs {
+            input: bad_yaml.path().to_string_lossy().to_string(),
+            no_imports: false,
+            no_wrapping: false,
+            output: None,
+        };
+        assert!(run_to_docs_json(&bad_parse).is_err());
     }
 }

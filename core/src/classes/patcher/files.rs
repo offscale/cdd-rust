@@ -59,5 +59,8 @@ mod tests {
         let res = add_import(code, "use foo::Bar;").expect("Failed to add import");
         assert!(res.contains("use std::io;"));
         assert!(res.contains("use foo::Bar;"));
+
+        let duplicate = add_import(&res, "use foo::Bar;").expect("duplicate import");
+        assert_eq!(duplicate, res);
     }
 }

@@ -67,8 +67,7 @@ impl RuntimeExpression {
     ///
     /// If the value is not a runtime expression (does not start with `$` and
     /// contains no `{...}` runtime segments), the value is accepted as a literal.
-    pub fn parse(s: impl AsRef<str>) -> AppResult<Self> {
-        let raw = s.as_ref();
+    pub fn parse(raw: &str) -> AppResult<Self> {
         let normalized = normalize_runtime_expression(raw);
         if normalized.starts_with('$') {
             validate_runtime_expression(&normalized)?;
@@ -85,8 +84,7 @@ impl RuntimeExpression {
     /// Parses and validates a required runtime expression or template.
     ///
     /// This rejects literals and requires at least one valid runtime expression.
-    pub fn parse_expression(s: impl AsRef<str>) -> AppResult<Self> {
-        let raw = s.as_ref();
+    pub fn parse_expression(raw: &str) -> AppResult<Self> {
         let normalized = normalize_runtime_expression(raw);
         if normalized.starts_with('$') {
             validate_runtime_expression(&normalized)?;
@@ -748,8 +746,8 @@ pub enum ParamSource {
 
 fn normalize_runtime_expression(raw: &str) -> String {
     let trimmed = raw.trim();
-    if trimmed.starts_with('{') && trimmed.ends_with('}') && trimmed.len() >= 2 {
-        let inner = trimmed[1..trimmed.len() - 1].trim();
+    if let Some(inner) = trimmed.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
+        let inner = inner.trim();
         if inner.starts_with('$') {
             return inner.to_string();
         }
@@ -1464,15 +1462,14 @@ pub struct ExtensionKey(String);
 
 impl ExtensionKey {
     /// Constructs a validated `ExtensionKey` enforcing the `x-` prefix.
-    pub fn parse(raw: impl Into<String>) -> AppResult<Self> {
-        let s = raw.into();
-        if !s.starts_with("x-") || s.len() <= 2 {
+    pub fn parse(raw: &str) -> AppResult<Self> {
+        if !raw.starts_with("x-") || raw.len() <= 2 {
             return Err(AppError::General(format!(
                 "Specification extension key '{}' must start with 'x-'",
-                s
+                raw
             )));
         }
-        Ok(Self(s))
+        Ok(Self(raw.to_string()))
     }
 
     /// Returns the extension key string slice.
@@ -1487,7 +1484,7 @@ impl<'de> serde::Deserialize<'de> for ExtensionKey {
         D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        Self::parse(s).map_err(serde::de::Error::custom)
+        Self::parse(&s).map_err(serde::de::Error::custom)
     }
 }
 
@@ -1740,11 +1737,20 @@ mod tests {
         assert_eq!(custom.to_lowercase_str(), "propfind");
         assert_eq!(format!("{}", custom), "PROPFIND");
         assert!(CustomHttpMethod::parse("bad method").is_err());
+        assert!(CustomHttpMethod::parse("").is_err());
 
         assert_eq!(
             "200".parse::<StatusCodeSpec>().expect("200"),
             StatusCodeSpec::Code(200)
         );
+        assert_eq!(
+            "200"
+                .parse::<StatusCodeSpec>()
+                .expect("200")
+                .representative_code(),
+            200
+        );
+        assert!("099".parse::<StatusCodeSpec>().is_err());
         assert_eq!(
             "2XX".parse::<StatusCodeSpec>().expect("2XX"),
             StatusCodeSpec::Range(StatusRange::Success2xx)
@@ -1848,6 +1854,7 @@ mod tests {
         let ext = ExtensionKey::parse("x-rate-limit").expect("ext");
         assert_eq!(ext.as_str(), "x-rate-limit");
         assert!(ExtensionKey::parse("rate-limit").is_err());
+        assert!(ExtensionKey::parse("x-").is_err());
         let deser_ext: ExtensionKey = serde_json::from_str("\"x-custom\"").expect("deser ext");
         assert_eq!(deser_ext.as_str(), "x-custom");
         assert!(serde_json::from_str::<ExtensionKey>("\"invalid\"").is_err());
@@ -1866,6 +1873,21 @@ mod tests {
         assert_eq!(
             RustType::parse("Secret<String>"),
             RustType::Secret(Box::new(RustType::String))
+        );
+        assert_eq!(
+            RustType::parse("std::collections::HashMap<String, i32>"),
+            RustType::HashMap(
+                Box::new(RustType::String),
+                Box::new(RustType::Primitive(PrimitiveType::I32))
+            )
+        );
+        assert_eq!(
+            RustType::parse("std::collections::BTreeMap<String, serde_json::Value>"),
+            RustType::BTreeMap(Box::new(RustType::String), Box::new(RustType::Value))
+        );
+        assert_eq!(
+            RustType::parse("Vec<String>"),
+            RustType::Vec(Box::new(RustType::String))
         );
         assert_eq!(
             RustType::parse("HashMap<String, i32>"),
@@ -1968,9 +1990,174 @@ mod tests {
             ContentMediaType::Json
         );
 
-        match ContentMediaType::from_media_type("text/plain") {
-            ContentMediaType::Other(val) => assert_eq!(val, "text/plain"),
-            _ => panic!("Expected Other for text/plain"),
+        assert_eq!(
+            ContentMediaType::from_media_type("text/plain"),
+            ContentMediaType::Other("text/plain".to_string())
+        );
+        assert_eq!(
+            ContentMediaType::FormUrlEncoded.as_str(),
+            "application/x-www-form-urlencoded"
+        );
+        assert_eq!(ContentMediaType::Json.as_str(), "application/json");
+        assert_eq!(
+            ContentMediaType::Other("text/plain".to_string()).as_str(),
+            "text/plain"
+        );
+        assert_eq!(
+            ContentMediaType::from_media_type("application/*+json"),
+            ContentMediaType::Json
+        );
+
+        // Cover OAuthFlows::is_empty, SecurityRequirementGroup::anonymous, ExampleValue::is_external
+        let empty_flows = super::OAuthFlows {
+            implicit: None,
+            password: None,
+            client_credentials: None,
+            authorization_code: None,
+            device_authorization: None,
+        };
+        assert!(empty_flows.is_empty());
+        let sample_flow = super::OAuthFlow {
+            authorization_url: None,
+            device_authorization_url: None,
+            token_url: None,
+            refresh_url: None,
+            scopes: std::collections::BTreeMap::new(),
+        };
+        for flows in [
+            super::OAuthFlows {
+                implicit: Some(sample_flow.clone()),
+                ..empty_flows.clone()
+            },
+            super::OAuthFlows {
+                password: Some(sample_flow.clone()),
+                ..empty_flows.clone()
+            },
+            super::OAuthFlows {
+                client_credentials: Some(sample_flow.clone()),
+                ..empty_flows.clone()
+            },
+            super::OAuthFlows {
+                authorization_code: Some(sample_flow.clone()),
+                ..empty_flows.clone()
+            },
+            super::OAuthFlows {
+                device_authorization: Some(sample_flow),
+                ..empty_flows
+            },
+        ] {
+            assert!(!flows.is_empty());
         }
+
+        for m in [
+            "GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD", "TRACE", "QUERY",
+        ] {
+            let parsed = m.parse::<HttpMethod>().expect("method");
+            assert_eq!(parsed.as_str(), m);
+        }
+
+        for (s, code) in [
+            ("1XX", 100),
+            ("2XX", 200),
+            ("3XX", 302),
+            ("4XX", 400),
+            ("5XX", 500),
+            ("default", 200),
+        ] {
+            let spec = s.parse::<StatusCodeSpec>().expect("spec");
+            assert_eq!(spec.representative_code(), code);
+            assert_eq!(spec.to_string(), s);
+        }
+
+        let anon = super::SecurityRequirementGroup::anonymous();
+        assert!(anon.is_anonymous());
+
+        let ext_ex = super::ExampleValue::external(json!("http://example.com"));
+        assert!(ext_ex.is_external());
+        assert!(ext_ex.is_serialized());
+        let data_ex = super::ExampleValue::data(json!(1)).with_overrides(None, None);
+        assert!(!data_ex.is_external());
+
+        // Cover RuntimeExpression::parse and parse_expression branches
+        for valid_expr in [
+            "$url",
+            "$method",
+            "$statusCode",
+            "$request.header.X-Custom!#$%&'*+-.^_`|~0",
+            "$request.query.q",
+            "$request.path.p",
+            "$request.body",
+            "$request.body#",
+            "$request.body#/a~0b/c~1d",
+            "$response.body#/ok",
+            "prefix-{not_expr}-{unclosed-{$url}-suffix",
+            "{$url}",
+            "{$url}{unclosed",
+            "{plain}",
+        ] {
+            assert!(RuntimeExpression::parse(valid_expr).is_ok());
+        }
+        assert!(RuntimeExpression::parse_expression("no_expr_at_all").is_err());
+        assert!(RuntimeExpression::parse("bad-template-{$invalid}").is_err());
+
+        for invalid_expr in [
+            "$unknown",
+            "$request.unknown",
+            "$request.header.",
+            "$request.header.bad header",
+            "$request.query.",
+            "$request.path.",
+            "$request.body_invalid",
+            "$request.body#no_slash",
+            "$request.body#/~2",
+            "$request.body#/~",
+        ] {
+            assert!(RuntimeExpression::parse(invalid_expr).is_err());
+            assert!(RuntimeExpression::parse_expression(invalid_expr).is_err());
+        }
+
+        // Cover StatusCodeSpec edge cases
+        assert!("99".parse::<StatusCodeSpec>().is_err());
+        assert!("abc".parse::<StatusCodeSpec>().is_err());
+
+        // Cover MediaType edge cases
+        let mt_no_slash = MediaType::parse("application; flag");
+        assert_eq!(mt_no_slash.top_type, "application");
+        assert_eq!(mt_no_slash.subtype, "*");
+        assert!(MediaType::parse("application/x-ndjson").is_sequential_json());
+        assert!(MediaType::parse("application/json-seq").is_sequential_json());
+        assert!(MediaType::parse("application/geo+json-seq").is_sequential_json());
+        assert!(MediaType::parse("application/vnd.custom+jsonl").is_sequential_json());
+        assert!(MediaType::parse("application/vnd.custom+ndjson").is_sequential_json());
+        assert!(MediaType::parse("application/vnd.custom+json-seq").is_sequential_json());
+        assert!(MediaType::parse("application/*+json").is_json());
+        assert!(MediaType::parse("application/xml").is_text());
+        assert!(MediaType::parse("application/atom+xml").is_text());
+        assert!(!MediaType::parse("application/octet-stream").is_text());
+        assert!(!MediaType::parse("text/plain").is_event_stream());
+        assert!(!MediaType::parse("application/json").is_form_urlencoded());
+
+        // Cover RustIdent and RustType edge cases
+        assert_eq!(RustIdent::sanitize_snake("---", "fb").as_str(), "fb");
+        assert_eq!(RustIdent::sanitize_snake("a__b__", "fb").as_str(), "a_b");
+        assert_eq!(RustIdent::sanitize_pascal("---", "Fb").as_str(), "Fb");
+        assert_eq!(
+            RustIdent::sanitize_pascal("Self", "Type").as_str(),
+            "SelfType"
+        );
+        assert_eq!(
+            RustType::parse("HashMap<Unclosed>"),
+            RustType::Custom(RustIdent::sanitize_pascal(
+                "HashMap<Unclosed>",
+                "CustomType"
+            ))
+        );
+        assert_eq!(
+            RustType::parse("BTreeMap<Unclosed>"),
+            RustType::Custom(RustIdent::sanitize_pascal(
+                "BTreeMap<Unclosed>",
+                "CustomType"
+            ))
+        );
     }
 }
