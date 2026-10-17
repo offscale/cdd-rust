@@ -386,17 +386,18 @@ fn resolve_request_body_from_components(
         });
     }
 
-    let (raw, comps_override, base_override) = registry?.resolve_component_ref_with_components(
-        &r.ref_location,
-        base_uri,
-        "requestBodies",
-    )?;
-    let body = serde_json::from_value::<ShimRequestBody>(raw).ok()?;
-    Some(ResolvedRequestBody {
-        body,
-        components: comps_override,
-        base_uri: base_override,
-    })
+    registry
+        .and_then(|reg| {
+            reg.resolve_component_ref_with_components(&r.ref_location, base_uri, "requestBodies")
+        })
+        .and_then(|(raw, comps_override, base_override)| {
+            let body = serde_json::from_value::<ShimRequestBody>(raw).ok()?;
+            Some(ResolvedRequestBody {
+                body,
+                components: comps_override,
+                base_uri: base_override,
+            })
+        })
 }
 
 /// Extracts a single example value for a media type, respecting OAS 3.2 example fields.

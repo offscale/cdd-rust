@@ -71,10 +71,20 @@ pub fn run_mcp_server(args: &McpArgs) -> AppResult<()> {
 pub fn serve_mcp(_args: &McpArgs) -> AppResult<()> {
     let mut stdout = io::stdout();
     #[cfg(not(coverage))]
-    let mut reader = io::stdin().lock();
+    {
+        if std::env::var_os("CDD_MCP_TEST_EOF").is_some() {
+            let mut reader = io::empty();
+            serve_mcp_inner(&mut reader, &mut stdout)
+        } else {
+            let mut reader = io::stdin().lock();
+            serve_mcp_inner(&mut reader, &mut stdout)
+        }
+    }
     #[cfg(coverage)]
-    let mut reader = io::empty();
-    serve_mcp_inner(&mut reader, &mut stdout)
+    {
+        let mut reader = io::empty();
+        serve_mcp_inner(&mut reader, &mut stdout)
+    }
 }
 
 /// Inner loop for the MCP server, taking `BufRead` and `Write` trait objects for testability.

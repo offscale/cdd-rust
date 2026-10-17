@@ -170,14 +170,15 @@ pub fn handler_signature(route: &crate::openapi::parse::ParsedRoute, args: &[Str
         } else {
             "json"
         };
+        let prefix = if is_multipart { "" } else { "&" };
 
         if body_arg.contains("Option<") {
             body.push_str(&format!(
-                "    if let Some(b) = body {{ req = req.{}(&b); }}\n",
-                method
+                "    if let Some(b) = body {{ req = req.{}({}b); }}\n",
+                method, prefix
             ));
         } else {
-            body.push_str(&format!("    req = req.{}(&body);\n", method));
+            body.push_str(&format!("    req = req.{}({}body);\n", method, prefix));
         }
     }
 
@@ -372,7 +373,7 @@ mod tests {
             &route,
             &["id: i64".to_string(), "body: Option<Form>".to_string()],
         );
-        assert!(sig_mp.contains("req.multipart(&b)"));
+        assert!(sig_mp.contains("req.multipart(b)"));
         assert!(sig_mp.contains("Result<reqwest::Response, reqwest::Error>"));
 
         // No response type and no response headers

@@ -211,7 +211,11 @@ pub fn generate_custom_test(
 
     // 5. Body
     if let Some(def) = &route.request_body {
-        let body_type = def.ty.clone();
+        let body_type = if def.ty == "Multipart" {
+            "reqwest::multipart::Form".to_string()
+        } else {
+            def.ty.clone()
+        };
 
         let mut full_body_type = body_type.clone();
         if body_type.starts_with("Vec<") && !body_type.starts_with("Vec<u8>") {
@@ -569,12 +573,20 @@ mod tests {
         }];
         {
             let rb = r3.request_body.as_mut().expect("request_body");
-            rb.ty = "reqwest::multipart::Form".to_string();
+            rb.ty = "Multipart".to_string();
             rb.required = true;
         }
         let custom3 = generate_custom_test(&r3, "");
         assert!(custom3.contains("reqwest::multipart::Form::new()"));
         assert!(custom3.contains("expected 200 OK and valid JSON parsing"));
+
+        {
+            let rb = r3.request_body.as_mut().expect("request_body");
+            rb.ty = "reqwest::multipart::Form".to_string();
+            rb.required = true;
+        }
+        let custom3_explicit = generate_custom_test(&r3, "");
+        assert!(custom3_explicit.contains("reqwest::multipart::Form::new()"));
 
         let mut r4 = route.clone();
         r4.handler_name = "other-op".to_string();

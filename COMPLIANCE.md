@@ -8,3 +8,22 @@
 ## Conformance Verification
 
 The toolchain has been fully verified against the universal conformance suite via `../scripts/check_all_conformance.sh`. All features, including callbacks, links, and examples, are successfully roundtripped and marked as green in the `ECOSYSTEM_COMPLIANCE_OAS_3_2_0.md` tracking document.
+## Support Matrix
+
+| Specification Concept       | Status |
+| --------------------------- | ------ |
+| Info Object                 | ✅     |
+| Server Object               | ✅     |
+| Components Object           | ✅     |
+| Paths Object                | ✅     |
+| Path Item Object            | ✅     |
+| Operation Object            | ✅     |
+| Parameter Object            | ✅     |
+| Request Body Object         | ✅     |
+| Responses Object            | ✅     |
+| Responses / Schema Object   | ✅     |
+| Reference Object (`$ref`)   | ✅     |
+| OAuth Flows                 | ✅     |
+| Security Requirement Object | ✅     |
+| Links / Callbacks           | ✅     |
+| Webhooks                    | ✅     |

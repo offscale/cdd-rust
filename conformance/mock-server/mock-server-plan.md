@@ -21,7 +21,7 @@ This document provides a granular, step-by-step checklist to implement an orthog
 - [x] **100% Doc Coverage:** Write docstrings for all DAO interfaces, explaining the input, output, and behavior of every data access method.
 - [x] **Stub DAOs (Traditional Scaffold):**
   - [x] Implement "Stub" versions of the DAOs.
-  - [x] Fill these with traditional scaffold bodies: they should return empty responses, static defaults, or explicitly raise `NotImplementedError` (or `unimplemented!()`, `panic!("Not implemented")` depending on the language).
+  - [x] Fill these with traditional scaffold bodies — they should return empty responses, static defaults, or explicitly raise `NotImplementedError` (or `unimplemented!()`, `panic!("Not implemented")` depending on the language).
 - [x] **Concrete DAOs (Actual Data Stuff):**
   - [x] Implement the DB-backed DAOs using the chosen ORM/Query Builder.
   - [x] **100% Doc Coverage:** Document the concrete and stub DAO implementations.
@@ -57,8 +57,8 @@ This document provides a granular, step-by-step checklist to implement an orthog
 ## Phase 5: CLI & Server Entrypoint Integration (Orthogonal Options)
 - [x] Open the main server entrypoint and CLI parser configuration.
 - [x] Register **two independent boolean flags** for the server CLI command:
-  - [x] `--ephemeral`: Triggers the Concrete DAOs and overrides `DATABASE_URL` with a throwaway database.
-  - [x] `--seed`: Runs the fake data seeder on startup (requires a concrete DB connection).
+  - [x] `--ephemeral` — Triggers the Concrete DAOs and overrides `DATABASE_URL` with a throwaway database.
+  - [x] `--seed` — Runs the fake data seeder on startup (requires a concrete DB connection).
 - [x] **100% Doc Coverage:** Add help-text documentation to both `--ephemeral` and `--seed` flags within the CLI parser.
 - [x] Modify the startup lifecycle to handle the resulting multi-tier states orthogonally:
   1. **Resolve DAOs:** Determine if the server should use Stub DAOs or Concrete DAOs.
@@ -77,7 +77,7 @@ This document provides a granular, step-by-step checklist to implement an orthog
   - [x] Run the native documentation linter (e.g., `rustdoc`, `typedoc`, `pydocstyle`) against the *generated output* to verify zero missing docstrings.
   - [x] **100% Test Coverage:** The generated server suite must include the comprehensive category tests (Phase 7). Run the native test coverage tool (e.g., `tarpaulin`, `jest --coverage`, `pytest --cov`) against the *generated output* and verify line and branch coverage is strictly at 100%.
 - [x] **Strict Error Handling:** Ensure the generator emits code where all DB and seeder operations return managed errors.
-  - [x] *(Rust-specific)* The generator must emit a single Error Enum with `derive_more`. The generator must NEVER emit `.unwrap()`, `.expect()`, `panic!()`, or `anyhow`. (Note: `unimplemented!()` is acceptable *only* inside the emitted Stub DAOs).
+  - [x] *(Rust-specific)* The generator must emit a single Error Enum with `derive_more`. The generator must NEVER emit `.unwrap()`, `.expect()`, `panic!()`, or `anyhow`. (Note — `unimplemented!()` is acceptable *only* inside the emitted Stub DAOs).
 - [x] Ensure the generator emits configuration to run code linters on the strictest settings against the generated code and resolves all warnings.
 
 ## Phase 7: Test Categories & Topologically Sorted Execution
@@ -112,7 +112,7 @@ This document provides a granular, step-by-step checklist to implement an orthog
 ## Phase 9: Contract Conformance & Bi-Directional Synchronization
 - [x] **Unified CLI Toolset:**
   - [x] Expose a CLI entrypoint (e.g., `cdd` or `cdd-lang`) that supports standard subcommands common to `cdd-go`, `cdd-php`, and `cdd-python`.
-  - [x] Implement `from_openapi` with sub-targets for generating specific artifacts: `to_sdk`, `to_sdk_cli`, and `to_server`.
+  - [x] Implement `from_openapi` with sub-targets for generating specific artifacts — `to_sdk`, `to_sdk_cli`, and `to_server`.
   - [x] Implement utility subcommands such as `to_docs_json`, `serve_json_rpc`, and `mcp`.
 - [x] **Reverse Generation (`to_openapi`):**
   - [x] Implement `to_openapi` to dynamically emit the actual runtime OpenAPI/MCP specification, derived directly from the generated source code (route handlers, DAOs, classes, and models).
@@ -130,7 +130,7 @@ This document provides a granular, step-by-step checklist to implement an orthog
 
 ### CORS Configuration
 - [x] Implement a global CORS middleware.
-- [x] Default to permissive configuration (e.g., `Access-Control-Allow-Origin: *`, allow all standard methods and headers) to facilitate frictionless local UI development.
+- [x] Default to permissive configuration (e.g., `Access-Control-Allow-Origin — *`, allow all standard methods and headers) to facilitate frictionless local UI development.
 - [x] **100% Test Coverage:** Write a test verifying that preflight `OPTIONS` requests and standard cross-origin requests succeed.
 
 ### Request Validation & Logging

@@ -17,6 +17,7 @@ mod tests {
     fn test_users_struct_integrity() {
         let now = Utc::now().naive_utc();
         let id = Uuid::new_v4();
+        let _ = <crate::schema::users::table as diesel::Table>::all_columns();
         let user = Users {
             id,
             email: "test@example.com".to_string(),

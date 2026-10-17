@@ -400,7 +400,7 @@ fn prepare_package_skeleton(
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_qs = "1.0"
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["json", "multipart"] }
 actix-web = "4.0"
 clap = { version = "4.0", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }

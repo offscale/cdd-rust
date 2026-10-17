@@ -246,7 +246,7 @@ fn build_route(
         let is_multipart = form_params.iter().any(|p| p.ty.contains("Vec<u8>"));
         request_body = Some(crate::openapi::parse::models::RequestBodyDefinition {
             ty: if is_multipart {
-                "reqwest::multipart::Form".to_string()
+                "Multipart".to_string()
             } else {
                 "serde_json::Value".to_string()
             },

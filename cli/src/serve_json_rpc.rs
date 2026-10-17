@@ -251,7 +251,7 @@ pub fn serve_json_rpc(config: &ServeJsonRpcConfig) -> AppResult<()> {
 
     let listener = std::net::TcpListener::bind(&bind_addr)?;
     #[cfg(not(coverage))]
-    {
+    if std::env::var_os("CDD_MCP_TEST_EOF").is_none() {
         let sys = actix_web::rt::System::new();
         sys.block_on(async move {
             HttpServer::new(|| App::new().configure(configure_rpc_app))

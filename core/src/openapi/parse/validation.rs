@@ -1268,12 +1268,8 @@ fn validate_encoding_headers(
             continue;
         }
         let mut visited = HashSet::new();
-        validate_header_value(
-            header_val,
-            &format!("{}.headers.{}", context, name),
-            components,
-            &mut visited,
-        )?;
+        let hdr_ctx = format!("{}.headers.{}", context, name);
+        validate_header_value(header_val, &hdr_ctx, components, &mut visited)?;
     }
 
     validate_nested_encoding(obj, context, components)
@@ -1685,19 +1681,19 @@ fn resolve_request_body_from_components(
         return None;
     }
 
-    let body_json = comps
+    comps
         .extra
         .get("requestBodies")
-        .and_then(|b| b.get(&name))?;
-    let parsed: utoipa::openapi::RefOr<ShimRequestBody> =
-        serde_json::from_value(body_json.clone()).ok()?;
-
-    match parsed {
-        utoipa::openapi::RefOr::T(body) => Some(body),
-        utoipa::openapi::RefOr::Ref(r) => {
-            resolve_request_body_from_components(&r.ref_location, components, visited)
-        }
-    }
+        .and_then(|b| b.get(&name))
+        .and_then(|body_json| {
+            serde_json::from_value::<RefOr<ShimRequestBody>>(body_json.clone()).ok()
+        })
+        .and_then(|parsed| match parsed {
+            RefOr::T(body) => Some(body),
+            RefOr::Ref(r) => {
+                resolve_request_body_from_components(&r.ref_location, components, visited)
+            }
+        })
 }
 
 fn validate_path_item_refs(openapi: &ShimOpenApi) -> AppResult<()> {
@@ -4165,6 +4161,8 @@ components:
           itemSchema: { type: string }
     CycleBody:
       $ref: '#/components/requestBodies/CycleBody'
+    RefToBadBody:
+      $ref: '#/components/requestBodies/BadBody'
     BadBody: "not_a_body"
   responses:
     ChainResp:
@@ -4352,6 +4350,21 @@ paths:
             "swagger: '2.0'\ninfo: { title: T, version: '1.0' }\nsecurityDefinitions:\n  O:\n    type: oauth2\n    flow: unknown_flow\n",
             "openapi: 3.2.0\ninfo: { title: T, version: '1.0', license: { name: Apache } }\nsecurity:\n  - 'not_an_object'\npaths: {}\n",
             "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\nsecurity:\n  - 'http://[::1': []\npaths: {}\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\npaths:\n  /p:\n    parameters:\n      - name: qs\n        in: querystring\n        schema: { type: string }\n    get:\n      responses:\n        '200': { description: ok }\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\nwebhooks:\n  w1:\n    parameters:\n      - name: qs\n        in: querystring\n        schema: { type: string }\n    get:\n      responses:\n        '200': { description: ok }\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  parameters:\n    P1:\n      name: q\n      in: query\n      content:\n        application/json: {}\n        text/plain: {}\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\nwebhooks:\n  w1:\n    get:\n      externalDocs: { url: 'bad url' }\n      responses:\n        '200': { description: ok }\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\npaths:\n  /p:\n    get:\n      callbacks:\n        cb1:\n          $ref: '#/components/callbacks/MissingCb'\n      responses:\n        '200': { description: ok }\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  securitySchemes:\n    O:\n      type: oauth2\n      flows:\n        implicit:\n          authorizationUrl: http://insecure.example.com/auth\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  securitySchemes:\n    O:\n      type: oauth2\n      flows:\n        password:\n          tokenUrl: http://insecure.example.com/token\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  securitySchemes:\n    O:\n      type: oauth2\n      flows:\n        deviceAuthorization:\n          deviceAuthorizationUrl: http://insecure.example.com/device\n          tokenUrl: https://example.com/token\n",
+            "swagger: '2.0'\ninfo: { title: T, version: '1.0' }\nsecurityDefinitions:\n  O:\n    type: oauth2\n    flow: implicit\n    authorizationUrl: http://insecure.example.com/auth\n",
+            "swagger: '2.0'\ninfo: { title: T, version: '1.0' }\nsecurityDefinitions:\n  O:\n    type: oauth2\n    flow: password\n    tokenUrl: http://insecure.example.com/token\n",
+            "swagger: '2.0'\ninfo: { title: T, version: '1.0' }\nsecurityDefinitions:\n  O:\n    type: oauth2\n    flow: accessCode\n    authorizationUrl: http://insecure.example.com/auth\n    tokenUrl: https://example.com/token\n",
+            "swagger: '2.0'\ninfo: { title: T, version: '1.0' }\nsecurityDefinitions:\n  O:\n    type: oauth2\n    flow: accessCode\n    authorizationUrl: https://example.com/auth\n    tokenUrl: http://insecure.example.com/token\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\nwebhooks:\n  w1:\n    post:\n      requestBody:\n        content: {}\n      responses:\n        '200': { description: ok }\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  pathItems:\n    Pi1:\n      additionalOperations:\n        GET:\n          responses:\n            '200': { description: ok }\n",
+            "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\npaths:\n  /p/{id}:\n    $ref: '#/components/pathItems/MissingPi'\n",
             "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\npaths:\n  /p:\n    get:\n      parameters:\n        - name: qs\n          in: querystring\n          schema: { type: string }\n      responses:\n        '200': { description: ok }\n",
             "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\npaths:\n  /p:\n    get:\n      parameters:\n        - name: q\n          in: query\n          content:\n            application/json: {}\n            text/plain: {}\n      responses:\n        '200': { description: ok }\n",
             "openapi: 3.2.0\ninfo: { title: T, version: '1.0' }\ncomponents:\n  headers:\n    H1: 'not_an_obj'\n",
