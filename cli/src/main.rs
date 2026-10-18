@@ -64,6 +64,12 @@ pub enum Commands {
     /// Generate an OpenAPI specification from source code.
     #[clap(name = "to_openapi")]
     ToOpenApi(cdd_cli::to_openapi::ToOpenApiArgs),
+    /// Generate code (SDK, CLI, or Server) from an Arazzo 1.1.0 workflow specification.
+    #[clap(name = "from_arazzo")]
+    FromArazzo(cdd_cli::from_arazzo::FromArazzoArgs),
+    /// Extract an Arazzo 1.1.0 workflow specification from Rust source code.
+    #[clap(name = "to_arazzo")]
+    ToArazzo(cdd_cli::to_arazzo::ToArazzoArgs),
     /// Expose CLI interface as a JSON-RPC server.
     #[clap(name = "serve_json_rpc")]
     #[cfg(all(feature = "server", not(target_os = "wasi")))]
@@ -92,6 +98,8 @@ pub fn dispatch_cli(cli: &Cli) -> AppResult<()> {
         Commands::ToDocsJson(args) => cdd_cli::to_docs_json::run_to_docs_json(args),
         Commands::FromOpenApi(args) => cdd_cli::from_openapi::run_from_openapi(args),
         Commands::ToOpenApi(args) => cdd_cli::to_openapi::run_to_openapi(args, &cli.target),
+        Commands::FromArazzo(args) => cdd_cli::from_arazzo::run_from_arazzo(args),
+        Commands::ToArazzo(args) => cdd_cli::to_arazzo::run_to_arazzo(args),
         #[cfg(all(feature = "server", not(target_os = "wasi")))]
         Commands::ServeJsonRpc(args) => cdd_cli::serve_json_rpc::run_serve_json_rpc(args),
         #[cfg(any(not(feature = "server"), target_os = "wasi"))]
@@ -137,6 +145,19 @@ mod tests {
             "/nonexistent_spec.yaml",
         ]);
         assert!(dispatch_cli(&from_oa_err).is_err());
+
+        let from_arazzo_err = Cli::parse_from([
+            "cdd-rust",
+            "from_arazzo",
+            "to_sdk",
+            "-i",
+            "/nonexistent_arazzo.yaml",
+        ]);
+        assert!(dispatch_cli(&from_arazzo_err).is_err());
+
+        let to_arazzo_err =
+            Cli::parse_from(["cdd-rust", "to_arazzo", "-i", "/nonexistent_input_path"]);
+        assert!(dispatch_cli(&to_arazzo_err).is_err());
 
         let rpc_err = Cli::parse_from([
             "cdd-rust",

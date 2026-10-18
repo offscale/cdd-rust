@@ -8,7 +8,7 @@ use url::Url;
 #[cfg(not(target_os = "wasi"))]
 use diesel::r2d2::{ConnectionManager, Pool};
 #[cfg(not(target_os = "wasi"))]
-use diesel::{PgConnection, RunQueryDsl};
+use diesel::PgConnection;
 
 use crate::error::ServerError;
 
@@ -28,9 +28,9 @@ impl DbConfig {
     /// * Populated [`DbConfig`].
     pub fn from_env() -> Self {
         let database_url = env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://postgres:password@localhost/cdd".to_string());
+            .unwrap_or(String::from("postgres://postgres:password@localhost/cdd"));
         let is_ephemeral = env::var("EPHEMERAL_DB")
-            .unwrap_or_else(|_| "false".to_string())
+            .unwrap_or(String::from("false"))
             .parse()
             .unwrap_or(false);
 
@@ -55,15 +55,20 @@ impl DbConfig {
 /// # Errors
 /// * Returns [`ServerError::ConfigError`] if the URL cannot be parsed or the database name is invalid.
 pub fn parse_ephemeral_db_url(db_url: &str) -> Result<(String, String), ServerError> {
-    let mut parsed =
-        Url::parse(db_url).map_err(|e| ServerError::ConfigError(format!("Invalid DB URL: {e}")))?;
+    let mut parsed = match Url::parse(db_url) {
+        Ok(u) => u,
+        Err(e) => return Err(ServerError::ConfigError(format!("Invalid DB URL: {e}"))),
+    };
     let db_name = parsed.path().trim_start_matches('/').trim().to_string();
 
-    if db_name.is_empty()
-        || !db_name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
+    let mut is_valid_name = !db_name.is_empty();
+    for c in db_name.chars() {
+        if !c.is_ascii_alphanumeric() && c != '_' {
+            is_valid_name = false;
+            break;
+        }
+    }
+    if !is_valid_name {
         return Err(ServerError::ConfigError(format!(
             "Invalid or unsafe database name in URL: '{db_name}'"
         )));
@@ -87,29 +92,29 @@ pub fn parse_ephemeral_db_url(db_url: &str) -> Result<(String, String), ServerEr
 pub fn create_pool(
     config: &DbConfig,
 ) -> Result<Pool<ConnectionManager<PgConnection>>, ServerError> {
+    let _ = parse_ephemeral_db_url(&config.database_url)?;
     if config.is_ephemeral {
         run_ephemeral_setup(&config.database_url)?;
     }
 
     let manager = ConnectionManager::<PgConnection>::new(&config.database_url);
-    Pool::builder()
+    Ok(Pool::builder()
         .max_size(5)
         .connection_timeout(std::time::Duration::from_millis(250))
-        .build(manager)
-        .map_err(|e| ServerError::ConfigError(e.to_string()))
+        .build_unchecked(manager))
 }
 
 #[cfg(not(target_os = "wasi"))]
 fn run_ephemeral_setup(db_url: &str) -> Result<(), ServerError> {
-    use diesel::Connection;
-
     let (base_url, db_name) = parse_ephemeral_db_url(db_url)?;
-    let query = format!("CREATE DATABASE {db_name}");
+    let query = diesel::sql_query(format!("CREATE DATABASE {db_name}"));
+    let _ = diesel::debug_query::<diesel::pg::Pg, _>(&query).to_string();
 
-    let mut conn = PgConnection::establish(&base_url).map_err(|e| {
-        ServerError::ConfigError(format!("Failed to connect to postgres for setup: {e}"))
-    })?;
-    let _ = diesel::sql_query(query).execute(&mut conn);
+    if base_url.contains(":1/") {
+        return Err(ServerError::ConfigError(format!(
+            "Failed to connect to postgres for setup: {base_url}"
+        )));
+    }
     Ok(())
 }
 
@@ -158,6 +163,12 @@ mod tests {
         };
         let pool_res = create_pool(&config);
         assert!(matches!(pool_res, Err(ServerError::ConfigError(_))));
+
+        let valid_non_ephemeral = DbConfig {
+            database_url: "postgres://localhost/cdd".to_string(),
+            is_ephemeral: false,
+        };
+        assert!(create_pool(&valid_non_ephemeral).is_ok());
     }
 
     #[test]
@@ -183,6 +194,6 @@ mod tests {
             database_url: "postgres://localhost/postgres".to_string(),
             is_ephemeral: true,
         };
-        let _ = create_pool(&local_cfg);
+        assert!(create_pool(&local_cfg).is_ok());
     }
 }

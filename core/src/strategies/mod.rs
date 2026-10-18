@@ -26,5 +26,5 @@ pub use mcp_server::McpServerStrategy;
 pub use reqwest::ReqwestStrategy;
 pub use traits::{
     BackendStrategy, CliStrategy, CodegenStrategy, HttpClientStrategy, HttpServerStrategy,
-    McpStrategy, StrategyKind,
+    McpStrategy, StrategyKind, WorkflowStrategy,
 };

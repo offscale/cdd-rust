@@ -5,6 +5,8 @@
 //! Exposes programmatic entrypoints for code generation, OpenAPI extraction,
 //! schema synchronization, documentation generation, and MCP/JSON-RPC servers.
 
+/// Arazzo-to-Rust SDK, CLI, and server workflow scaffolding generation.
+pub mod from_arazzo;
 /// OpenAPI-to-Rust SDK, CLI, and server scaffolding generation.
 pub mod from_openapi;
 /// Database-to-Diesel model mapper definitions.
@@ -22,15 +24,19 @@ pub mod serve_json_rpc;
 pub mod sync;
 /// Contract test suite generator command.
 pub mod test_gen;
+/// Rust-to-Arazzo 1.1.0 workflow specification extractor.
+pub mod to_arazzo;
 /// OpenAPI documentation code-snippet JSON generator.
 pub mod to_docs_json;
 /// Rust-to-OpenAPI specification extractor.
 pub mod to_openapi;
 
+pub use from_arazzo::{from_arazzo, FromArazzoConfig, FromArazzoSubcommand};
 pub use from_openapi::{from_openapi, FromOpenApiConfig, FromOpenApiSubcommand, ServerFramework};
 #[cfg(all(feature = "server", not(target_os = "wasi")))]
 pub use serve_json_rpc::{serve_json_rpc, ServeJsonRpcConfig};
 pub use sync::{sync, SyncConfig};
+pub use to_arazzo::{to_arazzo, ToArazzoConfig};
 pub use to_docs_json::{to_docs_json, ToDocsJsonConfig};
 pub use to_openapi::{to_openapi, ToOpenApiConfig};
 

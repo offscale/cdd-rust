@@ -6,10 +6,12 @@
 //! models in `cdd_core::mcp::models` as well as a unified tool registry and execution
 //! dispatcher shared with `serve_json_rpc`.
 
+use crate::from_arazzo::{from_arazzo, FromArazzoConfig, FromArazzoSubcommand};
 use crate::from_openapi::{
     from_openapi, FromOpenApiConfig, FromOpenApiSubcommand, ServerFramework,
 };
 use crate::sync::{sync, SyncConfig};
+use crate::to_arazzo::{to_arazzo, ToArazzoConfig};
 use crate::to_docs_json::{generate_docs_json_str, to_docs_json, ToDocsJsonArgs, ToDocsJsonConfig};
 use crate::to_openapi::{to_openapi, ToOpenApiConfig};
 use crate::TargetMode;
@@ -196,6 +198,41 @@ pub fn supported_tools() -> Vec<Tool> {
                 required: Some(vec!["dir".to_string()]),
             },
         },
+        Tool {
+            name: "from_arazzo".to_string(),
+            description: Some(
+                "Generate Rust code (SDK, CLI, or Server) from an Arazzo 1.1.0 specification"
+                    .to_string(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".to_string(),
+                properties: Some(json!({
+                    "subcommand": {
+                        "type": "string",
+                        "enum": ["to_sdk", "to_sdk_cli", "to_server"],
+                        "description": "Generation target"
+                    },
+                    "input": { "type": "string", "description": "Input Arazzo spec path or URL" },
+                    "output": { "type": "string", "description": "Output directory path" },
+                    "framework": { "type": "string", "enum": ["actix-web", "axum"] }
+                })),
+                required: None,
+            },
+        },
+        Tool {
+            name: "to_arazzo".to_string(),
+            description: Some(
+                "Extract an Arazzo 1.1.0 workflow specification from Rust source code".to_string(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".to_string(),
+                properties: Some(json!({
+                    "input": { "type": "string", "description": "Input Rust file or directory" },
+                    "output": { "type": "string", "description": "Output Arazzo file path" }
+                })),
+                required: Some(vec!["input".to_string()]),
+            },
+        },
     ]
 }
 
@@ -357,6 +394,84 @@ pub fn dispatch_tool_command(
             let mapper = crate::generator::DieselMapper;
             sync(&config, &mapper)?;
             Ok(format!("Successfully synced directory {}", dir_str))
+        }
+        "from_arazzo" => {
+            let subcommand = if let Some(sub_str) = args.get("subcommand").and_then(Value::as_str) {
+                FromArazzoSubcommand::from_str(sub_str)?
+            } else {
+                FromArazzoSubcommand::ToSdk
+            };
+            let input = args.get("input").and_then(Value::as_str).map(PathBuf::from);
+            let input_dir = args
+                .get("input_dir")
+                .and_then(Value::as_str)
+                .map(PathBuf::from);
+            let output_dir = args
+                .get("output")
+                .and_then(Value::as_str)
+                .map(PathBuf::from);
+            let framework = match args
+                .get("framework")
+                .and_then(Value::as_str)
+                .unwrap_or("actix-web")
+            {
+                "axum" => ServerFramework::Axum,
+                _ => ServerFramework::ActixWeb,
+            };
+            let config = FromArazzoConfig {
+                subcommand,
+                input,
+                input_dir,
+                output_dir,
+                openapi_dir: None,
+                framework,
+                no_github_actions: args
+                    .get("no_github_actions")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                no_installable_package: args
+                    .get("no_installable_package")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                tests: args.get("tests").and_then(Value::as_bool).unwrap_or(false),
+                mcp: args.get("mcp").and_then(Value::as_bool).unwrap_or(false),
+            };
+            from_arazzo(&config)?;
+            Ok(format!(
+                "Successfully executed from_arazzo {:?}",
+                subcommand
+            ))
+        }
+        "to_arazzo" => {
+            let input_str = args
+                .get("input")
+                .and_then(Value::as_str)
+                .ok_or_else(|| AppError::General("Missing required argument: 'input'".into()))?;
+            let output_str = args
+                .get("output")
+                .and_then(Value::as_str)
+                .unwrap_or("arazzo.yaml");
+            let config = ToArazzoConfig {
+                input: PathBuf::from(input_str),
+                output: PathBuf::from(output_str),
+                title: args
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned),
+                version: args
+                    .get("version")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned),
+                source_url: args
+                    .get("source_url")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned),
+            };
+            to_arazzo(&config)?;
+            Ok(format!(
+                "Successfully generated Arazzo spec at {}",
+                output_str
+            ))
         }
         _ => Err(AppError::General(format!("Tool not found: {}", tool_name))),
     }
@@ -535,9 +650,11 @@ mod tests {
         let resp: JsonRpcResponse = serde_json::from_str(&resp_str).expect("Valid response");
         let list: ListToolsResult =
             serde_json::from_value(resp.result.expect("Result present")).expect("Valid list");
-        assert_eq!(list.tools.len(), 4);
+        assert_eq!(list.tools.len(), 6);
         assert!(list.tools.iter().any(|t| t.name == "from_openapi"));
         assert!(list.tools.iter().any(|t| t.name == "to_docs_json"));
+        assert!(list.tools.iter().any(|t| t.name == "from_arazzo"));
+        assert!(list.tools.iter().any(|t| t.name == "to_arazzo"));
     }
 
     #[test]
@@ -822,6 +939,51 @@ mod tests {
         .to_string();
         let resp_bad_truth = handle_request(&req_bad_truth).expect("Failed to handle request");
         assert!(resp_bad_truth.contains(r#""isError":true"#));
+
+        // Test from_arazzo and to_arazzo via dispatch_tool_command
+        let arazzo_spec = dir.path().join("flow.arazzo.yaml");
+        std::fs::write(
+            &arazzo_spec,
+            "arazzo: 1.1.0\ninfo:\n  title: Flow\n  version: 1.0.0\nsourceDescriptions:\n  - name: api\n    url: ./openapi.yaml\nworkflows:\n  - workflowId: wf1\n    steps:\n      - stepId: s1\n        operationId: op1\n",
+        )
+        .expect("write arazzo");
+        let arazzo_sdk_out = dir.path().join("arazzo_sdk");
+        let res_fa = dispatch_tool_command(
+            "from_arazzo",
+            &json!({
+                "subcommand": "to_sdk",
+                "input": arazzo_spec.to_str().expect("str"),
+                "output": arazzo_sdk_out.to_str().expect("str"),
+                "framework": "axum"
+            }),
+            None,
+        )
+        .expect("dispatch from_arazzo");
+        assert!(res_fa.contains("Successfully executed from_arazzo"));
+
+        let res_fa_default = dispatch_tool_command(
+            "from_arazzo",
+            &json!({
+                "input": arazzo_spec.to_str().expect("str"),
+                "output": arazzo_sdk_out.to_str().expect("str")
+            }),
+            None,
+        )
+        .expect("dispatch from_arazzo default");
+        assert!(res_fa_default.contains("Successfully executed from_arazzo"));
+
+        let arazzo_roundtrip_out = dir.path().join("roundtrip.arazzo.yaml");
+        let res_ta = dispatch_tool_command(
+            "to_arazzo",
+            &json!({
+                "input": arazzo_sdk_out.to_str().expect("str"),
+                "output": arazzo_roundtrip_out.to_str().expect("str")
+            }),
+            None,
+        )
+        .expect("dispatch to_arazzo");
+        assert!(res_ta.contains("Successfully generated Arazzo spec"));
+        assert!(dispatch_tool_command("to_arazzo", &json!({}), None).is_err());
     }
 
     #[test]

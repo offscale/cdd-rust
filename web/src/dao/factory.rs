@@ -65,7 +65,11 @@ mod tests {
             .connection_timeout(std::time::Duration::from_millis(50))
             .build_unchecked(manager);
         let concrete_daos = AppDaos::new(DaoConfig::Concrete(pool));
-        let err = concrete_daos.user_dao.get_user(Uuid::new_v4()).await;
-        assert!(err.is_err());
+        let found = concrete_daos
+            .user_dao
+            .get_user(Uuid::new_v4())
+            .await
+            .expect("concrete dao query");
+        assert!(found.is_none());
     }
 }

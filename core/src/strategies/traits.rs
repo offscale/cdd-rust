@@ -185,6 +185,66 @@ pub trait McpStrategy: CodegenStrategy {
     fn mcp_tool_registration(&self, route: &ParsedRoute, handler_full_path: &str) -> String;
 }
 
+/// Strategy trait for Arazzo 1.1.0 workflow model, orchestrator, and E2E test generation.
+pub trait WorkflowStrategy {
+    /// Emits strongly typed Rust structs for workflow inputs, step outputs, and workflow outputs.
+    ///
+    /// # Arguments
+    /// * `doc` - The parsed [`crate::arazzo::models::ArazzoDocument`].
+    /// * `linked_specs` - Map of linked [`crate::openapi::parse::document::ParsedOpenApi`] specifications.
+    ///
+    /// # Returns
+    /// Generated Rust model definitions.
+    ///
+    /// # Errors
+    /// Returns [`crate::error::AppError`] if emission fails.
+    fn emit_workflow_models(
+        &self,
+        doc: &crate::arazzo::models::ArazzoDocument,
+        linked_specs: &std::collections::BTreeMap<
+            String,
+            crate::openapi::parse::document::ParsedOpenApi,
+        >,
+    ) -> crate::error::AppResult<String>;
+
+    /// Emits the workflow execution module (Client SDK `WorkflowsClient`, Clap CLI subcommands reusing SDK, or Server workflow handlers).
+    ///
+    /// # Arguments
+    /// * `doc` - The parsed [`crate::arazzo::models::ArazzoDocument`].
+    /// * `linked_specs` - Map of linked [`crate::openapi::parse::document::ParsedOpenApi`] specifications.
+    ///
+    /// # Returns
+    /// Generated Rust workflow module source code.
+    ///
+    /// # Errors
+    /// Returns [`crate::error::AppError`] if emission fails.
+    fn emit_workflow_module(
+        &self,
+        doc: &crate::arazzo::models::ArazzoDocument,
+        linked_specs: &std::collections::BTreeMap<
+            String,
+            crate::openapi::parse::document::ParsedOpenApi,
+        >,
+    ) -> crate::error::AppResult<String>;
+
+    /// Emits end-to-end integration tests for all workflows in `doc`.
+    ///
+    /// # Arguments
+    /// * `doc` - The parsed [`crate::arazzo::models::ArazzoDocument`].
+    /// * `crate_name` - Crate/module identifier for the generated package.
+    ///
+    /// # Returns
+    /// Generated Rust test module source code.
+    ///
+    /// # Errors
+    /// Returns [`crate::error::AppError`] if emission fails.
+    fn emit_workflow_tests(
+        &self,
+        doc: &crate::arazzo::models::ArazzoDocument,
+        crate_name: &str,
+    ) -> crate::error::AppResult<String>;
+}
+
 /// Unified strategy interface used by the shared AST scaffolding and test emitters.
 ///
 /// Non-server strategies inherit sensible defaults for server-only extractors and route
@@ -472,6 +532,67 @@ mod tests {
         assert!(dummy.test_validation_helper().is_empty());
         assert!(dummy.handler_unit_test(&route).is_empty());
         assert!(dummy.generate_custom_test(&route, "app").is_none());
+
+        let direct = DefaultDummyStrategy;
+        assert_eq!(CodegenStrategy::kind(&direct), StrategyKind::HttpClient);
+        assert_eq!(BackendStrategy::handler_imports(&direct), "use std::fmt;\n");
+        assert_eq!(
+            BackendStrategy::handler_signature(&direct, &route, &[]),
+            "pub fn list_pets() {}\n"
+        );
+        assert!(CodegenStrategy::extra_cargo_dependencies(&direct).is_empty());
+        assert!(BackendStrategy::extra_handler_docs(&direct, &route).is_empty());
+        assert_eq!(
+            BackendStrategy::path_extractor(&direct, &["i32".to_string()]),
+            "i32"
+        );
+        assert_eq!(
+            BackendStrategy::path_extractor(&direct, &["i32".to_string(), "String".to_string()]),
+            "(i32, String)"
+        );
+        assert_eq!(
+            BackendStrategy::query_extractor(&direct),
+            "serde_json::Value"
+        );
+        assert_eq!(BackendStrategy::typed_query_extractor(&direct, "Q"), "Q");
+        assert_eq!(
+            BackendStrategy::query_string_extractor(&direct, "Q", None),
+            "Q"
+        );
+        assert_eq!(BackendStrategy::header_extractor(&direct, "H"), "H");
+        assert_eq!(BackendStrategy::cookie_extractor(&direct), "String");
+        assert_eq!(BackendStrategy::body_extractor(&direct, "B"), "B");
+        assert_eq!(BackendStrategy::form_extractor(&direct, "F"), "F");
+        assert_eq!(BackendStrategy::multipart_extractor(&direct, "M"), "M");
+        assert_eq!(BackendStrategy::text_extractor(&direct, "T"), "T");
+        assert_eq!(
+            BackendStrategy::bytes_extractor(&direct, "Vec<u8>"),
+            "Vec<u8>"
+        );
+        assert_eq!(BackendStrategy::security_extractor(&direct, &[]), "");
+        assert!(BackendStrategy::route_registration_statement(&direct, &route, "h").is_empty());
+        assert_eq!(BackendStrategy::test_imports(&direct), "use super::*;\n");
+        assert_eq!(
+            BackendStrategy::test_fn_signature(&direct, "pets"),
+            "fn test_pets() {\n"
+        );
+        assert_eq!(
+            BackendStrategy::test_app_init(&direct, "app"),
+            "let _ = 1;\n"
+        );
+        assert_eq!(
+            BackendStrategy::test_body_setup_code(&direct, &body),
+            "let _ = 2;\n"
+        );
+        assert_eq!(
+            BackendStrategy::test_request_builder(&direct, "GET", "/", ""),
+            "let _ = 3;\n"
+        );
+        assert_eq!(BackendStrategy::test_api_call(&direct), "let _ = 4;\n");
+        assert_eq!(BackendStrategy::test_assertion(&direct), "assert!(true);\n");
+        assert!(BackendStrategy::test_validation_helper(&direct).is_empty());
+        assert!(BackendStrategy::handler_unit_test(&direct, &route).is_empty());
+        assert!(BackendStrategy::generate_custom_test(&direct, &route, "app").is_none());
 
         for s in [
             &ReqwestStrategy as &dyn BackendStrategy,

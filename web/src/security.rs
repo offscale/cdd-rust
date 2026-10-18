@@ -5,7 +5,7 @@
 use crate::dao::users::UserDao;
 use crate::error::ServerError;
 use actix_web::{
-    dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
+    dev::{Service, ServiceRequest, ServiceResponse, Transform},
     Error, HttpMessage, HttpResponse,
 };
 use futures_util::future::LocalBoxFuture;
@@ -57,8 +57,7 @@ pub struct SecurityConfig {
 impl Default for SecurityConfig {
     /// Loads the secret from the `JWT_SECRET` environment variable, or falls back to a development default.
     fn default() -> Self {
-        let jwt_secret =
-            env::var("JWT_SECRET").unwrap_or_else(|_| "super-secret-jwt-key".to_string());
+        let jwt_secret = env::var("JWT_SECRET").unwrap_or(String::from("super-secret-jwt-key"));
         Self { jwt_secret }
     }
 }
@@ -136,11 +135,17 @@ pub fn verify_jwt(token: &str) -> Result<Claims, ServerError> {
 /// * Returns [`ServerError::Unauthorized`] if the token format or signature is invalid.
 pub fn verify_jwt_with_config(token: &str, config: &SecurityConfig) -> Result<Claims, ServerError> {
     let prefix = format!("cdd.{}.", config.jwt_secret.len());
-    let payload = token.strip_prefix(&prefix).ok_or_else(|| {
-        ServerError::Unauthorized("Invalid token prefix or signature".to_string())
-    })?;
-    serde_json::from_str::<Claims>(payload)
-        .map_err(|e| ServerError::Unauthorized(format!("Invalid token claims: {e}")))
+    let Some(payload) = token.strip_prefix(&prefix) else {
+        return Err(ServerError::Unauthorized(
+            "Invalid token prefix or signature".to_string(),
+        ));
+    };
+    match serde_json::from_str::<Claims>(payload) {
+        Ok(claims) => Ok(claims),
+        Err(e) => Err(ServerError::Unauthorized(format!(
+            "Invalid token claims: {e}"
+        ))),
+    }
 }
 
 /// Hybrid Authentication Middleware Constructor supporting both mock and DAO-backed verification.
@@ -205,6 +210,13 @@ async fn validate_request_token(
         .is_some()
 }
 
+fn extract_bearer_token(req: &ServiceRequest) -> Option<String> {
+    let header_val = req.headers().get("Authorization")?;
+    let header_str = header_val.to_str().ok()?;
+    let bearer = header_str.strip_prefix("Bearer ")?;
+    Some(bearer.to_string())
+}
+
 impl<S, B> Service<ServiceRequest> for HybridAuthMiddleware<S>
 where
     S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
@@ -215,19 +227,18 @@ where
     type Error = Error;
     type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    forward_ready!(service);
+    fn poll_ready(
+        &self,
+        ctx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(ctx)
+    }
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
         let enforce_auth = self.enforce_auth;
         let is_mock_mode = self.is_mock_mode;
         let user_dao = self.user_dao.clone();
-
-        let token_opt = req
-            .headers()
-            .get("Authorization")
-            .and_then(|h| h.to_str().ok())
-            .and_then(|s| s.strip_prefix("Bearer "))
-            .map(|s| s.to_string());
+        let token_opt = extract_bearer_token(&req);
 
         req.extensions_mut().insert(ApiKey);
         req.extensions_mut().insert(OAuth2::<()>(PhantomData));
@@ -236,28 +247,24 @@ where
                 PhantomData,
             ));
 
-        if enforce_auth {
+        if !enforce_auth {
             let fut = self.service.call(req);
-            Box::pin(async move {
-                let is_valid = validate_request_token(token_opt, is_mock_mode, user_dao).await;
-                let res = fut.await.map(|r| r.map_into_boxed_body());
-                if !is_valid {
-                    let unauthorized = HttpResponse::Unauthorized()
-                        .body("Unauthorized: Invalid token")
-                        .map_into_boxed_body();
-
-                    return res.map(|r| {
-                        let (req_ext, _) = r.into_parts();
-                        ServiceResponse::new(req_ext, unauthorized)
-                    });
-                }
-
-                res
-            })
-        } else {
-            let fut = self.service.call(req);
-            Box::pin(async move { fut.await.map(|res| res.map_into_boxed_body()) })
+            return Box::pin(async move { Ok(fut.await?.map_into_boxed_body()) });
         }
+
+        let fut = self.service.call(req);
+        Box::pin(async move {
+            let is_valid = validate_request_token(token_opt, is_mock_mode, user_dao).await;
+            let res = fut.await?.map_into_boxed_body();
+            if !is_valid {
+                let unauthorized = HttpResponse::Unauthorized()
+                    .body("Unauthorized: Invalid token")
+                    .map_into_boxed_body();
+                let (req_ext, _) = res.into_parts();
+                return Ok(ServiceResponse::new(req_ext, unauthorized));
+            }
+            Ok(res)
+        })
     }
 }
 
@@ -339,9 +346,26 @@ mod tests {
         )
         .await;
 
-        let req = test::TestRequest::get().uri("/").to_request();
+        let req = test::TestRequest::get()
+            .uri("/")
+            .insert_header(("Authorization", "Basic dXNlcjpwYXNz"))
+            .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), actix_web::http::StatusCode::UNAUTHORIZED);
+
+        let req = test::TestRequest::get()
+            .uri("/")
+            .insert_header((
+                "Authorization",
+                actix_web::http::header::HeaderValue::from_bytes(&[0xFF]).expect("hdr"),
+            ))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::UNAUTHORIZED);
+
+        let waker = futures_util::task::noop_waker();
+        let mut cx = core::task::Context::from_waker(&waker);
+        let _ = app.poll_ready(&mut cx);
 
         let req = test::TestRequest::get()
             .uri("/")

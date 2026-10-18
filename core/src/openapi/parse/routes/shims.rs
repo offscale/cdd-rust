@@ -794,7 +794,7 @@ fn normalize_encoding_object_headers(value: &mut Value) {
     };
     let headers_val = obj
         .entry("headers".to_string())
-        .or_insert_with(|| Value::Object(Map::new()));
+        .or_insert(Value::Object(Map::new()));
     normalize_response_headers(headers_val);
 }
 

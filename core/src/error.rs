@@ -99,6 +99,61 @@ pub enum AppError {
         field: String,
     },
 
+    /// Schema or structural validation failure when inspecting Arazzo 1.1.0 definitions.
+    #[display("Arazzo Validation Error at {path}: {reason}")]
+    #[from(ignore)]
+    #[error(ignore)]
+    ArazzoValidation {
+        /// The JSON Pointer or document path where validation failed.
+        path: String,
+        /// Explanation of the validation failure.
+        reason: String,
+    },
+
+    /// Unsupported Arazzo specification version.
+    #[display("Unsupported Arazzo Specification Version: {version}")]
+    #[from(ignore)]
+    #[error(ignore)]
+    UnsupportedArazzoVersion {
+        /// The unsupported version string encountered.
+        version: String,
+    },
+
+    /// Cyclic dependency detected in workflow or step `dependsOn` graph.
+    #[display("Workflow Cycle Detected in '{workflow_id}': {chain}")]
+    #[from(ignore)]
+    #[error(ignore)]
+    WorkflowCycleDetected {
+        /// The workflow ID where the cycle was detected.
+        workflow_id: String,
+        /// The dependency chain illustrating the cycle.
+        chain: String,
+    },
+
+    /// Runtime expression syntax or ABNF validation error.
+    #[display("Runtime Expression Parse Error in '{expression}': {reason}")]
+    #[from(ignore)]
+    #[error(ignore)]
+    RuntimeExpressionParse {
+        /// The invalid runtime expression string.
+        expression: String,
+        /// Detailed explanation of the syntax error.
+        reason: String,
+    },
+
+    /// Failure resolving an Arazzo `sourceDescriptions` entry.
+    #[display("Source Description Resolution Error for '{name}' ({url}): {reason}")]
+    #[from(ignore)]
+    #[error(ignore)]
+    SourceDescriptionResolution {
+        /// The logical name of the source description.
+        name: String,
+        /// The URL or path of the source description.
+        url: String,
+        /// Explanation of why resolution failed.
+        reason: String,
+    },
+
     /// Wrapper for database or schema synchronization errors.
     #[from(ignore)]
     #[error(ignore)]
@@ -184,6 +239,51 @@ mod tests {
         assert_eq!(
             format!("{missing_err}"),
             "Missing Required Field 'title' in Info"
+        );
+
+        let arazzo_val_err = AppError::ArazzoValidation {
+            path: "/workflows/0".to_string(),
+            reason: "empty steps".to_string(),
+        };
+        assert_eq!(
+            format!("{arazzo_val_err}"),
+            "Arazzo Validation Error at /workflows/0: empty steps"
+        );
+
+        let arazzo_ver_err = AppError::UnsupportedArazzoVersion {
+            version: "2.0.0".to_string(),
+        };
+        assert_eq!(
+            format!("{arazzo_ver_err}"),
+            "Unsupported Arazzo Specification Version: 2.0.0"
+        );
+
+        let wf_cycle_err = AppError::WorkflowCycleDetected {
+            workflow_id: "wf1".to_string(),
+            chain: "wf1 -> wf2 -> wf1".to_string(),
+        };
+        assert_eq!(
+            format!("{wf_cycle_err}"),
+            "Workflow Cycle Detected in 'wf1': wf1 -> wf2 -> wf1"
+        );
+
+        let expr_err = AppError::RuntimeExpressionParse {
+            expression: "$invalid".to_string(),
+            reason: "unknown root".to_string(),
+        };
+        assert_eq!(
+            format!("{expr_err}"),
+            "Runtime Expression Parse Error in '$invalid': unknown root"
+        );
+
+        let src_err = AppError::SourceDescriptionResolution {
+            name: "petstore".to_string(),
+            url: "./petstore.yaml".to_string(),
+            reason: "file not found".to_string(),
+        };
+        assert_eq!(
+            format!("{src_err}"),
+            "Source Description Resolution Error for 'petstore' (./petstore.yaml): file not found"
         );
 
         let db_err = AppError::Database("connection lost".to_string());

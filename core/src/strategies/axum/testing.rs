@@ -91,28 +91,18 @@ pub fn test_body_setup_code(body: &RequestBodyDefinition) -> String {
             ),
             BodyFormat::Form => {
                 if let Some(obj) = example.value.as_object() {
-                    let pairs = obj
-                        .iter()
-                        .map(|(k, v)| {
-                            let s = match v.as_str() {
-                                Some(st) => st.to_owned(),
-                                None => v.to_string(),
-                            };
-                            format!("{}={}", k, s)
-                        })
-                        .collect::<Vec<_>>()
-                        .join("&");
-                    format!(
-                        "    let body = Body::from({:?});
-",
-                        pairs
-                    )
+                    let mut pairs_vec = Vec::new();
+                    for (k, v) in obj {
+                        let s = match v.as_str() {
+                            Some(st) => st.to_owned(),
+                            None => v.to_string(),
+                        };
+                        pairs_vec.push(format!("{}={}", k, s));
+                    }
+                    let pairs = pairs_vec.join("&");
+                    format!("    let body = Body::from({:?});\n", pairs)
                 } else {
-                    format!(
-                        "    let body = Body::from({:?});
-",
-                        val_str
-                    )
+                    format!("    let body = Body::from({:?});\n", val_str)
                 }
             }
             BodyFormat::Multipart => {
@@ -301,28 +291,25 @@ pub fn test_validation_helper() -> String {
 
 /// Resolves a sample path segment value appropriate for the parameter's Rust type.
 fn sample_value_for_param(route: &ParsedRoute, param_name: &str) -> &'static str {
-    let ty = route
-        .params
-        .iter()
-        .chain(route.path_params.iter())
-        .find(|p| p.source == ParamSource::Path && p.name == param_name)
-        .map(|p| p.ty.as_str())
-        .unwrap_or("i64");
+    let mut ty = "i64";
+    for p in route.params.iter().chain(route.path_params.iter()) {
+        if p.source == ParamSource::Path && p.name == param_name {
+            ty = p.ty.as_str();
+            break;
+        }
+    }
 
     crate::openapi::parse::models::RustType::parse(ty).sample_url_segment()
 }
 
 /// Resolves the expected HTTP status code for a route's unit test.
 fn expected_status_code(route: &ParsedRoute) -> u16 {
-    route
-        .response_status
-        .as_deref()
-        .and_then(|s| {
-            s.parse::<crate::openapi::parse::models::StatusCodeSpec>()
-                .ok()
-        })
-        .map(|spec| spec.representative_code())
-        .unwrap_or(200)
+    let Some(status_str) = route.response_status.as_deref() else {
+        return 200;
+    };
+    let spec: crate::openapi::parse::models::StatusCodeSpec =
+        status_str.parse().expect("infallible StatusCodeSpec parse");
+    spec.representative_code()
 }
 
 /// Generates a unit test for a specific Axum handler function to be placed alongside it.

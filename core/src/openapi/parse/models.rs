@@ -758,7 +758,7 @@ fn normalize_runtime_expression(raw: &str) -> String {
 
 /// A parsed segment of a runtime expression template.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum RuntimeExpressionSegment {
+pub enum RuntimeExpressionSegment {
     /// Literal text segment.
     Literal(String),
     /// Embedded runtime expression (without surrounding braces).
@@ -769,7 +769,7 @@ pub(crate) enum RuntimeExpressionSegment {
 ///
 /// Expressions are identified as `{...}` segments whose trimmed inner text starts with `$`.
 /// Non-expression braces are preserved as literals.
-pub(crate) fn split_runtime_expression_template(raw: &str) -> Vec<RuntimeExpressionSegment> {
+pub fn split_runtime_expression_template(raw: &str) -> Vec<RuntimeExpressionSegment> {
     let mut segments = Vec::new();
     let mut buf = String::new();
     let mut chars = raw.chars().peekable();
@@ -822,7 +822,7 @@ fn contains_runtime_expression(raw: &str) -> bool {
 
 fn validate_runtime_expression(expr: &str) -> AppResult<()> {
     match expr {
-        "$url" | "$method" | "$statusCode" => return Ok(()),
+        "$url" | "$method" | "$statusCode" | "$self" => return Ok(()),
         _ => {}
     }
 
@@ -834,10 +834,102 @@ fn validate_runtime_expression(expr: &str) -> AppResult<()> {
         return validate_runtime_source(rest);
     }
 
+    if let Some(rest) = expr.strip_prefix("$message.") {
+        return validate_message_source(rest);
+    }
+
+    if let Some(rest) = expr
+        .strip_prefix("$inputs.")
+        .or_else(|| expr.strip_prefix("$outputs."))
+    {
+        return validate_named_pointer_tail(rest, "inputs/outputs");
+    }
+
+    if let Some(rest) = expr
+        .strip_prefix("$steps.")
+        .or_else(|| expr.strip_prefix("$workflows."))
+        .or_else(|| expr.strip_prefix("$sourceDescriptions."))
+    {
+        return validate_scoped_expression_tail(rest);
+    }
+
+    if let Some(rest) = expr.strip_prefix("$components.") {
+        return validate_components_tail(rest);
+    }
+
     Err(AppError::General(format!(
         "Invalid runtime expression: '{}'",
         expr
     )))
+}
+
+fn validate_message_source(source: &str) -> AppResult<()> {
+    if let Some(tail) = source.strip_prefix("header.") {
+        return validate_header_token(tail);
+    }
+    if let Some(tail) = source
+        .strip_prefix("header")
+        .or_else(|| source.strip_prefix("payload"))
+    {
+        return validate_body_reference(tail);
+    }
+    Err(AppError::General(format!(
+        "Invalid message runtime expression source: '{}'",
+        source
+    )))
+}
+
+fn validate_named_pointer_tail(tail: &str, kind: &str) -> AppResult<()> {
+    let (head, ptr_opt) = match tail.split_once('#') {
+        Some((h, p)) => (h, Some(p)),
+        None => (tail, None),
+    };
+    if head.is_empty() || head.split('.').any(|seg| seg.is_empty()) {
+        return Err(AppError::General(format!(
+            "Runtime expression {} name must not be empty",
+            kind
+        )));
+    }
+    if let Some(ptr) = ptr_opt {
+        validate_json_pointer(ptr)?;
+    }
+    Ok(())
+}
+
+fn validate_scoped_expression_tail(tail: &str) -> AppResult<()> {
+    let (scope_id, rest) = tail.split_once('.').ok_or_else(|| {
+        AppError::General(format!(
+            "Scoped runtime expression requires '<id>.<member>': '{}'",
+            tail
+        ))
+    })?;
+    if scope_id.is_empty() {
+        return Err(AppError::General(
+            "Scoped runtime expression identifier must not be empty".into(),
+        ));
+    }
+    validate_named_pointer_tail(rest, "scoped member")
+}
+
+fn validate_components_tail(tail: &str) -> AppResult<()> {
+    let (section, name) = tail.split_once('.').ok_or_else(|| {
+        AppError::General(format!(
+            "Components runtime expression requires '<section>.<name>': '{}'",
+            tail
+        ))
+    })?;
+    if !matches!(
+        section,
+        "parameters" | "successActions" | "failureActions" | "inputs"
+    ) || name.is_empty()
+        || name.contains('.')
+    {
+        return Err(AppError::General(format!(
+            "Invalid components runtime expression: '$components.{}'",
+            tail
+        )));
+    }
+    Ok(())
 }
 
 fn validate_runtime_source(source: &str) -> AppResult<()> {
@@ -2083,6 +2175,7 @@ mod tests {
             "$url",
             "$method",
             "$statusCode",
+            "$self",
             "$request.header.X-Custom!#$%&'*+-.^_`|~0",
             "$request.query.q",
             "$request.path.p",
@@ -2090,6 +2183,19 @@ mod tests {
             "$request.body#",
             "$request.body#/a~0b/c~1d",
             "$response.body#/ok",
+            "$message.header.X-Msg",
+            "$message.header#/meta/id",
+            "$message.payload#/data/id",
+            "$inputs.userId",
+            "$inputs.user#/id",
+            "$outputs.resultId",
+            "$steps.login.outputs.token",
+            "$workflows.auth.outputs.jwt",
+            "$sourceDescriptions.petstore.url",
+            "$components.parameters.petId",
+            "$components.successActions.done",
+            "$components.failureActions.retry",
+            "$components.inputs.UserInput",
             "prefix-{not_expr}-{unclosed-{$url}-suffix",
             "{$url}",
             "{$url}{unclosed",
@@ -2111,6 +2217,19 @@ mod tests {
             "$request.body#no_slash",
             "$request.body#/~2",
             "$request.body#/~",
+            "$message.unknown",
+            "$message.header.",
+            "$message.payload#no_slash",
+            "$inputs.",
+            "$inputs.a..b",
+            "$inputs.a#no_slash",
+            "$steps.only_id",
+            "$steps..outputs.x",
+            "$steps.s1.",
+            "$components.only_section",
+            "$components.unknown.x",
+            "$components.parameters.",
+            "$components.parameters.a.b",
         ] {
             assert!(RuntimeExpression::parse(invalid_expr).is_err());
             assert!(RuntimeExpression::parse_expression(invalid_expr).is_err());

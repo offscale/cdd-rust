@@ -2,6 +2,7 @@
 
 `cdd-rust` is fully compliant with the following standards:
 - **OpenAPI Specification**: 3.2.0 (Full Support)
+- **Arazzo Specification**: 1.1.0 (Full Support)
 - **JSON Schema Dialect**: 2020-12
 - **Rust Edition**: 2021
 
@@ -27,3 +28,20 @@ The toolchain has been fully verified against the universal conformance suite vi
 | Security Requirement Object | ✅     |
 | Links / Callbacks           | ✅     |
 | Webhooks                    | ✅     |
+
+## Arazzo 1.1.0 Support Matrix
+
+| Arazzo 1.1.0 Concept                     | Status |
+| ---------------------------------------- | ------ |
+| Arazzo Object (`arazzo`, `$self`)        | ✅     |
+| Info Object                              | ✅     |
+| Source Description Object (`openapi`, `asyncapi`, `arazzo`) | ✅     |
+| Workflow Object (`dependsOn`, `inputs`, `outputs`) | ✅     |
+| Step Object (`operationId`, `operationPath`, `channelPath`, `workflowId`, `timeout`, `dependsOn`) | ✅     |
+| Parameter Object & Reusable Object       | ✅     |
+| RequestBody & Payload Replacement Object | ✅     |
+| Criterion & Criterion Expression Type    | ✅     |
+| Selector Object                          | ✅     |
+| Success Action & Failure Action Objects  | ✅     |
+| Components Object                        | ✅     |
+| Runtime Expressions (All 17 Roots)       | ✅     |

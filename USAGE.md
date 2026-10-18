@@ -14,6 +14,15 @@ The primary CLI interaction uses the `cdd-rust` executable.
 *   `cdd-rust to_openapi -i <src_dir> -o <spec.yaml>`
     Parse an existing Actix-web or generic Rust workspace and build an OpenAPI spec.
 
+*   `cdd-rust from_arazzo <command> -i <arazzo.yaml> -o <out_dir>`
+    Generate multi-step workflow code starting from an Arazzo 1.1.0 specification:
+    *   `to_sdk`: Generate a Reqwest Client SDK workflow orchestrator (`WorkflowsClient`).
+    *   `to_sdk_cli`: Generate a Clap CLI workflow runner that directly reuses the Client SDK.
+    *   `to_server`: Generate Actix-web or Axum server workflow handlers and E2E integration tests.
+
+*   `cdd-rust to_arazzo -i <src_dir> -o <arazzo.yaml>`
+    Statically extract Arazzo 1.1.0 workflows from Rust source code (SDK, CLI, or Server tests).
+
 *   `cdd-rust to_docs_json -i <spec.yaml> -o <docs.json>`
     Format the spec into a JSON format used directly by the central CDD documentation site.
 

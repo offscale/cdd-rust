@@ -11,10 +11,44 @@ pub mod scaffolding;
 pub mod testing;
 
 use crate::openapi::parse::ParsedRoute;
-use crate::strategies::{BackendStrategy, CodegenStrategy, McpStrategy, StrategyKind};
+use crate::strategies::{
+    BackendStrategy, CodegenStrategy, McpStrategy, StrategyKind, WorkflowStrategy,
+};
 
 /// Strategy for generating MCP Server (SSE) implementations.
 pub struct McpServerStrategy;
+
+impl WorkflowStrategy for McpServerStrategy {
+    fn emit_workflow_models(
+        &self,
+        doc: &crate::arazzo::models::ArazzoDocument,
+        linked_specs: &std::collections::BTreeMap<
+            String,
+            crate::openapi::parse::document::ParsedOpenApi,
+        >,
+    ) -> crate::error::AppResult<String> {
+        crate::strategies::reqwest::workflows::emit_workflow_models(doc, linked_specs)
+    }
+
+    fn emit_workflow_module(
+        &self,
+        doc: &crate::arazzo::models::ArazzoDocument,
+        linked_specs: &std::collections::BTreeMap<
+            String,
+            crate::openapi::parse::document::ParsedOpenApi,
+        >,
+    ) -> crate::error::AppResult<String> {
+        crate::strategies::reqwest::workflows::emit_workflow_module(doc, linked_specs)
+    }
+
+    fn emit_workflow_tests(
+        &self,
+        doc: &crate::arazzo::models::ArazzoDocument,
+        crate_name: &str,
+    ) -> crate::error::AppResult<String> {
+        crate::strategies::reqwest::workflows::emit_workflow_tests(doc, crate_name)
+    }
+}
 
 impl CodegenStrategy for McpServerStrategy {
     fn kind(&self) -> StrategyKind {

@@ -63,11 +63,12 @@ impl<'a> ResolutionContext<'a> {
         registry: Option<&'a DocumentRegistry>,
     ) -> Self {
         let base_uri = base_uri_str.and_then(|s| {
-            if let Ok(url) = Url::parse(&s) {
-                return Some(url);
-            }
-            let dummy = Url::parse(DUMMY_BASE).expect("valid dummy base");
-            dummy.join(&s).ok()
+            Url::parse(&s).ok().or_else(|| {
+                Url::parse(DUMMY_BASE)
+                    .expect("valid dummy base")
+                    .join(&s)
+                    .ok()
+            })
         });
         Self {
             base_uri,
@@ -747,13 +748,8 @@ fn resolve_component_ref_name(
     }
 
     let parsed = parse_reference(ref_str);
-    let doc_uri = resolve_ref_document_uri(parsed.document, current_base).or_else(|| {
-        if parsed.document.is_empty() {
-            None
-        } else {
-            Some(parsed.document.to_string())
-        }
-    })?;
+    let doc_uri = resolve_ref_document_uri(parsed.document, current_base)
+        .or_else(|| (!parsed.document.is_empty()).then(|| parsed.document.to_string()))?;
     if let Some(name) = schema_ids.get(&doc_uri) {
         if let Some(frag) = parsed.fragment {
             if !frag.is_empty() && frag != "/" {

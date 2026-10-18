@@ -310,13 +310,13 @@ impl DocumentRegistry {
         if segments.first() == Some(&"components") && segments.get(1) == Some(&"pathItems") {
             let name_seg = segments.get(2)?;
             let name = decode_pointer_segment(name_seg);
-            if let Some(ref_or) = entry
+            let ref_or_opt = entry
                 .shim
                 .as_ref()
                 .and_then(|s| s.components.as_ref())
                 .and_then(|c| c.path_items.as_ref())
-                .and_then(|m| m.get(&name))
-            {
+                .and_then(|m| m.get(&name));
+            if let Some(ref_or) = ref_or_opt {
                 resolved = match ref_or {
                     RefOr::T(pi) => Some(pi.clone()),
                     RefOr::Ref(_) => serde_json::to_value(ref_or)
@@ -880,6 +880,33 @@ type: boolean
                 "parameters"
             )
             .is_some());
+        assert!(registry
+            .resolve_component_ref_with_components(
+                "https://example.com/missing_doc.yaml#/components/parameters/Param1",
+                None,
+                "parameters"
+            )
+            .is_none());
+        assert!(registry
+            .resolve_component_ref_with_components(
+                "https://example.com/full.yaml#/components/parameters/MissingParam",
+                None,
+                "parameters"
+            )
+            .is_none());
+        assert!(registry
+            .resolve_component_ref_with_components(
+                "#/components/parameters/Param1",
+                None,
+                "parameters"
+            )
+            .is_none());
+        assert!(registry
+            .resolve_path_item_ref("https://example.com/missing_doc.yaml#/paths/~1items", None)
+            .is_none());
+        assert!(registry
+            .resolve_path_item_ref("#/paths/~1items", None)
+            .is_none());
 
         // Resolve path_item_ref & path_item_ref_with_components
         assert!(registry

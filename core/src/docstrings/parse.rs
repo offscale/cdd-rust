@@ -29,10 +29,7 @@ pub fn extract_doc_comment<N: HasDocComments>(node: &N) -> Option<String> {
     if docs.is_empty() {
         None
     } else {
-        Some(docs.join(
-            "
-",
-        ))
+        Some(docs.join("\n"))
     }
 }
 
@@ -47,25 +44,17 @@ pub fn parse_raw_doc_lines(raw: &str) -> Option<String> {
     let mut lines = Vec::new();
     for line in raw.lines() {
         let trimmed = line.trim();
-        if let Some(rest) = trimmed
+        let rest_opt = trimmed
             .strip_prefix("///")
-            .or_else(|| trimmed.strip_prefix("//!"))
-        {
+            .or_else(|| trimmed.strip_prefix("//!"));
+        if let Some(rest) = rest_opt {
             lines.push(rest.trim().to_string());
         }
     }
     if lines.is_empty() {
         None
     } else {
-        Some(
-            lines
-                .join(
-                    "
-",
-                )
-                .trim()
-                .to_string(),
-        )
+        Some(lines.join("\n").trim().to_string())
     }
 }
 

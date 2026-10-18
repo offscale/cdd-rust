@@ -2626,5 +2626,84 @@ components:
         ] {
             let _ = map_param_style(style.as_ref());
         }
+
+        // Cover closure false/None return paths for tarpaulin DWARF line tables
+        let mut extra_comps = ShimComponents::default();
+        extra_comps.extra.insert(
+            "requestBodies".to_string(),
+            json!({ "BadBody": "not_an_object" }),
+        );
+        extra_comps.extra.insert(
+            "mediaTypes".to_string(),
+            json!({ "KnownMedia": { "schema": { "type": "string" } } }),
+        );
+        let mut extra_reg = DocumentRegistry::new();
+        extra_reg
+            .register_openapi_yaml(
+                "https://example.com/extra.yaml",
+                r#"
+openapi: 3.2.0
+info:
+  title: Extra
+  version: "1.0"
+paths: {}
+components:
+  requestBodies:
+    BadExtBody:
+      content: "not_a_map"
+"#,
+            )
+            .expect("register extra");
+        assert!(resolve_request_body_from_components(
+            &Ref::new("#/components/requestBodies/BadBody"),
+            Some(&extra_comps),
+            Some(&extra_reg),
+            None,
+        )
+        .is_none());
+        assert!(resolve_request_body_from_components(
+            &Ref::new("https://example.com/extra.yaml#/components/requestBodies/BadExtBody"),
+            Some(&ShimComponents::default()),
+            Some(&extra_reg),
+            None,
+        )
+        .is_none());
+        assert!(resolve_request_body_from_components(
+            &Ref::new("#/components/schemas/NotARequestBody"),
+            Some(&extra_comps),
+            None,
+            None,
+        )
+        .is_none());
+        assert!(raw_media_for_type(
+            &json!({ "content": { "application/json": { "$ref": "#/components/schemas/NotMedia" } } }),
+            "application/json",
+            Some(&extra_comps),
+            Some(&extra_reg),
+            None,
+        )
+        .is_some());
+        assert!(raw_media_for_type(
+            &json!({ "content": { "application/json": { "$ref": "#/components/mediaTypes/MissingMedia" } } }),
+            "application/json",
+            Some(&extra_comps),
+            Some(&extra_reg),
+            None,
+        )
+        .is_some());
+        assert!(resolve_encoding_header_type(
+            &json!({ "$ref": "#/components/schemas/NotAHeader" }),
+            Some(&hdr_cycle_comps),
+            Some(&extra_reg),
+            None,
+        )
+        .is_err());
+        assert!(resolve_encoding_header_type(
+            &json!({ "$ref": "#/components/headers/MissingWithEmptyComps" }),
+            Some(&ShimComponents::default()),
+            Some(&extra_reg),
+            None,
+        )
+        .is_err());
     }
 }

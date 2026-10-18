@@ -258,13 +258,12 @@ pub fn extract_response_details_with_registry(
                 links = extract_links_from_raw(raw_links, components_ctx, registry, base_ctx)?;
             }
 
-            let summary = summary_override.or_else(|| {
-                raw_response
-                    .as_ref()
-                    .and_then(|raw| raw.get("summary"))
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-            });
+            let raw_summary = raw_response
+                .as_ref()
+                .and_then(|raw| raw.get("summary"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let summary = summary_override.or(raw_summary);
 
             let description = if r.description.trim().is_empty() {
                 None
@@ -290,24 +289,19 @@ pub fn extract_response_details_with_registry(
 }
 
 fn parsed_server_from_utoipa(server: &Server) -> ParsedServer {
-    let variables = server
-        .variables
-        .as_ref()
-        .map(|vars| {
-            vars.iter()
-                .map(|(name, var)| {
-                    (
-                        name.clone(),
-                        ParsedServerVariable {
-                            enum_values: var.enum_values.clone(),
-                            default: var.default_value.clone(),
-                            description: var.description.clone(),
-                        },
-                    )
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let mut variables = BTreeMap::new();
+    if let Some(vars) = server.variables.as_ref() {
+        for (name, var) in vars {
+            variables.insert(
+                name.clone(),
+                ParsedServerVariable {
+                    enum_values: var.enum_values.clone(),
+                    default: var.default_value.clone(),
+                    description: var.description.clone(),
+                },
+            );
+        }
+    }
 
     ParsedServer {
         url: server.url.clone(),
@@ -672,9 +666,7 @@ fn resolve_header_from_components(
     }
 
     registry
-        .and_then(|registry| {
-            registry.resolve_component_ref_with_components(ref_str, base_uri, "headers")
-        })
+        .and_then(|reg| reg.resolve_component_ref_with_components(ref_str, base_uri, "headers"))
         .map(|(raw, _, _)| raw)
 }
 
@@ -988,9 +980,7 @@ fn resolve_link_raw_from_components(
     }
 
     registry
-        .and_then(|registry| {
-            registry.resolve_component_ref_with_components(ref_str, base_uri, "links")
-        })
+        .and_then(|reg| reg.resolve_component_ref_with_components(ref_str, base_uri, "links"))
         .map(|(raw, _, _)| raw)
 }
 
@@ -2762,6 +2752,87 @@ components:
             Some(&ShimComponents::default()),
             Some(&reg),
             None
+        )
+        .is_some());
+
+        // Cover closure false/None return paths for tarpaulin DWARF line tables
+        let mut extra_comps = ShimComponents::default();
+        extra_comps.extra.insert(
+            "responses".to_string(),
+            json!({ "BadResp": "not_a_response" }),
+        );
+        extra_comps.extra.insert(
+            "mediaTypes".to_string(),
+            json!({ "KnownMedia": { "schema": { "type": "string" } } }),
+        );
+        let mut extra_reg = DocumentRegistry::new();
+        extra_reg
+            .register_openapi_yaml(
+                "https://example.com/extra.yaml",
+                r#"
+openapi: 3.2.0
+info:
+  title: Extra
+  version: "1.0"
+paths: {}
+components:
+  responses:
+    BadExtResp:
+      $ref: '#/components/responses/Other'
+"#,
+            )
+            .expect("register extra");
+        assert!(resolve_response_from_components(
+            &utoipa::openapi::Ref::new("#/components/responses/BadResp"),
+            Some(&extra_comps),
+            Some(&extra_reg),
+            None,
+        )
+        .is_none());
+        assert!(resolve_response_from_components(
+            &utoipa::openapi::Ref::new(
+                "https://example.com/extra.yaml#/components/responses/BadExtResp"
+            ),
+            Some(&ShimComponents::default()),
+            Some(&extra_reg),
+            None,
+        )
+        .is_none());
+        assert!(resolve_response_from_components(
+            &utoipa::openapi::Ref::new("#/components/schemas/NotAResponse"),
+            Some(&extra_comps),
+            None,
+            None,
+        )
+        .is_none());
+        assert!(resolve_link_raw_from_components(
+            "#/components/schemas/NotALink",
+            Some(&extra_comps),
+            Some(&extra_reg),
+            None,
+        )
+        .is_none());
+        assert!(resolve_header_from_components(
+            "#/components/schemas/NotAHeader",
+            Some(&extra_comps),
+            Some(&extra_reg),
+            None,
+        )
+        .is_none());
+        assert!(raw_media_for_type(
+            &json!({ "content": { "application/json": { "$ref": "#/components/schemas/NotMedia" } } }),
+            "application/json",
+            Some(&extra_comps),
+            Some(&extra_reg),
+            None,
+        )
+        .is_some());
+        assert!(raw_media_for_type(
+            &json!({ "content": { "application/json": { "$ref": "#/components/mediaTypes/MissingMedia" } } }),
+            "application/json",
+            Some(&extra_comps),
+            Some(&extra_reg),
+            None,
         )
         .is_some());
     }

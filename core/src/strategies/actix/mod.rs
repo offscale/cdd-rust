@@ -11,13 +11,48 @@ pub mod registration;
 pub mod scaffolding;
 pub mod testing;
 pub mod utils;
+pub mod workflows;
 
 use crate::openapi::parse::models::{ContentMediaType, SecurityRequirementGroup};
 use crate::openapi::parse::ParsedRoute;
-use crate::strategies::{BackendStrategy, CodegenStrategy, HttpServerStrategy, StrategyKind};
+use crate::strategies::{
+    BackendStrategy, CodegenStrategy, HttpServerStrategy, StrategyKind, WorkflowStrategy,
+};
 
 /// Strategy for generating Actix Web compatible code.
 pub struct ActixStrategy;
+
+impl WorkflowStrategy for ActixStrategy {
+    fn emit_workflow_models(
+        &self,
+        doc: &crate::arazzo::models::ArazzoDocument,
+        linked_specs: &std::collections::BTreeMap<
+            String,
+            crate::openapi::parse::document::ParsedOpenApi,
+        >,
+    ) -> crate::error::AppResult<String> {
+        workflows::emit_workflow_models(doc, linked_specs)
+    }
+
+    fn emit_workflow_module(
+        &self,
+        doc: &crate::arazzo::models::ArazzoDocument,
+        linked_specs: &std::collections::BTreeMap<
+            String,
+            crate::openapi::parse::document::ParsedOpenApi,
+        >,
+    ) -> crate::error::AppResult<String> {
+        workflows::emit_workflow_module(doc, linked_specs)
+    }
+
+    fn emit_workflow_tests(
+        &self,
+        doc: &crate::arazzo::models::ArazzoDocument,
+        crate_name: &str,
+    ) -> crate::error::AppResult<String> {
+        workflows::emit_workflow_tests(doc, crate_name)
+    }
+}
 
 impl CodegenStrategy for ActixStrategy {
     fn kind(&self) -> StrategyKind {

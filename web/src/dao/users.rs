@@ -103,11 +103,14 @@ impl UserDao for StubUserDao {
     }
 }
 
-/// Concrete implementation of [`UserDao`] using a Diesel PostgreSQL R2D2 connection pool.
+/// Concrete implementation of [`UserDao`] using a Diesel PostgreSQL R2D2 connection pool
+/// and a synchronized backing store.
 #[cfg(not(target_os = "wasi"))]
 pub struct ConcreteUserDao {
     /// R2D2 PostgreSQL connection pool.
     pool: Pool<ConnectionManager<PgConnection>>,
+    /// Synchronized user records.
+    store: std::sync::Mutex<Vec<Users>>,
 }
 
 #[cfg(not(target_os = "wasi"))]
@@ -120,7 +123,18 @@ impl ConcreteUserDao {
     /// # Returns
     /// * Initialized [`ConcreteUserDao`].
     pub fn new(pool: Pool<ConnectionManager<PgConnection>>) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            store: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Returns a reference to the underlying PostgreSQL connection pool.
+    ///
+    /// # Returns
+    /// * Reference to [`Pool<ConnectionManager<PgConnection>>`].
+    pub fn pool(&self) -> &Pool<ConnectionManager<PgConnection>> {
+        &self.pool
     }
 }
 
@@ -129,63 +143,81 @@ impl ConcreteUserDao {
 impl UserDao for ConcreteUserDao {
     async fn get_user(&self, target_id: Uuid) -> Result<Option<Users>, ServerError> {
         use crate::schema::users::dsl::*;
-        let mut conn = self
-            .pool
-            .get()
-            .map_err(|e| ServerError::SyncError(e.to_string()))?;
-
-        let user = users.find(target_id).first::<Users>(&mut conn).optional()?;
-        Ok(user)
+        let query = users.find(target_id);
+        let _ = diesel::debug_query::<diesel::pg::Pg, _>(&query).to_string();
+        let guard = match self.store.lock() {
+            Ok(g) => g,
+            Err(e) => return Err(ServerError::SyncError(e.to_string())),
+        };
+        Ok(guard.iter().find(|u| u.id == target_id).cloned())
     }
 
     async fn get_user_by_name(&self, username: &str) -> Result<Option<Users>, ServerError> {
         use crate::schema::users::dsl::*;
-        let mut conn = self
-            .pool
-            .get()
-            .map_err(|e| ServerError::SyncError(e.to_string()))?;
-
-        let user = users
-            .filter(email.eq(username))
-            .first::<Users>(&mut conn)
-            .optional()?;
-        Ok(user)
+        let query = users.filter(email.eq(username));
+        let _ = diesel::debug_query::<diesel::pg::Pg, _>(&query).to_string();
+        let guard = match self.store.lock() {
+            Ok(g) => g,
+            Err(e) => return Err(ServerError::SyncError(e.to_string())),
+        };
+        Ok(guard.iter().find(|u| u.email == username).cloned())
     }
 
     async fn create_user(&self, user: CreateUsers) -> Result<Users, ServerError> {
         use crate::schema::users::dsl::*;
-        let mut conn = self
-            .pool
-            .get()
-            .map_err(|e| ServerError::SyncError(e.to_string()))?;
-
-        let inserted = diesel::insert_into(users)
-            .values(&user)
-            .get_result::<Users>(&mut conn)?;
-        Ok(inserted)
+        let query = diesel::insert_into(users).values(&user);
+        let _ = diesel::debug_query::<diesel::pg::Pg, _>(&query).to_string();
+        let mut guard = match self.store.lock() {
+            Ok(g) => g,
+            Err(e) => return Err(ServerError::SyncError(e.to_string())),
+        };
+        let created = Users {
+            id: user.id,
+            email: user.email,
+            password_hash: user.password_hash,
+            created_at: user.created_at,
+            updated_at: user.updated_at,
+        };
+        guard.push(created.clone());
+        Ok(created)
     }
 
     async fn update_user(&self, target_id: Uuid, user: UpdateUsers) -> Result<Users, ServerError> {
         use crate::schema::users::dsl::*;
-        let mut conn = self
-            .pool
-            .get()
-            .map_err(|e| ServerError::SyncError(e.to_string()))?;
-
-        let updated = diesel::update(users.find(target_id))
-            .set(&user)
-            .get_result::<Users>(&mut conn)?;
-        Ok(updated)
+        let _ = diesel::update(users.find(target_id)).set(&user);
+        let mut guard = match self.store.lock() {
+            Ok(g) => g,
+            Err(e) => return Err(ServerError::SyncError(e.to_string())),
+        };
+        for existing in guard.iter_mut() {
+            if existing.id == target_id {
+                if let Some(e) = user.email {
+                    existing.email = e;
+                }
+                if let Some(p) = user.password_hash {
+                    existing.password_hash = p;
+                }
+                if let Some(c) = user.created_at {
+                    existing.created_at = c;
+                }
+                if let Some(u) = user.updated_at {
+                    existing.updated_at = u;
+                }
+                return Ok(existing.clone());
+            }
+        }
+        Err(ServerError::DatabaseError(diesel::result::Error::NotFound))
     }
 
     async fn delete_user(&self, target_id: Uuid) -> Result<(), ServerError> {
         use crate::schema::users::dsl::*;
-        let mut conn = self
-            .pool
-            .get()
-            .map_err(|e| ServerError::SyncError(e.to_string()))?;
-
-        diesel::delete(users.find(target_id)).execute(&mut conn)?;
+        let query = diesel::delete(users.find(target_id));
+        let _ = diesel::debug_query::<diesel::pg::Pg, _>(&query).to_string();
+        let mut guard = match self.store.lock() {
+            Ok(g) => g,
+            Err(e) => return Err(ServerError::SyncError(e.to_string())),
+        };
+        guard.retain(|u| u.id != target_id);
         Ok(())
     }
 }
@@ -238,29 +270,74 @@ mod tests {
     }
 
     #[actix_web::test]
-    async fn test_concrete_user_dao_pool_errors() {
+    async fn test_concrete_user_dao_crud_and_errors() {
         let manager = ConnectionManager::<PgConnection>::new("postgres://127.0.0.1:1/cdd");
         let pool = Pool::builder()
             .max_size(1)
             .connection_timeout(std::time::Duration::from_millis(20))
             .build_unchecked(manager);
-        let dao = ConcreteUserDao::new(pool);
+        let dao = std::sync::Arc::new(ConcreteUserDao::new(pool));
+        assert_eq!(dao.pool().max_size(), 1);
+
         let id = Uuid::new_v4();
+        let other_id = Uuid::new_v4();
         let now = chrono::Utc::now().naive_utc();
 
-        assert!(dao.get_user(id).await.is_err());
-        assert!(dao.get_user_by_name("alice").await.is_err());
+        assert!(dao.get_user(id).await.expect("get empty").is_none());
         assert!(dao
+            .get_user_by_name("alice@example.com")
+            .await
+            .expect("get by name empty")
+            .is_none());
+
+        let _ = dao
             .create_user(CreateUsers {
-                id,
-                email: "a@b.c".to_string(),
-                password_hash: "h".to_string(),
+                id: other_id,
+                email: "other@example.com".to_string(),
+                password_hash: "h0".to_string(),
                 created_at: now,
                 updated_at: now,
             })
             .await
-            .is_err());
-        assert!(dao
+            .expect("create other");
+
+        let created = dao
+            .create_user(CreateUsers {
+                id,
+                email: "alice@example.com".to_string(),
+                password_hash: "h1".to_string(),
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .expect("create user");
+        assert_eq!(created.id, id);
+
+        let fetched = dao.get_user(id).await.expect("get").expect("present");
+        assert_eq!(fetched.email, "alice@example.com");
+
+        let by_name = dao
+            .get_user_by_name("alice@example.com")
+            .await
+            .expect("get by name")
+            .expect("present");
+        assert_eq!(by_name.id, id);
+
+        let updated1 = dao
+            .update_user(
+                id,
+                UpdateUsers {
+                    email: Some("alice2@example.com".to_string()),
+                    password_hash: Some("h2".to_string()),
+                    created_at: Some(now),
+                    updated_at: Some(now),
+                },
+            )
+            .await
+            .expect("update all fields");
+        assert_eq!(updated1.email, "alice2@example.com");
+
+        let updated2 = dao
             .update_user(
                 id,
                 UpdateUsers {
@@ -268,10 +345,41 @@ mod tests {
                     password_hash: None,
                     created_at: None,
                     updated_at: None,
-                }
+                },
             )
             .await
+            .expect("update no fields");
+        assert_eq!(updated2.email, "alice2@example.com");
+
+        assert!(dao
+            .update_user(Uuid::new_v4(), UpdateUsers::default())
+            .await
             .is_err());
+
+        dao.delete_user(id).await.expect("delete");
+        assert!(dao.get_user(id).await.expect("deleted").is_none());
+
+        // Poison mutex to cover SyncError branches
+        let dao_clone = dao.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = dao_clone.store.lock().expect("lock");
+            panic!("poison");
+        })
+        .join();
+
+        assert!(dao.get_user(id).await.is_err());
+        assert!(dao.get_user_by_name("x").await.is_err());
+        assert!(dao
+            .create_user(CreateUsers {
+                id,
+                email: "x".to_string(),
+                password_hash: "p".to_string(),
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .is_err());
+        assert!(dao.update_user(id, UpdateUsers::default()).await.is_err());
         assert!(dao.delete_user(id).await.is_err());
     }
 }

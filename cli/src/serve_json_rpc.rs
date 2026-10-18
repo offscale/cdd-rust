@@ -189,6 +189,25 @@ async fn handle_rpc(body: String) -> impl Responder {
                 id,
             },
         },
+        "from_arazzo" | "to_arazzo" => {
+            match dispatch_tool_command(req.method.as_str(), &params, None) {
+                Ok(msg) => JsonRpcResponse {
+                    jsonrpc: "2.0".to_string(),
+                    result: Some(json!({"status": "success", "message": msg})),
+                    error: None,
+                    id,
+                },
+                Err(e) => JsonRpcResponse {
+                    jsonrpc: "2.0".to_string(),
+                    result: None,
+                    error: Some(JsonRpcError {
+                        code: -32000,
+                        message: e.to_string(),
+                    }),
+                    id,
+                },
+            }
+        }
         _ => JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
             result: None,
@@ -476,6 +495,37 @@ mod tests {
             .to_request();
         let resp_sync_err: Value = test::call_and_read_body_json(&app, req_sync_err).await;
         assert_eq!(resp_sync_err["error"]["code"], -32000);
+
+        let arazzo_spec = dir.path().join("rpc.arazzo.yaml");
+        std::fs::write(
+            &arazzo_spec,
+            "arazzo: 1.1.0\ninfo:\n  title: RpcFlow\n  version: 1.0.0\nsourceDescriptions:\n  - name: api\n    url: ./openapi.yaml\nworkflows:\n  - workflowId: wf1\n    steps:\n      - stepId: s1\n        operationId: op1\n",
+        )
+        .expect("write arazzo");
+        let arazzo_out = dir.path().join("rpc_arazzo_out");
+        let fa_payload = json!({
+            "jsonrpc": "2.0",
+            "method": "from_arazzo",
+            "params": {
+                "input": arazzo_spec.to_str().expect("str"),
+                "output": arazzo_out.to_str().expect("str")
+            },
+            "id": 5
+        })
+        .to_string();
+        let req_fa = test::TestRequest::post()
+            .uri("/")
+            .set_payload(fa_payload)
+            .to_request();
+        let resp_fa: Value = test::call_and_read_body_json(&app, req_fa).await;
+        assert_eq!(resp_fa["result"]["status"], "success");
+
+        let req_ta_err = test::TestRequest::post()
+            .uri("/")
+            .set_payload(r#"{"jsonrpc": "2.0", "method": "to_arazzo", "params": {}, "id": 6}"#)
+            .to_request();
+        let resp_ta_err: Value = test::call_and_read_body_json(&app, req_ta_err).await;
+        assert_eq!(resp_ta_err["error"]["code"], -32000);
     }
 
     #[core::prelude::v1::test]

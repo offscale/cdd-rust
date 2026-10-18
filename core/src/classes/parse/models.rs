@@ -164,7 +164,7 @@ pub struct ParsedField {
 }
 
 /// Represents a fully parsed struct including field and doc metadata.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ParsedStruct {
     /// The struct name.
     pub name: String,

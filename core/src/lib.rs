@@ -8,6 +8,9 @@
 /// Shared error types.
 pub mod error;
 
+/// Strongly typed Arazzo 1.1.0 workflow models, parsers, and emitters.
+pub mod arazzo;
+
 /// Type mapping logic (Rust -> JSON).
 pub mod type_mapping;
 

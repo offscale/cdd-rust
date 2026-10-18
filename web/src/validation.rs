@@ -8,7 +8,7 @@
 
 use actix_web::{
     body::EitherBody,
-    dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
+    dev::{Service, ServiceRequest, ServiceResponse, Transform},
     http::Method,
     Error, HttpResponse,
 };
@@ -55,7 +55,12 @@ where
     type Error = Error;
     type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    forward_ready!(service);
+    fn poll_ready(
+        &self,
+        ctx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(ctx)
+    }
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
         let srv = self.service.clone();
@@ -77,7 +82,8 @@ where
                 }
             }
 
-            srv.call(req).await.map(|res| res.map_into_left_body())
+            let res = srv.call(req).await?;
+            Ok(res.map_into_left_body())
         })
     }
 }
@@ -99,6 +105,10 @@ mod tests {
                 ),
         )
         .await;
+
+        let waker = futures_util::task::noop_waker();
+        let mut cx = core::task::Context::from_waker(&waker);
+        let _ = app.poll_ready(&mut cx);
 
         let req = test::TestRequest::get().uri("/").to_request();
         let resp = test::call_service(&app, req).await;
