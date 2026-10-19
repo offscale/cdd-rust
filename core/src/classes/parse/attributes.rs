@@ -1,40 +1,45 @@
+#![deny(missing_docs)]
+
 //! # Attribute Operations
 //!
-//! internal logic for parsing `#[serde(...)]` and `#[oai(...)]` attributes.
+//! Internal logic for parsing `#[serde(...)]` and `#[oai(...)]` attributes
+//! directly from `ra_ap_syntax` token trees without regular expressions.
 
 use crate::classes::parse::models::RenameRule;
 use ra_ap_syntax::ast::{self};
-use ra_ap_syntax::{AstNode, SyntaxNode};
-use regex::Regex;
-use std::sync::OnceLock;
+use ra_ap_syntax::{AstNode, SyntaxKind, SyntaxNode, SyntaxToken};
 
-/// Helper struct for attributes extracted from a single node.
+/// Helper struct for attributes extracted from a single AST node.
 #[derive(Default, Debug)]
 pub struct AttrInfo {
-    /// The rename value if present.
+    /// The `rename` value if present.
     pub rename: Option<String>,
-    /// The rename_all rule if present.
+    /// The `rename_all` rule if present.
     pub rename_all: Option<RenameRule>,
-    /// Whether the skip flag was found.
+    /// Whether the `skip` flag was found.
     pub is_skipped: bool,
-    /// Whether the field is skipped during serialization.
+    /// Whether the field is skipped during serialization (`skip` or `skip_serializing`).
     pub skip_serializing: bool,
-    /// Whether the field is skipped during deserialization.
+    /// Whether the field is skipped during deserialization (`skip` or `skip_deserializing`).
     pub skip_deserializing: bool,
-    /// The tag value (for enums) if present.
+    /// The `tag` value (for enums) if present.
     pub tag: Option<String>,
-    /// Whether the untagged flag was found (for enums).
+    /// Whether the `untagged` flag was found (for enums).
     pub untagged: bool,
-    /// Whether deny_unknown_fields was found.
+    /// Whether `deny_unknown_fields` was found.
     pub deny_unknown_fields: bool,
 }
 
-/// Analyzes attributes on a node to find `serde` or `oai` configurations.
+/// Analyzes attributes on a syntax node to find `serde` or `oai` configurations.
+///
+/// # Arguments
+/// * `node` - Reference to the [`SyntaxNode`] whose direct `#[serde(...)]` / `#[oai(...)]` attributes are inspected.
+///
+/// # Returns
+/// * Populated [`AttrInfo`] describing all discovered serialization/OpenAPI directives.
 pub fn extract_attributes(node: &SyntaxNode) -> AttrInfo {
     let mut info = AttrInfo::default();
 
-    // Iterate over children that are attributes
-    // Use generic casting iterator manually to work on SyntaxNode directly
     for meta in node
         .children()
         .filter_map(ast::Attr::cast)
@@ -45,7 +50,7 @@ pub fn extract_attributes(node: &SyntaxNode) -> AttrInfo {
             .is_some_and(|p| matches!(p.to_string().as_str(), "serde" | "oai"));
         if is_target {
             if let Some(tt) = meta.token_tree() {
-                parse_attribute_content(&tt.to_string(), &mut info);
+                parse_attribute_token_tree(&tt, &mut info);
             }
         }
     }
@@ -53,70 +58,65 @@ pub fn extract_attributes(node: &SyntaxNode) -> AttrInfo {
     info
 }
 
-/// Parses the inner content of an attribute.
-fn parse_attribute_content(content: &str, info: &mut AttrInfo) {
-    static RENAME_RE: OnceLock<Regex> = OnceLock::new();
-    let rename_re =
-        RENAME_RE.get_or_init(|| Regex::new(r#"rename\s*=\s*"([^"]+)""#).expect("Invalid regex"));
+/// Parses the non-trivia tokens of a `#[serde(...)]` or `#[oai(...)]` [`ast::TokenTree`].
+fn parse_attribute_token_tree(tt: &ast::TokenTree, info: &mut AttrInfo) {
+    let tokens: Vec<SyntaxToken> = tt
+        .syntax()
+        .children_with_tokens()
+        .filter_map(|el| el.into_token())
+        .filter(|tok| !tok.kind().is_trivia())
+        .collect();
 
-    static SKIP_RE: OnceLock<Regex> = OnceLock::new();
-    let skip_re = SKIP_RE.get_or_init(|| Regex::new(r#"\bskip\b"#).expect("Invalid regex"));
-    static SKIP_SERIALIZING_RE: OnceLock<Regex> = OnceLock::new();
-    let skip_serializing_re = SKIP_SERIALIZING_RE
-        .get_or_init(|| Regex::new(r#"\bskip_serializing\b"#).expect("Invalid regex"));
-    static SKIP_DESERIALIZING_RE: OnceLock<Regex> = OnceLock::new();
-    let skip_deserializing_re = SKIP_DESERIALIZING_RE
-        .get_or_init(|| Regex::new(r#"\bskip_deserializing\b"#).expect("Invalid regex"));
-
-    static TAG_RE: OnceLock<Regex> = OnceLock::new();
-    let tag_re =
-        TAG_RE.get_or_init(|| Regex::new(r#"tag\s*=\s*"([^"]+)""#).expect("Invalid regex"));
-
-    static UNTAGGED_RE: OnceLock<Regex> = OnceLock::new();
-    let untagged_re =
-        UNTAGGED_RE.get_or_init(|| Regex::new(r#"\buntagged\b"#).expect("Invalid regex"));
-
-    static RENAME_ALL_RE: OnceLock<Regex> = OnceLock::new();
-    let rename_all_re = RENAME_ALL_RE
-        .get_or_init(|| Regex::new(r#"rename_all\s*=\s*"([^"]+)""#).expect("Invalid regex"));
-
-    static DENY_UNKNOWN_RE: OnceLock<Regex> = OnceLock::new();
-    let deny_unknown_re = DENY_UNKNOWN_RE
-        .get_or_init(|| Regex::new(r#"\bdeny_unknown_fields\b"#).expect("Invalid regex"));
-
-    if let Some(val) = rename_re.captures(content).and_then(|c| c.get(1)) {
-        info.rename = Some(val.as_str().to_string());
+    let mut idx = 0;
+    while idx < tokens.len() {
+        let tok = &tokens[idx];
+        if tok.kind() == SyntaxKind::IDENT {
+            match tok.text() {
+                "skip" => {
+                    info.is_skipped = true;
+                    info.skip_serializing = true;
+                    info.skip_deserializing = true;
+                }
+                "skip_serializing" => {
+                    info.skip_serializing = true;
+                }
+                "skip_deserializing" => {
+                    info.skip_deserializing = true;
+                }
+                "untagged" => {
+                    info.untagged = true;
+                }
+                "deny_unknown_fields" => {
+                    info.deny_unknown_fields = true;
+                }
+                key @ ("rename" | "rename_all" | "tag") => {
+                    if let Some(val) = extract_assigned_string_literal(&tokens, idx) {
+                        match key {
+                            "rename" => info.rename = Some(val),
+                            "rename_all" => info.rename_all = RenameRule::parse(&val),
+                            _ => info.tag = Some(val),
+                        }
+                        idx += 2;
+                    }
+                }
+                _ => {}
+            }
+        }
+        idx += 1;
     }
+}
 
-    if let Some(val) = rename_all_re.captures(content).and_then(|c| c.get(1)) {
-        info.rename_all = RenameRule::parse(val.as_str());
+/// Extracts the unquoted string literal from a `key = "value"` token sequence starting at `key_idx`.
+fn extract_assigned_string_literal(tokens: &[SyntaxToken], key_idx: usize) -> Option<String> {
+    let eq_tok = tokens.get(key_idx + 1)?;
+    let val_tok = tokens.get(key_idx + 2)?;
+    if eq_tok.kind() == SyntaxKind::EQ && val_tok.kind() == SyntaxKind::STRING {
+        let raw = val_tok.text();
+        if raw.len() >= 2 && raw.starts_with('"') && raw.ends_with('"') {
+            return Some(raw[1..raw.len() - 1].to_string());
+        }
     }
-
-    if skip_re.is_match(content) {
-        info.is_skipped = true;
-        info.skip_serializing = true;
-        info.skip_deserializing = true;
-    }
-
-    if skip_serializing_re.is_match(content) {
-        info.skip_serializing = true;
-    }
-
-    if skip_deserializing_re.is_match(content) {
-        info.skip_deserializing = true;
-    }
-
-    if let Some(val) = tag_re.captures(content).and_then(|c| c.get(1)) {
-        info.tag = Some(val.as_str().to_string());
-    }
-
-    if untagged_re.is_match(content) {
-        info.untagged = true;
-    }
-
-    if deny_unknown_re.is_match(content) {
-        info.deny_unknown_fields = true;
-    }
+    None
 }
 
 #[cfg(test)]
@@ -259,10 +259,11 @@ mod tests {
     }
 
     #[test]
-    fn test_ignores_non_target_attributes() {
+    fn test_ignores_non_target_attributes_and_malformed_assignments() {
         let code = r#"
             #[derive(Debug)]
             #[serde]
+            #[serde(unknown_flag, rename, tag = 123, rename = 'c')]
             #[]
             struct Ignored {
                 #[doc = "not serde"]

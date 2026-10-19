@@ -3,6 +3,7 @@
 //! Store inventory and order HTTP handlers backed by thread-safe in-memory state.
 
 use crate::error::ServerError;
+use crate::models::handlers::store::OrderIdParam;
 use actix_web::{web, HttpResponse};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -24,7 +25,7 @@ pub struct OrderStore {
 /// * `200 OK` with a JSON object mapping status names to quantities.
 ///
 /// # Errors
-/// * Returns [`ServerError::SyncError`] if the internal mutex is poisoned.
+/// * Returns [`ServerError`] wrapping [`cdd_core::error::AppError::SyncError`] if the internal mutex is poisoned.
 pub async fn get_inventory(
     store: Option<web::Data<OrderStore>>,
 ) -> Result<HttpResponse, ServerError> {
@@ -33,7 +34,7 @@ pub async fn get_inventory(
         let orders = store
             .orders
             .lock()
-            .map_err(|_| ServerError::SyncError("OrderStore lock poisoned".to_string()))?;
+            .map_err(|_| ServerError::sync_error("OrderStore lock poisoned"))?;
         for order in orders.values() {
             let status = order
                 .get("status")
@@ -57,7 +58,7 @@ pub async fn get_inventory(
 /// * `200 OK` with the stored order JSON.
 ///
 /// # Errors
-/// * Returns [`ServerError::SyncError`] if the internal mutex is poisoned.
+/// * Returns [`ServerError`] wrapping [`cdd_core::error::AppError::SyncError`] if the internal mutex is poisoned.
 pub async fn place_order(
     body: Option<web::Json<Value>>,
     store: Option<web::Data<OrderStore>>,
@@ -71,7 +72,7 @@ pub async fn place_order(
         let mut orders = store
             .orders
             .lock()
-            .map_err(|_| ServerError::SyncError("OrderStore lock poisoned".to_string()))?;
+            .map_err(|_| ServerError::sync_error("OrderStore lock poisoned"))?;
         orders.insert(id, payload.clone());
     }
 
@@ -88,17 +89,20 @@ pub async fn place_order(
 /// * `200 OK` with the order JSON if found, or `404 Not Found` if missing in a configured store.
 ///
 /// # Errors
-/// * Returns [`ServerError::SyncError`] if the internal mutex is poisoned.
+/// * Returns [`ServerError`] wrapping [`cdd_core::error::AppError::SyncError`] if the internal mutex is poisoned.
 pub async fn get_order_by_id(
     order_id: web::Path<i64>,
     store: Option<web::Data<OrderStore>>,
 ) -> Result<HttpResponse, ServerError> {
-    let id = order_id.into_inner();
+    let id = OrderIdParam {
+        order_id: order_id.into_inner(),
+    }
+    .order_id;
     if let Some(store) = store {
         let orders = store
             .orders
             .lock()
-            .map_err(|_| ServerError::SyncError("OrderStore lock poisoned".to_string()))?;
+            .map_err(|_| ServerError::sync_error("OrderStore lock poisoned"))?;
         if let Some(order) = orders.get(&id) {
             return Ok(HttpResponse::Ok().json(order));
         }
@@ -117,17 +121,20 @@ pub async fn get_order_by_id(
 /// * `200 OK` if deleted, or `404 Not Found` if missing in a configured store.
 ///
 /// # Errors
-/// * Returns [`ServerError::SyncError`] if the internal mutex is poisoned.
+/// * Returns [`ServerError`] wrapping [`cdd_core::error::AppError::SyncError`] if the internal mutex is poisoned.
 pub async fn delete_order(
     order_id: web::Path<i64>,
     store: Option<web::Data<OrderStore>>,
 ) -> Result<HttpResponse, ServerError> {
-    let id = order_id.into_inner();
+    let id = OrderIdParam {
+        order_id: order_id.into_inner(),
+    }
+    .order_id;
     if let Some(store) = store {
         let mut orders = store
             .orders
             .lock()
-            .map_err(|_| ServerError::SyncError("OrderStore lock poisoned".to_string()))?;
+            .map_err(|_| ServerError::sync_error("OrderStore lock poisoned"))?;
         if orders.remove(&id).is_some() {
             return Ok(HttpResponse::Ok().finish());
         }

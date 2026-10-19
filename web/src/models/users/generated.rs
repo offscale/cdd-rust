@@ -1,8 +1,7 @@
-/* @generated and managed by dsync */
-#![allow(clippy::redundant_field_names)]
+#![deny(missing_docs)]
 
-#[allow(unused)]
-use crate::diesel::*;
+//! Generated Diesel models (`Users`, `CreateUsers`, `UpdateUsers`) for the `users` table.
+
 use crate::schema::*;
 
 /// Struct representing a row in table `users`

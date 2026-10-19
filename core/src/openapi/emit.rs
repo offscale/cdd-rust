@@ -682,9 +682,9 @@ pub fn generate_openapi_document_with_routes_and_components(
     }
 
     if !merged.is_empty() {
-        doc.as_object_mut()
-            .expect("doc is object")
-            .insert("components".to_string(), Value::Object(merged));
+        if let Value::Object(doc_obj) = &mut doc {
+            doc_obj.insert("components".to_string(), Value::Object(merged));
+        }
     }
 
     Ok(doc)
@@ -720,13 +720,12 @@ fn insert_route_operation(
     emit_operation_servers: bool,
     root_security_empty: bool,
 ) -> AppResult<()> {
-    let path_item = target
-        .entry(route.path.clone())
-        .or_insert_with(|| Value::Object(Map::new()))
-        .as_object_mut()
-        .expect("path_item is object");
+    let mut path_item = match target.remove(&route.path) {
+        Some(Value::Object(map)) => map,
+        _ => Map::new(),
+    };
 
-    merge_path_extensions(path_item, &route.path_extensions, &route.path)?;
+    merge_path_extensions(&mut path_item, &route.path_extensions, &route.path)?;
     if let Some(summary) = &route.path_summary {
         path_item
             .entry("summary".to_string())
@@ -755,15 +754,20 @@ fn insert_route_operation(
     let method_key = route.method.to_ascii_lowercase();
     if is_reserved_method(&method_key) {
         path_item.insert(method_key, op);
+        target.insert(route.path.clone(), Value::Object(path_item));
         return Ok(());
     }
 
-    path_item
-        .entry("additionalOperations".to_string())
-        .or_insert_with(|| Value::Object(Map::new()))
-        .as_object_mut()
-        .expect("additionalOperations is object")
-        .insert(route.method.clone(), op);
+    if !path_item.contains_key("additionalOperations") {
+        path_item.insert(
+            "additionalOperations".to_string(),
+            Value::Object(Map::new()),
+        );
+    }
+    if let Some(Value::Object(add_ops)) = path_item.get_mut("additionalOperations") {
+        add_ops.insert(route.method.clone(), op);
+    }
+    target.insert(route.path.clone(), Value::Object(path_item));
     Ok(())
 }
 
@@ -1318,11 +1322,7 @@ fn merge_schema_value(generated: Value, raw: Option<&Value>) -> Value {
 }
 
 fn merge_response_entry_with_raw(generated: Value, raw: Option<&Value>) -> Value {
-    let Some(raw_obj) = raw.and_then(|v| v.as_object()) else {
-        return generated;
-    };
-    let gen_obj = generated.as_object().expect("generated response is object");
-    Value::Object(merge_json_objects(gen_obj.clone(), raw_obj))
+    merge_schema_value(generated, raw)
 }
 
 fn merge_request_body(
@@ -1333,11 +1333,7 @@ fn merge_request_body(
         return raw.clone();
     };
     let generated = build_request_body(body);
-    let Some(raw_obj) = raw.as_object() else {
-        return generated;
-    };
-    let gen_obj = generated.as_object().expect("generated body is object");
-    Value::Object(merge_json_objects(gen_obj.clone(), raw_obj))
+    merge_schema_value(generated, Some(raw))
 }
 
 fn build_request_body(body: &crate::openapi::parse::models::RequestBodyDefinition) -> Value {
@@ -1566,18 +1562,16 @@ fn build_callbacks(
     let mut cb_map = Map::new();
 
     for callback in callbacks {
-        let expr_map = cb_map
-            .entry(callback.name.clone())
-            .or_insert_with(|| Value::Object(Map::new()))
-            .as_object_mut()
-            .expect("expr_map is object");
+        let mut expr_map = match cb_map.remove(&callback.name) {
+            Some(Value::Object(map)) => map,
+            _ => Map::new(),
+        };
 
         let expr_key = callback.expression.as_str().to_string();
-        let path_item = expr_map
-            .entry(expr_key)
-            .or_insert_with(|| Value::Object(Map::new()))
-            .as_object_mut()
-            .expect("path_item is object");
+        let mut path_item = match expr_map.remove(&expr_key) {
+            Some(Value::Object(map)) => map,
+            _ => Map::new(),
+        };
 
         if !callback.path_params.is_empty() && !path_item.contains_key("parameters") {
             let params = callback
@@ -1588,7 +1582,9 @@ fn build_callbacks(
             path_item.insert("parameters".to_string(), Value::Array(params));
         }
 
-        insert_callback_operation(path_item, callback, root_security_empty);
+        insert_callback_operation(&mut path_item, callback, root_security_empty);
+        expr_map.insert(expr_key, Value::Object(path_item));
+        cb_map.insert(callback.name.clone(), Value::Object(expr_map));
     }
 
     Value::Object(cb_map)
@@ -1614,12 +1610,15 @@ fn insert_callback_operation(
         return;
     }
 
-    path_item
-        .entry("additionalOperations".to_string())
-        .or_insert_with(|| Value::Object(Map::new()))
-        .as_object_mut()
-        .expect("additionalOperations is object")
-        .insert(callback.method.clone(), op);
+    if !path_item.contains_key("additionalOperations") {
+        path_item.insert(
+            "additionalOperations".to_string(),
+            Value::Object(Map::new()),
+        );
+    }
+    if let Some(Value::Object(add_ops)) = path_item.get_mut("additionalOperations") {
+        add_ops.insert(callback.method.clone(), op);
+    }
 }
 
 fn build_callback_operation(
@@ -1788,9 +1787,10 @@ fn is_sequential_media_type(media_type: &str) -> bool {
 }
 
 fn schema_item_schema(schema: &Value) -> Option<Value> {
-    let obj = schema.as_object().expect("schema is object");
-    if obj.get("type").and_then(|v| v.as_str()) == Some("array") {
-        return obj.get("items").cloned();
+    if let Value::Object(obj) = schema {
+        if obj.get("type").and_then(|v| v.as_str()) == Some("array") {
+            return obj.get("items").cloned();
+        }
     }
     None
 }
@@ -1864,14 +1864,13 @@ fn generate_struct_schema(struct_def: &ParsedStruct, dialect: Option<&str>) -> A
             let (json_name, mut field_schema, is_optional) =
                 process_field(field, struct_def.rename_all.as_ref());
 
-            let obj = field_schema
-                .as_object_mut()
-                .expect("field_schema is object");
-            if field.is_deprecated {
-                obj.insert("deprecated".to_string(), json!(true));
-            }
-            if let Some(ext) = &field.external_docs {
-                obj.insert("externalDocs".to_string(), external_docs_value(ext));
+            if let Value::Object(obj) = &mut field_schema {
+                if field.is_deprecated {
+                    obj.insert("deprecated".to_string(), json!(true));
+                }
+                if let Some(ext) = &field.external_docs {
+                    obj.insert("externalDocs".to_string(), external_docs_value(ext));
+                }
             }
 
             properties.insert(json_name.clone(), field_schema);
@@ -1942,10 +1941,9 @@ fn generate_enum_schema(enum_def: &ParsedEnum, dialect: Option<&str>) -> AppResu
         };
 
         if variant.is_deprecated {
-            sub_schema
-                .as_object_mut()
-                .expect("sub_schema is object")
-                .insert("deprecated".to_string(), json!(true));
+            if let Value::Object(sub_obj) = &mut sub_schema {
+                sub_obj.insert("deprecated".to_string(), json!(true));
+            }
         }
 
         one_of.push(sub_schema);
@@ -2009,15 +2007,16 @@ fn process_field(field: &ParsedField, rename_all: Option<&RenameRule>) -> (Strin
         schema = make_nullable_schema(schema);
     }
 
-    let obj = schema.as_object_mut().expect("schema is object");
-    if let Some(desc) = &field.description {
-        obj.insert("description".to_string(), json!(desc));
-    }
-    if field.is_read_only {
-        obj.insert("readOnly".to_string(), json!(true));
-    }
-    if field.is_write_only {
-        obj.insert("writeOnly".to_string(), json!(true));
+    if let Value::Object(obj) = &mut schema {
+        if let Some(desc) = &field.description {
+            obj.insert("description".to_string(), json!(desc));
+        }
+        if field.is_read_only {
+            obj.insert("readOnly".to_string(), json!(true));
+        }
+        if field.is_write_only {
+            obj.insert("writeOnly".to_string(), json!(true));
+        }
     }
 
     (name, schema, is_optional)
@@ -2032,12 +2031,12 @@ fn binary_schema_value() -> Value {
 }
 
 fn make_nullable_schema(schema: Value) -> Value {
-    let obj = schema.as_object().expect("schema is object");
-
-    if let Some(Value::String(s)) = obj.get("type") {
-        let mut new_obj = obj.clone();
-        new_obj.insert("type".to_string(), json!([s, "null"]));
-        return Value::Object(new_obj);
+    if let Value::Object(obj) = &schema {
+        if let Some(Value::String(s)) = obj.get("type") {
+            let mut new_obj = obj.clone();
+            new_obj.insert("type".to_string(), json!([s, "null"]));
+            return Value::Object(new_obj);
+        }
     }
 
     json!({ "anyOf": [schema, { "type": "null" }] })
@@ -6590,7 +6589,11 @@ mod tests {
             url: "https://example.com/tuple".to_string(),
             description: Some("TupleDoc".to_string()),
         });
-        let _ = generate_json_schema(&ParsedModel::Struct(tuple_s), None).expect("tuple");
+        let tuple_schema =
+            generate_json_schema(&ParsedModel::Struct(tuple_s), None).expect("tuple");
+        assert_eq!(tuple_schema["title"], json!("RenamedTuple"));
+        assert_eq!(tuple_schema["type"], json!("array"));
+        assert_eq!(tuple_schema["deprecated"], json!(true));
 
         let mut f_ro = make_field("ro_field", "BTreeMap<String, Vec<Decimal>>", Some("f desc"));
         f_ro.is_read_only = true;
@@ -6628,12 +6631,16 @@ mod tests {
         named_s.description = None;
         named_s.rename_all = Some(RenameRule::CamelCase);
         named_s.deny_unknown_fields = true;
-        let _ = generate_json_schema(&ParsedModel::Struct(named_s), None).expect("named");
-        let _ = generate_json_schema(
+        let named_schema =
+            generate_json_schema(&ParsedModel::Struct(named_s), None).expect("named");
+        assert_eq!(named_schema["additionalProperties"], json!(false));
+        assert!(named_schema["properties"].get("skipMe").is_none());
+        let empty_schema = generate_json_schema(
             &ParsedModel::Struct(make_struct("EmptyStruct", vec![])),
             None,
         )
         .expect("empty_s");
+        assert_eq!(empty_schema["type"], json!("object"));
 
         let rich_enum = ParsedEnum {
             name: "RichEnum".to_string(),
@@ -6668,7 +6675,13 @@ mod tests {
             discriminator_mapping: Some(BTreeMap::new()),
             discriminator_default_mapping: Some("#/components/schemas/Fallback".to_string()),
         };
-        let _ = generate_json_schema(&ParsedModel::Enum(rich_enum), None).expect("rich_enum");
+        let enum_schema =
+            generate_json_schema(&ParsedModel::Enum(rich_enum), None).expect("rich_enum");
+        assert_eq!(enum_schema["title"], json!("RenamedEnum"));
+        assert_eq!(
+            enum_schema["discriminator"]["defaultMapping"],
+            json!("#/components/schemas/Fallback")
+        );
         assert!(schema_item_schema(&json!({ "type": "string" })).is_none());
         assert!(is_sequential_media_type("text/event-stream"));
         assert!(is_sequential_media_type("multipart/byteranges"));

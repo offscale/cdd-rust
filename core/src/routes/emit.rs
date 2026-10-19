@@ -41,15 +41,26 @@ pub fn register_routes(
     if let Some(func) = config_fn {
         let body = func
             .body()
-            .ok_or_else(|| crate::error::AppError::General("Config function has no body".into()))?;
+            .ok_or_else(|| crate::error::AppError::AstMutationError {
+                target: "config".into(),
+                reason: "Config function has no body".into(),
+            })?;
 
-        let existing_code = body.syntax().text().to_string();
+        let existing_paths: std::collections::HashSet<String> = body
+            .syntax()
+            .descendants()
+            .filter_map(ast::Path::cast)
+            .map(|p| p.syntax().text().to_string())
+            .collect();
 
         let r_curly = body
             .syntax()
             .last_token()
             .filter(|t| t.kind() == SyntaxKind::R_CURLY)
-            .ok_or_else(|| crate::error::AppError::General("Missing } in config".into()))?;
+            .ok_or_else(|| crate::error::AppError::AstMutationError {
+                target: "config".into(),
+                reason: "Missing } in config".into(),
+            })?;
 
         let insert_pos: usize = r_curly.text_range().start().into();
         let mut injection = String::new();
@@ -57,7 +68,7 @@ pub fn register_routes(
         for route in routes {
             let full_handler_path = format!("handlers::{}::{}", module_name, route.handler_name);
 
-            if !existing_code.contains(&full_handler_path) {
+            if !existing_paths.contains(&full_handler_path) {
                 let registration = strategy.route_registration_statement(route, &full_handler_path);
                 injection.push_str(&registration);
             }
@@ -67,9 +78,10 @@ pub fn register_routes(
             new_source.insert_str(insert_pos, &injection);
         }
     } else {
-        return Err(crate::error::AppError::General(
-            "Could not find 'config' function to patch".into(),
-        ));
+        return Err(crate::error::AppError::AstMutationError {
+            target: "config".into(),
+            reason: "Could not find 'config' function to patch".into(),
+        });
     }
 
     Ok(new_source)

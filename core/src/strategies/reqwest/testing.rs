@@ -115,12 +115,13 @@ pub fn generate_custom_test(
         .filter(|p| p.source == ParamSource::Path)
     {
         let var_name = to_snake_case(&param.name);
-        if param.ty == "String" {
+        let parsed_ty = param.rust_type();
+        if parsed_ty == crate::openapi::parse::models::RustType::String {
             code.push_str(&format!(
                 "    let {}: String = \"test_value\".to_string();\n",
                 var_name
             ));
-        } else if param.ty == "i64" || param.ty == "i32" || param.ty == "u64" || param.ty == "u32" {
+        } else if parsed_ty.is_integer() && !parsed_ty.is_option() {
             code.push_str(&format!("    let {}: {} = 1;\n", var_name, param.ty));
         } else {
             code.push_str(&format!(
@@ -211,22 +212,24 @@ pub fn generate_custom_test(
 
     // 5. Body
     if let Some(def) = &route.request_body {
-        let body_type = if def.ty == "Multipart" {
+        let full_body_type = if def.ty == "Multipart" {
             "reqwest::multipart::Form".to_string()
-        } else {
+        } else if def.ty.contains("::") {
             def.ty.clone()
+        } else {
+            match def.rust_type() {
+                crate::openapi::parse::models::RustType::Vec(inner) => match *inner {
+                    crate::openapi::parse::models::RustType::Custom(ident) => {
+                        format!("Vec<{}::models::{}>", crate_name, ident.as_str())
+                    }
+                    _ => def.ty.clone(),
+                },
+                crate::openapi::parse::models::RustType::Custom(ident) => {
+                    format!("{}::models::{}", crate_name, ident.as_str())
+                }
+                _ => def.ty.clone(),
+            }
         };
-
-        let mut full_body_type = body_type.clone();
-        if body_type.starts_with("Vec<") && !body_type.starts_with("Vec<u8>") {
-            let inner = &body_type[4..body_type.len() - 1];
-            full_body_type = format!("Vec<{}::models::{}>", crate_name, inner);
-        } else if !body_type.starts_with("String")
-            && !body_type.starts_with("Vec<")
-            && !body_type.contains("::")
-        {
-            full_body_type = format!("{}::models::{}", crate_name, body_type);
-        }
 
         if def.required {
             if full_body_type.contains("reqwest::multipart::Form") {
@@ -615,5 +618,13 @@ mod tests {
         }
         let custom6 = generate_custom_test(&r4, "sdk");
         assert!(custom6.contains("let body: Option<String> = None;"));
+
+        {
+            let rb = r4.request_body.as_mut().expect("request_body");
+            rb.ty = "Vec<String>".to_string();
+            rb.required = false;
+        }
+        let custom7 = generate_custom_test(&r4, "sdk");
+        assert!(custom7.contains("let body: Option<Vec<String>> = None;"));
     }
 }

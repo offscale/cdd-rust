@@ -84,54 +84,21 @@ mod tests {
         let dao = Arc::new(StubUserDao);
         let res = seed_database(dao).await;
         // Stub DAO returns NotImplemented, so seed_database should fail with it.
-        assert!(matches!(res, Err(ServerError::NotImplemented)));
+        assert!(matches!(
+            res,
+            Err(ServerError(cdd_core::error::AppError::NotImplemented))
+        ));
     }
 }
 
 #[cfg(test)]
 mod additional_seeder_tests {
     use super::*;
-    use crate::dao::users::UserDao;
-    use crate::models::users::{CreateUsers, UpdateUsers, Users};
-    use async_trait::async_trait;
-
-    struct SuccessUserDao;
-    #[async_trait]
-    impl UserDao for SuccessUserDao {
-        async fn get_user(&self, _id: Uuid) -> Result<Option<Users>, ServerError> {
-            Ok(None)
-        }
-        async fn get_user_by_name(&self, _username: &str) -> Result<Option<Users>, ServerError> {
-            Ok(None)
-        }
-        async fn create_user(&self, user: CreateUsers) -> Result<Users, ServerError> {
-            Ok(Users {
-                id: user.id,
-                email: user.email,
-                password_hash: "hash".to_string(),
-                created_at: user.created_at,
-                updated_at: user.updated_at,
-            })
-        }
-        async fn update_user(&self, _id: Uuid, _user: UpdateUsers) -> Result<Users, ServerError> {
-            Err(ServerError::NotImplemented)
-        }
-        async fn delete_user(&self, _id: Uuid) -> Result<(), ServerError> {
-            Err(ServerError::NotImplemented)
-        }
-    }
+    use crate::dao::users::InMemoryUserDao;
 
     #[actix_web::test]
     async fn test_seed_database_success() {
-        let dao = Arc::new(SuccessUserDao);
-        assert!(dao.get_user(Uuid::nil()).await.expect("ok").is_none());
-        assert!(dao.get_user_by_name("u").await.expect("ok").is_none());
-        assert!(dao
-            .update_user(Uuid::nil(), UpdateUsers::default())
-            .await
-            .is_err());
-        assert!(dao.delete_user(Uuid::nil()).await.is_err());
-
+        let dao = Arc::new(InMemoryUserDao::new());
         let res = seed_database(dao).await.expect("must succeed");
         assert_eq!(res.users.len(), 10);
     }

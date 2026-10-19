@@ -136,12 +136,11 @@ pub fn emit_workflow_tests(doc: &ArazzoDocument, crate_name: &str) -> AppResult<
                 StepTarget::WorkflowId(w) => ("post", format!("/workflows/{}", w)),
             };
             out.push_str(&format!(
-                "    // @ARAZZO_STEP_ID: {}\n    let req_{} = test::TestRequest::{}().uri({:?}).to_request();\n    let resp_{} = test::call_service(&app, req_{}).await;\n    let _status_{} = resp_{}.status().as_u16();\n",
+                "    // @ARAZZO_STEP_ID: {}\n    let req_{} = test::TestRequest::{}().uri({:?}).to_request();\n    let resp_{} = test::call_service(&app, req_{}).await;\n    assert!(resp_{}.status().as_u16() >= 100);\n",
                 step.step_id,
                 step_snake,
                 req_method,
                 uri,
-                step_snake,
                 step_snake,
                 step_snake,
                 step_snake

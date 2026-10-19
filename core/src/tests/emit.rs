@@ -140,16 +140,21 @@ fn generate_test_fn(
 }
 
 fn dummy_json_value(ty: &str) -> serde_json::Value {
-    if ty.contains("Uuid") {
-        serde_json::Value::String("00000000-0000-0000-0000-000000000000".to_string())
-    } else if ty.contains("i32") || ty.contains("i64") || ty.contains("Integer") {
-        serde_json::Value::Number(serde_json::Number::from(1))
-    } else if ty.contains("bool") || ty.contains("Boolean") {
-        serde_json::Value::Bool(true)
-    } else if ty.contains("Date") {
-        serde_json::Value::String("2023-01-01T00:00:00Z".to_string())
-    } else {
-        serde_json::Value::String("test_val".to_string())
+    let parsed = crate::openapi::parse::models::RustType::parse(ty);
+    match parsed.unwrap_option() {
+        crate::openapi::parse::models::RustType::Uuid => {
+            serde_json::Value::String("00000000-0000-0000-0000-000000000000".to_string())
+        }
+        ty_node if ty_node.is_integer() => serde_json::Value::Number(serde_json::Number::from(1)),
+        crate::openapi::parse::models::RustType::Primitive(
+            crate::openapi::parse::models::PrimitiveType::Bool,
+        ) => serde_json::Value::Bool(true),
+        crate::openapi::parse::models::RustType::DateTime
+        | crate::openapi::parse::models::RustType::NaiveDate
+        | crate::openapi::parse::models::RustType::NaiveDateTime => {
+            serde_json::Value::String("2023-01-01T00:00:00Z".to_string())
+        }
+        _ => serde_json::Value::String("test_val".to_string()),
     }
 }
 

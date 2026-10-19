@@ -9,6 +9,9 @@ use crate::functions::emit::extractors::{generate_function, generate_query_struc
 use crate::functions::emit::parsing::{extract_fn_names, extract_struct_names, to_snake_case};
 use crate::openapi::parse::ParsedRoute;
 use crate::strategies::BackendStrategy;
+use ra_ap_edition::Edition;
+use ra_ap_syntax::ast::{self, HasName};
+use ra_ap_syntax::{AstNode, SourceFile, SyntaxKind};
 
 /// Updates or creates a handler module source code.
 pub fn update_handler_module(
@@ -62,13 +65,37 @@ fn update_handler_module_dyn(
         }
     }
 
-    if !tests_code.is_empty() && !new_source.contains("mod tests {") {
-        new_source.push_str("\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n");
-        new_source.push_str(&tests_code);
-        new_source.push_str("}\n");
+    if !tests_code.is_empty() {
+        inject_into_mod_tests(&mut new_source, &tests_code);
     }
 
     Ok(new_source)
+}
+
+/// Injects generated unit test items into an existing `mod tests` CST node or appends a new `mod tests` block.
+fn inject_into_mod_tests(source: &mut String, tests_code: &str) {
+    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(source, Edition::Edition2021));
+    let insert_pos = parse
+        .tree()
+        .syntax()
+        .descendants()
+        .filter_map(ast::Module::cast)
+        .find(|m| m.name().is_some_and(|n| n.text() == "tests"))
+        .and_then(|m| m.item_list())
+        .and_then(|list| {
+            list.syntax()
+                .last_token()
+                .filter(|t| t.kind() == SyntaxKind::R_CURLY)
+        })
+        .map(|tok| usize::from(tok.text_range().start()));
+
+    if let Some(pos) = insert_pos {
+        source.insert_str(pos, tests_code);
+    } else {
+        source.push_str("\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n");
+        source.push_str(tests_code);
+        source.push_str("}\n");
+    }
 }
 
 #[cfg(test)]

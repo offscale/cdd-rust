@@ -48,9 +48,32 @@ pub fn emit_workflow_models(
 ",
     );
     out.push_str(
-        "use serde::{Deserialize, Serialize};
+        "use derive_more::{Display, Error, From};\nuse serde::{Deserialize, Serialize};\n\n",
+    );
+    out.push_str(
+        r#"/// Strongly typed error enum for Arazzo 1.1.0 workflow execution.
+#[derive(Debug, Display, Error, From)]
+pub enum WorkflowError {
+    /// HTTP client transport failure.
+    #[display("HTTP error: {_0}")]
+    Http(reqwest::Error),
+    /// Invalid HTTP method encountered in step configuration.
+    #[display("Invalid HTTP method: {_0}")]
+    InvalidMethod(reqwest::header::InvalidHeaderValue),
+    /// JSON serialization or deserialization failure.
+    #[display("JSON error: {_0}")]
+    Json(serde_json::Error),
+    /// Regular expression compilation failure.
+    #[display("Regex error: {_0}")]
+    Regex(regex::Error),
+    /// Step criterion assertion or runtime execution failure.
+    #[from(ignore)]
+    #[error(ignore)]
+    #[display("Workflow execution error: {_0}")]
+    Execution(String),
+}
 
-",
+"#,
     );
 
     if let Some(comps) = &doc.components {
@@ -327,7 +350,7 @@ fn emit_workflow_method(
     }
     out.push_str(&format!("    /// @ARAZZO_WORKFLOW_JSON: {}\n", wf_json));
     out.push_str(&format!(
-        "    #[allow(unused_variables, unused_mut, clippy::let_and_return)]\n    pub async fn {}(&self, inputs: {}Inputs) -> Result<{}Outputs, String> {{\n",
+        "    #[allow(unused_variables, unused_mut, clippy::let_and_return)]\n    pub async fn {}(&self, inputs: {}Inputs) -> Result<{}Outputs, WorkflowError> {{\n",
         wf_snake, wf_pascal, wf_pascal
     ));
     out.push_str("        let self_uri = self.self_uri.clone();\n");
@@ -436,7 +459,7 @@ fn emit_step_execution(
         }
     };
 
-    out.push_str(&format!("        let req_url = {};\n", url_expr));
+    out.push_str(&format!("        let mut req_url = {};\n", url_expr));
     out.push_str(&format!(
         "        let req_method = {:?}.to_string();\n",
         http_method
@@ -459,10 +482,35 @@ fn emit_step_execution(
                 }
                 ParameterValue::Literal(lit) => format!("{:?}.to_string()", lit.to_string()),
             };
-            out.push_str(&format!(
-                r#"        req_query.insert({:?}.to_string(), format!("{{:?}}", {}));"#,
-                p.name, val_expr
-            ));
+            match p.in_loc {
+                Some(crate::arazzo::models::ArazzoParamLocation::Header) => {
+                    out.push_str(&format!(
+                        r#"        req_headers.insert({:?}.to_string(), format!("{{:?}}", {}));"#,
+                        p.name, val_expr
+                    ));
+                }
+                Some(crate::arazzo::models::ArazzoParamLocation::Path) => {
+                    let placeholder = format!("{{{}}}", p.name);
+                    out.push_str(&format!(
+                        r#"        {{ let val_s = format!("{{:?}}", {}); req_path.insert({:?}.to_string(), val_s.clone()); req_url = req_url.replace({:?}, &val_s); }}"#,
+                        val_expr, p.name, placeholder
+                    ));
+                }
+                Some(crate::arazzo::models::ArazzoParamLocation::Cookie) => {
+                    out.push_str(&format!(
+                        r#"        req_headers.insert("Cookie".to_string(), format!("{}={{:?}}", {}));"#,
+                        p.name, val_expr
+                    ));
+                }
+                Some(crate::arazzo::models::ArazzoParamLocation::Query)
+                | Some(crate::arazzo::models::ArazzoParamLocation::QueryString)
+                | None => {
+                    out.push_str(&format!(
+                        r#"        req_query.insert({:?}.to_string(), format!("{{:?}}", {}));"#,
+                        p.name, val_expr
+                    ));
+                }
+            }
             out.push('\n');
         }
     }
@@ -507,6 +555,14 @@ fn emit_step_execution(
             _ => None,
         })
         .unwrap_or(0);
+    let retry_after_secs = step.on_failure.iter().find_map(|a| match a {
+        ActionOrReusable::Action(FailureAction {
+            action_type: FailureActionType::Retry,
+            retry_after: Some(secs),
+            ..
+        }) => Some(*secs),
+        _ => None,
+    });
 
     out.push_str(&format!(
         "        let max_attempts: u32 = {};
@@ -526,11 +582,15 @@ fn emit_step_execution(
 ",
     );
     out.push_str(
-        "            let method = reqwest::Method::from_bytes(req_method.as_bytes()).map_err(|e| e.to_string())?;
+        "            let method = reqwest::Method::from_bytes(req_method.as_bytes()).map_err(|e| WorkflowError::Execution(e.to_string()))?;
 ",
     );
     out.push_str(
         "            let mut req_builder = self.client.request(method, &req_url).json(&req_body);
+",
+    );
+    out.push_str(
+        "            if !req_query.is_empty() { req_builder = req_builder.query(&req_query); }
 ",
     );
     out.push_str(
@@ -585,9 +645,15 @@ fn emit_step_execution(
 ",
     );
     out.push_str(
-        "                    if attempt >= max_attempts { return Err(err.to_string()); }
+        "                    if attempt >= max_attempts { return Err(WorkflowError::Http(err)); }
 ",
     );
+    if let Some(secs) = retry_after_secs {
+        out.push_str(&format!(
+            "                    tokio::time::sleep(std::time::Duration::from_secs_f64({:?})).await;\n",
+            secs
+        ));
+    }
     out.push_str(
         "                }
 ",
@@ -683,12 +749,12 @@ fn emit_criterion_check(out: &mut String, crit: &Criterion) {
     ));
     if matches!(crit.criterion_type, Some(CriterionType::Regex)) {
         out.push_str(&format!(
-            "        let _re = regex::Regex::new({:?}).map_err(|e| e.to_string())?;\n",
-            crit.condition
+            "        let re = regex::Regex::new({:?})?;\n        if !re.is_match(&resp_body.to_string()) {{ return Err(WorkflowError::Execution(format!(\"Regex criterion failed: {{}}\", {:?}))); }}\n",
+            crit.condition, crit.condition
         ));
     } else if crit.condition == "$statusCode == 200" {
         out.push_str(
-            r#"        if status_code != 200 { return Err(format!("Expected status 200, got {}", status_code)); }"#,
+            r#"        if status_code != 200 { return Err(WorkflowError::Execution(format!("Expected status 200, got {}", status_code))); }"#,
         );
         out.push('\n');
     }
@@ -806,6 +872,17 @@ workflows:
           - name: limit
             in: query
             value: 10
+          - name: X-Trace
+            in: header
+            value: trace-1
+          - name: orderId
+            in: path
+            value: 99
+          - name: session
+            in: cookie
+            value: abc
+          - name: defaultLoc
+            value: def
         requestBody:
           contentType: application/json
           payload:
@@ -832,6 +909,7 @@ workflows:
             type: end
           - name: retryOrder
             type: retry
+            retryAfter: 1.5
             retryLimit: 2
         outputs:
           id: $response.body#/id

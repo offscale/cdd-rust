@@ -313,7 +313,7 @@ pub fn dispatch_tool_command(
             let input_str = args
                 .get("input")
                 .and_then(Value::as_str)
-                .ok_or_else(|| AppError::General("Missing required argument: 'input'".into()))?;
+                .ok_or(AppError::MissingArgument { argument: "input" })?;
             let output_str = args
                 .get("output")
                 .and_then(Value::as_str)
@@ -336,7 +336,7 @@ pub fn dispatch_tool_command(
             let input_str = args
                 .get("input")
                 .and_then(Value::as_str)
-                .ok_or_else(|| AppError::General("Missing required argument: 'input'".into()))?;
+                .ok_or(AppError::MissingArgument { argument: "input" })?;
             let no_imports = args
                 .get("no_imports")
                 .and_then(Value::as_bool)
@@ -377,7 +377,7 @@ pub fn dispatch_tool_command(
                 .get("dir")
                 .or_else(|| args.get("input"))
                 .and_then(Value::as_str)
-                .ok_or_else(|| AppError::General("Missing required argument: 'dir'".into()))?;
+                .ok_or(AppError::MissingArgument { argument: "dir" })?;
             let truth_str = args.get("truth").and_then(Value::as_str).unwrap_or("code");
             let output_str = args
                 .get("output")
@@ -446,7 +446,7 @@ pub fn dispatch_tool_command(
             let input_str = args
                 .get("input")
                 .and_then(Value::as_str)
-                .ok_or_else(|| AppError::General("Missing required argument: 'input'".into()))?;
+                .ok_or(AppError::MissingArgument { argument: "input" })?;
             let output_str = args
                 .get("output")
                 .and_then(Value::as_str)
@@ -473,7 +473,9 @@ pub fn dispatch_tool_command(
                 output_str
             ))
         }
-        _ => Err(AppError::General(format!("Tool not found: {}", tool_name))),
+        _ => Err(AppError::ToolNotFound {
+            tool: tool_name.to_string(),
+        }),
     }
 }
 
@@ -583,23 +585,18 @@ pub fn handle_request(input: &str) -> Option<String> {
                     };
                     ok_response(req.id, &result)
                 }
+                Err(e @ AppError::ToolNotFound { .. }) => {
+                    err_response(req.id, -32601, e.to_string())
+                }
                 Err(e) => {
-                    if call_params.name != "from_openapi"
-                        && call_params.name != "to_openapi"
-                        && call_params.name != "to_docs_json"
-                        && call_params.name != "sync"
-                    {
-                        err_response(req.id, -32601, e.to_string())
-                    } else {
-                        let result = CallToolResult {
-                            content: vec![CallToolResultContent::Text(TextContent {
-                                text: format!("Error executing {}: {}", call_params.name, e),
-                            })],
-                            is_error: Some(true),
-                            meta: None,
-                        };
-                        ok_response(req.id, &result)
-                    }
+                    let result = CallToolResult {
+                        content: vec![CallToolResultContent::Text(TextContent {
+                            text: format!("Error executing {}: {}", call_params.name, e),
+                        })],
+                        is_error: Some(true),
+                        meta: None,
+                    };
+                    ok_response(req.id, &result)
                 }
             }
         }

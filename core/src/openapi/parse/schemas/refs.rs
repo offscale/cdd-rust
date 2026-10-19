@@ -65,9 +65,8 @@ impl<'a> ResolutionContext<'a> {
         let base_uri = base_uri_str.and_then(|s| {
             Url::parse(&s).ok().or_else(|| {
                 Url::parse(DUMMY_BASE)
-                    .expect("valid dummy base")
-                    .join(&s)
                     .ok()
+                    .and_then(|base| base.join(&s).ok())
             })
         });
         Self {
@@ -188,16 +187,7 @@ fn is_remote(uri: &str) -> bool {
     if let Some(colon) = uri.find(':') {
         // RFC 3986 3.1: scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
         let scheme = &uri[..colon];
-        if scheme.is_empty() {
-            return false;
-        }
-        let first = scheme.chars().next().expect("Failed to next");
-        if !first.is_ascii_alphabetic() {
-            // Not a scheme (e.g. /abs/path or ./rel)
-            return false;
-        }
-        // It looks like a scheme.
-        return true;
+        return scheme.starts_with(|c: char| c.is_ascii_alphabetic());
     }
     false
 }
@@ -481,19 +471,17 @@ pub(crate) fn resolve_dynamic_refs_for_component(
     let mut resolved = HashMap::new();
     let mut visiting = HashSet::new();
     let mut scope = DynamicScope::default();
-
-    resolve_component_dynamic_refs_for_ref(
-        entry_name,
-        "",
-        document_base,
+    let mut ctx = RefResolutionScope {
         document_base,
         raw_schemas,
         schema_ids,
         self_uri,
-        &mut scope,
-        &mut resolved,
-        &mut visiting,
-    );
+        scope: &mut scope,
+        resolved: &mut resolved,
+        visiting: &mut visiting,
+    };
+
+    resolve_component_dynamic_refs_for_ref(entry_name, "", document_base, &mut ctx);
 
     resolved
 }
@@ -513,17 +501,16 @@ pub(crate) fn resolve_dynamic_refs_in_schema_root(
     let mut visiting = HashSet::new();
     let empty = serde_json::Map::new();
     let empty_ids = HashMap::new();
-    resolve_dynamic_refs_in_resource(
-        &mut cloned,
+    let mut ctx = RefResolutionScope {
         document_base,
-        document_base,
-        &empty,
-        &empty_ids,
-        None,
-        &mut scope,
-        &mut resolved,
-        &mut visiting,
-    );
+        raw_schemas: &empty,
+        schema_ids: &empty_ids,
+        self_uri: None,
+        scope: &mut scope,
+        resolved: &mut resolved,
+        visiting: &mut visiting,
+    };
+    resolve_dynamic_refs_in_resource(&mut cloned, document_base, &mut ctx);
     cloned
 }
 
@@ -551,76 +538,56 @@ impl DynamicScope {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+struct RefResolutionScope<'a> {
+    document_base: Option<&'a Url>,
+    raw_schemas: &'a serde_json::Map<String, JsonValue>,
+    schema_ids: &'a HashMap<String, String>,
+    self_uri: Option<&'a str>,
+    scope: &'a mut DynamicScope,
+    resolved: &'a mut HashMap<String, JsonValue>,
+    visiting: &'a mut HashSet<String>,
+}
+
 fn resolve_dynamic_refs_in_resource(
     node: &mut JsonValue,
     current_base: Option<&Url>,
-    document_base: Option<&Url>,
-    raw_schemas: &serde_json::Map<String, JsonValue>,
-    schema_ids: &HashMap<String, String>,
-    self_uri: Option<&str>,
-    scope: &mut DynamicScope,
-    resolved: &mut HashMap<String, JsonValue>,
-    visiting: &mut HashSet<String>,
+    ctx: &mut RefResolutionScope<'_>,
 ) {
     let (resource_base_url, resource_base_str) = resource_base(node, current_base);
     let mut anchors = Vec::new();
     collect_resource_dynamic_anchors(node, resource_base_str.as_deref(), true, &mut anchors);
     let anchor_count = anchors.len();
     for (name, target) in anchors {
-        scope.push(name, target);
+        ctx.scope.push(name, target);
     }
 
-    resolve_dynamic_refs_walk(
-        node,
-        resource_base_url.as_ref(),
-        document_base,
-        raw_schemas,
-        schema_ids,
-        self_uri,
-        scope,
-        resolved,
-        visiting,
-    );
+    resolve_dynamic_refs_walk(node, resource_base_url.as_ref(), ctx);
 
-    scope.pop(anchor_count);
+    ctx.scope.pop(anchor_count);
 }
 
-#[allow(clippy::too_many_arguments)]
 fn resolve_dynamic_refs_walk(
     node: &mut JsonValue,
     current_base: Option<&Url>,
-    document_base: Option<&Url>,
-    raw_schemas: &serde_json::Map<String, JsonValue>,
-    schema_ids: &HashMap<String, String>,
-    self_uri: Option<&str>,
-    scope: &mut DynamicScope,
-    resolved: &mut HashMap<String, JsonValue>,
-    visiting: &mut HashSet<String>,
+    ctx: &mut RefResolutionScope<'_>,
 ) {
     match node {
         JsonValue::Object(map) => {
             if let Some(dynamic_ref) = map.get("$dynamicRef").and_then(|v| v.as_str()) {
-                let resolved_ref = resolve_dynamic_ref_value(dynamic_ref, current_base, scope);
+                let resolved_ref = resolve_dynamic_ref_value(dynamic_ref, current_base, ctx.scope);
                 map.remove("$dynamicRef");
                 map.insert("$ref".to_string(), JsonValue::String(resolved_ref));
             }
 
             if let Some(ref_str) = map.get("$ref").and_then(|v| v.as_str()) {
                 if let Some(target_name) =
-                    resolve_component_ref_name(ref_str, self_uri, schema_ids, current_base)
+                    resolve_component_ref_name(ref_str, ctx.self_uri, ctx.schema_ids, current_base)
                 {
                     resolve_component_dynamic_refs_for_ref(
                         &target_name,
                         ref_str,
                         current_base,
-                        document_base,
-                        raw_schemas,
-                        schema_ids,
-                        self_uri,
-                        scope,
-                        resolved,
-                        visiting,
+                        ctx,
                     );
                 }
             }
@@ -632,30 +599,10 @@ fn resolve_dynamic_refs_walk(
                     .and_then(|v| v.as_str())
                     .is_some()
                 {
-                    resolve_dynamic_refs_in_resource(
-                        value,
-                        current_base,
-                        document_base,
-                        raw_schemas,
-                        schema_ids,
-                        self_uri,
-                        scope,
-                        resolved,
-                        visiting,
-                    );
+                    resolve_dynamic_refs_in_resource(value, current_base, ctx);
                     continue;
                 }
-                resolve_dynamic_refs_walk(
-                    value,
-                    current_base,
-                    document_base,
-                    raw_schemas,
-                    schema_ids,
-                    self_uri,
-                    scope,
-                    resolved,
-                    visiting,
-                );
+                resolve_dynamic_refs_walk(value, current_base, ctx);
             }
         }
         JsonValue::Array(items) => {
@@ -666,73 +613,36 @@ fn resolve_dynamic_refs_walk(
                     .and_then(|v| v.as_str())
                     .is_some()
                 {
-                    resolve_dynamic_refs_in_resource(
-                        item,
-                        current_base,
-                        document_base,
-                        raw_schemas,
-                        schema_ids,
-                        self_uri,
-                        scope,
-                        resolved,
-                        visiting,
-                    );
+                    resolve_dynamic_refs_in_resource(item, current_base, ctx);
                     continue;
                 }
-                resolve_dynamic_refs_walk(
-                    item,
-                    current_base,
-                    document_base,
-                    raw_schemas,
-                    schema_ids,
-                    self_uri,
-                    scope,
-                    resolved,
-                    visiting,
-                );
+                resolve_dynamic_refs_walk(item, current_base, ctx);
             }
         }
         _ => {}
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn resolve_component_dynamic_refs_for_ref(
     name: &str,
     ref_str: &str,
     current_base: Option<&Url>,
-    document_base: Option<&Url>,
-    raw_schemas: &serde_json::Map<String, JsonValue>,
-    schema_ids: &HashMap<String, String>,
-    self_uri: Option<&str>,
-    scope: &mut DynamicScope,
-    resolved: &mut HashMap<String, JsonValue>,
-    visiting: &mut HashSet<String>,
+    ctx: &mut RefResolutionScope<'_>,
 ) {
-    if resolved.contains_key(name) || visiting.contains(name) {
+    if ctx.resolved.contains_key(name) || ctx.visiting.contains(name) {
         return;
     }
 
-    let Some(schema) = raw_schemas.get(name) else {
+    let Some(schema) = ctx.raw_schemas.get(name) else {
         return;
     };
 
-    let ref_base = resolve_ref_base(ref_str, current_base, document_base);
-    visiting.insert(name.to_string());
+    let ref_base = resolve_ref_base(ref_str, current_base, ctx.document_base);
+    ctx.visiting.insert(name.to_string());
     let mut cloned = schema.clone();
-    resolve_dynamic_refs_in_resource(
-        &mut cloned,
-        ref_base.as_ref(),
-        document_base,
-        raw_schemas,
-        schema_ids,
-        self_uri,
-        scope,
-        resolved,
-        visiting,
-    );
-    resolved.insert(name.to_string(), cloned);
-    visiting.remove(name);
+    resolve_dynamic_refs_in_resource(&mut cloned, ref_base.as_ref(), ctx);
+    ctx.resolved.insert(name.to_string(), cloned);
+    ctx.visiting.remove(name);
 }
 
 fn resolve_component_ref_name(
@@ -798,10 +708,11 @@ fn resolve_ref_with_base(ref_str: &str, base: Option<&Url>) -> String {
 
     let resolved = base
         .join(parsed.document)
-        .expect("relative reference joins against valid base URL");
+        .map(|u| u.to_string())
+        .unwrap_or_default();
     match parsed.fragment {
         Some(frag) => format!("{}#{}", resolved, frag),
-        None => resolved.to_string(),
+        None => resolved,
     }
 }
 
@@ -1083,25 +994,18 @@ pub fn compute_base_uri(retrieval_uri: &str, self_val: Option<&str>) -> String {
 ///
 /// Replaces previous naive string slicing with strict `Url::join`.
 pub fn resolve_uri_reference(base_uri: &str, ref_uri: &str) -> String {
-    // 1. Attempt to parse base as a strict URL (e.g. http://..., file://...)
-    let base_url = match Url::parse(base_uri) {
-        Ok(u) => u,
-        Err(_) => {
-            // 2. If parsing failed, assume it's a raw file path (OS specific).
-            let path = Path::new(base_uri);
-            let abs_path = if path.is_absolute() {
-                path.to_path_buf()
-            } else {
-                std::env::current_dir().unwrap_or_default().join(path)
-            };
+    let base_url = Url::parse(base_uri).ok().or_else(|| {
+        let path = Path::new(base_uri);
+        let abs_path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir().unwrap_or_default().join(path)
+        };
+        Url::from_file_path(&abs_path).ok()
+    });
 
-            Url::from_file_path(&abs_path).expect("valid absolute file path url")
-        }
-    };
-
-    // 3. Perform RFC 3986 Join
-    match base_url.join(ref_uri) {
-        Ok(resolved) => {
+    match base_url.and_then(|u| u.join(ref_uri).ok()) {
+        Some(resolved) => {
             if resolved.scheme() == "file" {
                 if let Ok(p) = resolved.to_file_path() {
                     return p.to_string_lossy().to_string();
@@ -1109,7 +1013,7 @@ pub fn resolve_uri_reference(base_uri: &str, ref_uri: &str) -> String {
             }
             resolved.to_string()
         }
-        Err(_) => ref_uri.to_string(),
+        None => ref_uri.to_string(),
     }
 }
 
@@ -1743,22 +1647,28 @@ mod tests {
             "CompB".to_string(),
         );
         dyn_ids.insert("rel_doc_id".to_string(), "CompA".to_string());
-        let _ = resolve_dynamic_refs_for_component(
+        let missing_res = resolve_dynamic_refs_for_component(
             "MissingEntry",
             dyn_map,
             &dyn_ids,
             Some(&base),
             None,
         );
-        let _ = resolve_dynamic_refs_for_component(
+        assert!(missing_res.is_empty());
+        let comp_a_res = resolve_dynamic_refs_for_component(
             "CompA",
             dyn_map,
             &dyn_ids,
             Some(&base),
             Some("https://example.com/openapi.yaml"),
         );
-        let _ = resolve_dynamic_refs_for_component("CompC", dyn_map, &dyn_ids, None, None);
-        let _ = resolve_dynamic_refs_in_schema_root(&json!("not_an_object"), None);
+        assert!(comp_a_res.contains_key("CompA"));
+        let comp_c_res = resolve_dynamic_refs_for_component("CompC", dyn_map, &dyn_ids, None, None);
+        assert!(comp_c_res.contains_key("CompC"));
+        assert_eq!(
+            resolve_dynamic_refs_in_schema_root(&json!("not_an_object"), None),
+            json!("not_an_object")
+        );
 
         // Inline schema index with array, $dynamicAnchor, and unparseable schema
         let inline_edge = json!({
@@ -1774,8 +1684,10 @@ mod tests {
                 }
             ]
         });
-        let _ = collect_inline_schema_index(&inline_edge, Some(&base), false);
-        let _ = collect_inline_schema_index(&inline_edge, None, false);
+        let idx_with_base = collect_inline_schema_index(&inline_edge, Some(&base), false);
+        assert!(!idx_with_base.ids.is_empty());
+        let idx_no_base = collect_inline_schema_index(&inline_edge, None, false);
+        assert!(!idx_no_base.ids.is_empty());
 
         // URI reference & directory resolution
         assert_eq!(
@@ -1790,8 +1702,13 @@ mod tests {
             resolve_uri_reference("https://example.com/a/b.yaml", "http://[::1"),
             "http://[::1"
         );
-        let _ = resolve_uri_reference("/tmp/spec.yaml", "models.yaml");
-        let _ = resolve_uri_reference("relative/spec.yaml", "models.yaml");
-        let _ = resolve_uri_directory("https://example.com/a/b.yaml");
+        assert!(
+            resolve_uri_reference("/tmp/spec.yaml", "models.yaml").ends_with("/tmp/models.yaml")
+        );
+        assert!(resolve_uri_reference("relative/spec.yaml", "models.yaml").ends_with("models.yaml"));
+        assert_eq!(
+            resolve_uri_directory("https://example.com/a/b.yaml"),
+            "https://example.com/a/"
+        );
     }
 }

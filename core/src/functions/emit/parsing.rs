@@ -9,7 +9,6 @@ use crate::openapi::parse::{ParamSource, ParsedRoute};
 use ra_ap_edition::Edition;
 use ra_ap_syntax::ast::{self, HasName};
 use ra_ap_syntax::{AstNode, SourceFile};
-use regex::Regex;
 use std::collections::HashSet;
 
 /// Parses the source using rust-analyzer syntax tree to find all function names.
@@ -38,8 +37,20 @@ pub(crate) fn extract_struct_names(source: &str) -> HashSet<String> {
 
 /// Extracts parameter names from a path template like `/users/{id}`.
 pub(crate) fn extract_path_vars(path: &str) -> Vec<String> {
-    let re = Regex::new(r"\{([^}]+)}").expect("Invalid regex constant");
-    re.captures_iter(path).map(|c| c[1].to_string()).collect()
+    let mut vars = Vec::new();
+    let mut rest = path;
+    while let Some(start) = rest.find('{') {
+        let after_open = &rest[start + 1..];
+        let Some(end) = after_open.find('}') else {
+            break;
+        };
+        let var_name = &after_open[..end];
+        if !var_name.is_empty() {
+            vars.push(var_name.to_string());
+        }
+        rest = &after_open[end + 1..];
+    }
+    vars
 }
 
 /// Helper to lookup a parameter type from the parsed route definition.
@@ -155,5 +166,9 @@ mod tests {
         assert_eq!(to_pascal_case("x-token"), "XToken");
         assert_eq!(to_pascal_case("---"), "Query");
         assert_eq!(to_pascal_case("123_items"), "Q123Items");
+        assert_eq!(
+            extract_path_vars("/users/{id}/{}/items/{unclosed"),
+            vec!["id".to_string()]
+        );
     }
 }

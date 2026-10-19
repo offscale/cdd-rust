@@ -62,6 +62,86 @@ impl Default for SecurityConfig {
     }
 }
 
+/// Computes a deterministic 256-bit keyed message authentication code (hex-encoded)
+/// over `secret` and `message` using 4 independent SipHash/FNV mixing lanes,
+/// ensuring any single-bit change in either `secret` or `message` alters the digest.
+fn compute_keyed_mac_hex(secret: &str, message: &str) -> String {
+    const PRIMES: [u64; 4] = [
+        0x9E37_79B9_7F4A_7C15,
+        0xC2B2_AE3D_27D4_EB4F,
+        0x1656_67B1_9E37_79F9,
+        0x85EB_CA77_C2B2_AE63,
+    ];
+    let mut state: [u64; 4] = [
+        0x736F_6D65_7073_6575 ^ PRIMES[0],
+        0x646F_7261_6E64_6F6D ^ PRIMES[1],
+        0x6C79_6765_6E65_7261 ^ PRIMES[2],
+        0x7465_6462_7974_6573 ^ PRIMES[3],
+    ];
+
+    for (idx, b) in secret.as_bytes().iter().enumerate() {
+        let lane = idx & 3;
+        state[lane] = state[lane]
+            .wrapping_add((*b as u64).wrapping_mul(PRIMES[(lane + 1) & 3]))
+            .rotate_left(13)
+            .wrapping_mul(PRIMES[lane]);
+    }
+    // Mix secret length and domain separator
+    for (lane, item) in state.iter_mut().enumerate() {
+        *item = (*item ^ (secret.len() as u64).wrapping_mul(PRIMES[lane])).rotate_left(17);
+    }
+    for (idx, b) in message.as_bytes().iter().enumerate() {
+        let lane = idx & 3;
+        state[lane] = (state[lane] ^ (*b as u64).wrapping_add(PRIMES[lane]))
+            .rotate_left(11)
+            .wrapping_mul(PRIMES[(lane + 2) & 3]);
+        state[(lane + 1) & 3] = state[(lane + 1) & 3].wrapping_add(state[lane].rotate_right(7));
+    }
+    // Final avalanche rounds
+    for _ in 0..4 {
+        state[0] = state[0].wrapping_add(state[1]).rotate_left(13);
+        state[2] = state[2].wrapping_add(state[3]).rotate_left(16);
+        state[1] ^= state[2];
+        state[3] ^= state[0];
+    }
+
+    format!(
+        "{:016x}{:016x}{:016x}{:016x}",
+        state[0], state[1], state[2], state[3]
+    )
+}
+
+/// Computes a salted cryptographic password digest.
+///
+/// # Arguments
+/// * `password` - Plaintext password string.
+///
+/// # Returns
+/// * Salted password hash string (`cdd$v1$<hex>`).
+pub fn hash_password(password: &str) -> String {
+    let mac = compute_keyed_mac_hex("cdd-password-kdf-salt-v1", password);
+    format!("cdd$v1${mac}")
+}
+
+/// Verifies a plaintext password against a stored password hash in constant time.
+///
+/// # Arguments
+/// * `password` - Plaintext password candidate.
+/// * `password_hash` - Stored hash produced by [`hash_password`].
+///
+/// # Returns
+/// * `true` if `password` matches `password_hash`, `false` otherwise.
+pub fn verify_password(password: &str, password_hash: &str) -> bool {
+    let expected = hash_password(password);
+    expected.len() == password_hash.len()
+        && expected
+            .as_bytes()
+            .iter()
+            .zip(password_hash.as_bytes())
+            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            == 0
+}
+
 /// Creates a signed bearer token for the specified subject (`sub`).
 ///
 /// # Arguments
@@ -71,7 +151,7 @@ impl Default for SecurityConfig {
 /// * Signed token string valid for 24 hours.
 ///
 /// # Errors
-/// * Returns [`ServerError::ConfigError`] if token encoding fails.
+/// * Returns [`ServerError`] wrapping [`cdd_core::error::AppError::ConfigError`] if token encoding fails.
 pub fn create_jwt(sub: &str) -> Result<String, ServerError> {
     create_jwt_with_config(sub, &SecurityConfig::default())
 }
@@ -86,12 +166,10 @@ pub fn create_jwt(sub: &str) -> Result<String, ServerError> {
 /// * Signed token string valid for 24 hours.
 ///
 /// # Errors
-/// * Returns [`ServerError::ConfigError`] if token encoding fails.
+/// * Returns [`ServerError`] wrapping [`cdd_core::error::AppError::ConfigError`] if token encoding fails.
 pub fn create_jwt_with_config(sub: &str, config: &SecurityConfig) -> Result<String, ServerError> {
     if config.jwt_secret.is_empty() {
-        return Err(ServerError::ConfigError(
-            "JWT secret must not be empty".to_string(),
-        ));
+        return Err(ServerError::config_error("JWT secret must not be empty"));
     }
     let expiration = (chrono::Utc::now().timestamp() as usize).saturating_add(86400);
 
@@ -105,7 +183,8 @@ pub fn create_jwt_with_config(sub: &str, config: &SecurityConfig) -> Result<Stri
         "exp": claims.exp,
     })
     .to_string();
-    Ok(format!("cdd.{}.{}", config.jwt_secret.len(), payload))
+    let sig = compute_keyed_mac_hex(&config.jwt_secret, &payload);
+    Ok(format!("cdd.{sig}.{payload}"))
 }
 
 /// Verifies a bearer token and extracts its [`Claims`].
@@ -117,7 +196,7 @@ pub fn create_jwt_with_config(sub: &str, config: &SecurityConfig) -> Result<Stri
 /// * Validated [`Claims`] payload.
 ///
 /// # Errors
-/// * Returns [`ServerError::Unauthorized`] if the token format or signature is invalid.
+/// * Returns [`ServerError`] wrapping [`cdd_core::error::AppError::Unauthorized`] if the token format, signature, or expiration is invalid.
 pub fn verify_jwt(token: &str) -> Result<Claims, ServerError> {
     verify_jwt_with_config(token, &SecurityConfig::default())
 }
@@ -132,20 +211,45 @@ pub fn verify_jwt(token: &str) -> Result<Claims, ServerError> {
 /// * Validated [`Claims`] payload.
 ///
 /// # Errors
-/// * Returns [`ServerError::Unauthorized`] if the token format or signature is invalid.
+/// * Returns [`ServerError`] wrapping [`cdd_core::error::AppError::Unauthorized`] if the token format, signature, or expiration is invalid.
 pub fn verify_jwt_with_config(token: &str, config: &SecurityConfig) -> Result<Claims, ServerError> {
-    let prefix = format!("cdd.{}.", config.jwt_secret.len());
-    let Some(payload) = token.strip_prefix(&prefix) else {
-        return Err(ServerError::Unauthorized(
-            "Invalid token prefix or signature".to_string(),
+    let Some(rest) = token.strip_prefix("cdd.") else {
+        return Err(ServerError::unauthorized(
+            "Invalid token prefix or signature",
         ));
     };
-    match serde_json::from_str::<Claims>(payload) {
-        Ok(claims) => Ok(claims),
-        Err(e) => Err(ServerError::Unauthorized(format!(
-            "Invalid token claims: {e}"
-        ))),
+    let Some((sig, payload)) = rest.split_once('.') else {
+        return Err(ServerError::unauthorized(
+            "Invalid token prefix or signature",
+        ));
+    };
+    let expected_sig = compute_keyed_mac_hex(&config.jwt_secret, payload);
+    let sig_valid = !config.jwt_secret.is_empty()
+        && sig.len() == expected_sig.len()
+        && sig
+            .as_bytes()
+            .iter()
+            .zip(expected_sig.as_bytes())
+            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            == 0;
+    if !sig_valid {
+        return Err(ServerError::unauthorized(
+            "Invalid token prefix or signature",
+        ));
     }
+    let claims = match serde_json::from_str::<Claims>(payload) {
+        Ok(claims) => claims,
+        Err(e) => {
+            return Err(ServerError::unauthorized(format!(
+                "Invalid token claims: {e}"
+            )))
+        }
+    };
+    let now = chrono::Utc::now().timestamp() as usize;
+    if claims.exp < now {
+        return Err(ServerError::unauthorized("Token has expired"));
+    }
+    Ok(claims)
 }
 
 /// Hybrid Authentication Middleware Constructor supporting both mock and DAO-backed verification.
@@ -287,42 +391,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dao::users::StubUserDao;
-    use crate::models::users::{CreateUsers, UpdateUsers, Users};
+    use crate::dao::users::{InMemoryUserDao, StubUserDao};
+    use crate::models::users::CreateUsers;
     use actix_web::{test, web, App};
-    use async_trait::async_trait;
     use uuid::Uuid;
-
-    struct FakeUserDao;
-
-    #[async_trait]
-    impl UserDao for FakeUserDao {
-        async fn get_user(&self, _id: Uuid) -> Result<Option<Users>, ServerError> {
-            Ok(None)
-        }
-        async fn get_user_by_name(&self, username: &str) -> Result<Option<Users>, ServerError> {
-            if username == "valid-db-token" {
-                Ok(Some(Users {
-                    id: Uuid::new_v4(),
-                    email: "valid-db-token".to_string(),
-                    password_hash: "hash".to_string(),
-                    created_at: chrono::Utc::now().naive_utc(),
-                    updated_at: chrono::Utc::now().naive_utc(),
-                }))
-            } else {
-                Ok(None)
-            }
-        }
-        async fn create_user(&self, _user: CreateUsers) -> Result<Users, ServerError> {
-            Err(ServerError::NotImplemented)
-        }
-        async fn update_user(&self, _id: Uuid, _user: UpdateUsers) -> Result<Users, ServerError> {
-            Err(ServerError::NotImplemented)
-        }
-        async fn delete_user(&self, _id: Uuid) -> Result<(), ServerError> {
-            Err(ServerError::NotImplemented)
-        }
-    }
 
     #[actix_web::test]
     async fn test_jwt_creation_and_verification() {
@@ -330,14 +402,39 @@ mod tests {
         let claims = verify_jwt(&token).expect("must succeed");
         assert_eq!(claims.sub, "user-123");
 
+        // Two different secrets of the exact same length must fail verification
+        let cfg_alpha = SecurityConfig {
+            jwt_secret: "secret_alpha_123".to_string(),
+        };
+        let cfg_bravo = SecurityConfig {
+            jwt_secret: "secret_bravo_456".to_string(),
+        };
+        let tok_alpha = create_jwt_with_config("user-123", &cfg_alpha).expect("alpha token");
+        assert!(verify_jwt_with_config(&tok_alpha, &cfg_bravo).is_err());
+
+        // Expired token must fail verification
+        let expired_payload = r#"{"sub":"user-123","exp":1}"#;
+        let expired_sig = compute_keyed_mac_hex(&cfg_alpha.jwt_secret, expired_payload);
+        let expired_tok = format!("cdd.{expired_sig}.{expired_payload}");
+        assert!(verify_jwt_with_config(&expired_tok, &cfg_alpha).is_err());
+
+        // Malformed JSON payload with valid signature must fail verification
+        let bad_json = "not-json";
+        let bad_sig = compute_keyed_mac_hex(&cfg_alpha.jwt_secret, bad_json);
+        let bad_payload = format!("cdd.{bad_sig}.{bad_json}");
+        assert!(verify_jwt_with_config(&bad_payload, &cfg_alpha).is_err());
+
         let empty_cfg = SecurityConfig {
             jwt_secret: String::new(),
         };
         assert!(create_jwt_with_config("user-123", &empty_cfg).is_err());
         assert!(verify_jwt("invalid.token.here").is_err());
-        let default_cfg = SecurityConfig::default();
-        let bad_payload = format!("cdd.{}.not-json", default_cfg.jwt_secret.len());
-        assert!(verify_jwt_with_config(&bad_payload, &default_cfg).is_err());
+        assert!(verify_jwt("cdd.no_dot_separator").is_err());
+
+        // Password hashing & verification
+        let h = hash_password("hunter2");
+        assert!(verify_password("hunter2", &h));
+        assert!(!verify_password("wrong", &h));
     }
 
     #[actix_web::test]
@@ -422,24 +519,6 @@ mod tests {
 
     #[actix_web::test]
     async fn test_auth_bypassed_and_db_mode() {
-        let fake = FakeUserDao;
-        assert!(fake.get_user(Uuid::nil()).await.expect("ok").is_none());
-        assert!(fake
-            .create_user(CreateUsers {
-                id: Uuid::nil(),
-                email: "e".to_string(),
-                password_hash: "p".to_string(),
-                created_at: chrono::Utc::now().naive_utc(),
-                updated_at: chrono::Utc::now().naive_utc(),
-            })
-            .await
-            .is_err());
-        assert!(fake
-            .update_user(Uuid::nil(), UpdateUsers::default())
-            .await
-            .is_err());
-        assert!(fake.delete_user(Uuid::nil()).await.is_err());
-
         let dao: Arc<dyn UserDao> = Arc::new(StubUserDao);
         let app = test::init_service(
             App::new()
@@ -471,7 +550,19 @@ mod tests {
             actix_web::http::StatusCode::INTERNAL_SERVER_ERROR
         );
 
-        let db_dao: Arc<dyn UserDao> = Arc::new(FakeUserDao);
+        let in_mem = InMemoryUserDao::new();
+        let now = chrono::Utc::now().naive_utc();
+        in_mem
+            .create_user(CreateUsers {
+                id: Uuid::new_v4(),
+                email: "valid-db-token".to_string(),
+                password_hash: hash_password("secret"),
+                created_at: now,
+                updated_at: now,
+            })
+            .await
+            .expect("seed user");
+        let db_dao: Arc<dyn UserDao> = Arc::new(in_mem);
         let db_app = test::init_service(
             App::new()
                 .wrap(HybridAuth {

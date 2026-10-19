@@ -228,6 +228,48 @@ pub struct ParsedRoute {
     pub extensions: BTreeMap<String, JsonValue>,
 }
 
+impl ParsedRoute {
+    /// Returns the strongly typed [`HttpMethod`] for this route.
+    pub fn http_method(&self) -> HttpMethod {
+        self.method.parse().unwrap_or(HttpMethod::Get)
+    }
+
+    /// Returns the sanitized [`RustIdent`] for this route's handler function.
+    pub fn handler_ident(&self) -> RustIdent {
+        RustIdent::sanitize_snake(&self.handler_name, "handler")
+    }
+
+    /// Returns the validated [`OperationId`] when `operation_id` is present and non-empty.
+    pub fn typed_operation_id(&self) -> Option<OperationId> {
+        self.operation_id
+            .as_deref()
+            .and_then(|id| OperationId::parse(id).ok())
+    }
+
+    /// Returns the strongly typed [`StatusCodeSpec`] for the selected response.
+    pub fn response_status_spec(&self) -> Option<StatusCodeSpec> {
+        self.response_status.as_deref().and_then(|s| s.parse().ok())
+    }
+
+    /// Returns the structured [`MediaType`] for the selected response body.
+    pub fn response_media_type_parsed(&self) -> Option<MediaType> {
+        self.response_media_type.as_deref().map(MediaType::parse)
+    }
+
+    /// Returns the structured [`RustType`] AST for the selected response body type.
+    pub fn response_rust_type(&self) -> Option<RustType> {
+        self.response_type.as_deref().map(RustType::parse)
+    }
+
+    /// Returns validated [`ExtensionKey`] entries from `extensions`.
+    pub fn typed_extensions(&self) -> BTreeMap<ExtensionKey, JsonValue> {
+        self.extensions
+            .iter()
+            .filter_map(|(k, v)| ExtensionKey::parse(k).ok().map(|ek| (ek, v.clone())))
+            .collect()
+    }
+}
+
 /// Represents a header returned in the response.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResponseHeader {
@@ -253,6 +295,21 @@ pub struct ResponseHeader {
     pub example: Option<ExampleValue>,
     /// Specification extensions (`x-...`) attached to the Header Object.
     pub extensions: BTreeMap<String, JsonValue>,
+}
+
+impl ResponseHeader {
+    /// Returns the structured [`RustType`] AST for this response header's value.
+    pub fn rust_type(&self) -> RustType {
+        RustType::parse(&self.ty)
+    }
+
+    /// Returns validated [`ExtensionKey`] entries from `extensions`.
+    pub fn typed_extensions(&self) -> BTreeMap<ExtensionKey, JsonValue> {
+        self.extensions
+            .iter()
+            .filter_map(|(k, v)| ExtensionKey::parse(k).ok().map(|ek| (ek, v.clone())))
+            .collect()
+    }
 }
 
 /// Represents a static link relationship defined in the response.
@@ -481,6 +538,18 @@ pub struct RequestBodyDefinition {
     pub item_encoding: Option<EncodingInfo>,
     /// Optional example payload for the request body.
     pub example: Option<ExampleValue>,
+}
+
+impl RequestBodyDefinition {
+    /// Returns the structured [`RustType`] AST for the request body payload.
+    pub fn rust_type(&self) -> RustType {
+        RustType::parse(&self.ty)
+    }
+
+    /// Returns the structured [`MediaType`] for the request body.
+    pub fn parsed_media_type(&self) -> MediaType {
+        MediaType::parse(&self.media_type)
+    }
 }
 
 /// Encoding details for a specific property.
@@ -723,6 +792,21 @@ pub struct RouteParam {
     pub raw_schema: Option<JsonValue>,
     /// Specification extensions (`x-...`) attached to the Parameter Object.
     pub extensions: BTreeMap<String, JsonValue>,
+}
+
+impl RouteParam {
+    /// Returns the structured [`RustType`] AST for this parameter.
+    pub fn rust_type(&self) -> RustType {
+        RustType::parse(&self.ty)
+    }
+
+    /// Returns validated [`ExtensionKey`] entries from `extensions`.
+    pub fn typed_extensions(&self) -> BTreeMap<ExtensionKey, JsonValue> {
+        self.extensions
+            .iter()
+            .filter_map(|(k, v)| ExtensionKey::parse(k).ok().map(|ek| (ek, v.clone())))
+            .collect()
+    }
 }
 
 /// The source location of a parameter.
@@ -1742,6 +1826,38 @@ impl RustType {
         }
     }
 
+    /// Checks whether the outer type is `Option<T>`.
+    pub fn is_option(&self) -> bool {
+        matches!(self, Self::Option(_))
+    }
+
+    /// Checks whether this type (or its inner `Option<T>`) represents binary bytes (`Vec<u8>`, `Bytes`, `&[u8]`).
+    pub fn is_bytes(&self) -> bool {
+        matches!(self.unwrap_option(), Self::Bytes)
+    }
+
+    /// Checks whether this type is a built-in primitive or well-known standard library / crate type.
+    pub fn is_primitive_or_known(&self) -> bool {
+        match self {
+            Self::Primitive(_)
+            | Self::String
+            | Self::Uuid
+            | Self::DateTime
+            | Self::NaiveDate
+            | Self::NaiveDateTime
+            | Self::Bytes
+            | Self::Value => true,
+            Self::Option(inner) | Self::Vec(inner) | Self::Secret(inner) => {
+                inner.is_primitive_or_known()
+            }
+            Self::HashMap(k, v) | Self::BTreeMap(k, v) => {
+                k.is_primitive_or_known() && v.is_primitive_or_known()
+            }
+            Self::Tuple(items) => items.iter().all(Self::is_primitive_or_known),
+            Self::Custom(_) => false,
+        }
+    }
+
     /// Checks whether this type (or its inner `Option<T>`) is `Uuid`.
     pub fn is_uuid(&self) -> bool {
         matches!(self.unwrap_option(), Self::Uuid)
@@ -2278,5 +2394,110 @@ mod tests {
                 "CustomType"
             ))
         );
+        assert!(RustType::parse("Option<Vec<u8>>").is_option());
+        assert!(RustType::parse("Option<Vec<u8>>").is_bytes());
+        assert!(RustType::parse("Option<Vec<String>>").is_primitive_or_known());
+        assert!(RustType::parse("HashMap<String, (i32, Uuid)>").is_primitive_or_known());
+        assert!(!RustType::parse("Vec<CustomDto>").is_primitive_or_known());
+
+        let mut ext_map = std::collections::BTreeMap::new();
+        ext_map.insert("x-custom".to_string(), json!(true));
+        let param = super::RouteParam {
+            name: "id".to_string(),
+            description: None,
+            source: super::ParamSource::Path,
+            ty: "Uuid".to_string(),
+            content_media_type: None,
+            style: None,
+            explode: false,
+            deprecated: false,
+            allow_empty_value: false,
+            allow_reserved: false,
+            example: None,
+            raw_schema: None,
+            extensions: ext_map.clone(),
+        };
+        assert!(param.rust_type().is_uuid());
+        assert_eq!(param.typed_extensions().len(), 1);
+
+        let hdr = super::ResponseHeader {
+            name: "X-Rate".to_string(),
+            description: None,
+            required: false,
+            deprecated: false,
+            style: None,
+            explode: None,
+            ty: "i32".to_string(),
+            content_media_type: None,
+            example: None,
+            extensions: ext_map.clone(),
+        };
+        assert!(hdr.rust_type().is_integer());
+        assert_eq!(hdr.typed_extensions().len(), 1);
+
+        let rb = super::RequestBodyDefinition {
+            ty: "Vec<u8>".to_string(),
+            description: None,
+            media_type: "application/json".to_string(),
+            format: super::BodyFormat::Binary,
+            required: true,
+            encoding: None,
+            prefix_encoding: None,
+            item_encoding: None,
+            example: None,
+        };
+        assert!(rb.rust_type().is_bytes());
+        assert!(rb.parsed_media_type().is_json());
+
+        let route = super::ParsedRoute {
+            path: "/pets".to_string(),
+            summary: None,
+            description: None,
+            path_summary: None,
+            path_description: None,
+            operation_summary: None,
+            operation_description: None,
+            path_extensions: std::collections::BTreeMap::new(),
+            base_path: None,
+            path_servers: None,
+            servers_override: None,
+            method: "POST".to_string(),
+            handler_name: "create_pet".to_string(),
+            operation_id: Some("createPet".to_string()),
+            params: vec![param],
+            path_params: vec![],
+            request_body: Some(rb),
+            raw_request_body: None,
+            security: vec![],
+            security_defined: false,
+            kind: super::RouteKind::Path,
+            tags: vec![],
+            response_type: Some("String".to_string()),
+            response_status: Some("201".to_string()),
+            response_summary: None,
+            response_description: None,
+            response_media_type: Some("application/json".to_string()),
+            response_example: None,
+            response_headers: vec![hdr],
+            raw_responses: None,
+            response_links: None,
+            callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
+            extensions: ext_map,
+        };
+        assert_eq!(route.http_method(), HttpMethod::Post);
+        assert_eq!(route.handler_ident().as_str(), "create_pet");
+        assert_eq!(
+            route.typed_operation_id().expect("op id").as_str(),
+            "createPet"
+        );
+        assert_eq!(
+            route.response_status_spec(),
+            Some(StatusCodeSpec::Code(201))
+        );
+        assert!(route.response_media_type_parsed().expect("mt").is_json());
+        assert_eq!(route.response_rust_type(), Some(RustType::String));
+        assert_eq!(route.typed_extensions().len(), 1);
     }
 }

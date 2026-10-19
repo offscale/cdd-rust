@@ -558,9 +558,10 @@ fn process_parameter_with_registry(
             }
         };
         (ty, None)
-    } else if let Some(content) = &param.content {
+    } else if let Some((media_type, media_obj)) =
+        param.content.as_ref().and_then(|c| c.iter().next())
+    {
         // OAS 3.x: "The map MUST only contain one entry." (validated above)
-        let (media_type, media_obj) = content.iter().next().expect("checked len == 1");
         let raw_media = raw_media_for_type(
             param.raw.get("content").and_then(|v| v.as_object()),
             media_type,
@@ -711,8 +712,7 @@ fn raw_media_for_first_entry(
     let raw_map = raw_content.and_then(|v| v.as_object())?;
     let key = content
         .and_then(|map| map.keys().next())
-        .or_else(|| raw_map.keys().next())
-        .expect("content map has at least one entry");
+        .or_else(|| raw_map.keys().next())?;
     raw_media_for_type(Some(raw_map), key, components, registry, base_uri)
 }
 

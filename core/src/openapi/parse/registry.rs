@@ -559,8 +559,9 @@ fn parse_base_url(base_str: &str) -> Option<Url> {
     if let Ok(url) = Url::parse(base_str) {
         return Some(url);
     }
-    let dummy = Url::parse(DUMMY_BASE).expect("valid dummy base");
-    dummy.join(base_str).ok()
+    Url::parse(DUMMY_BASE)
+        .ok()
+        .and_then(|dummy| dummy.join(base_str).ok())
 }
 
 fn resolve_doc_uri(doc: &str, base: Option<&Url>) -> Option<String> {

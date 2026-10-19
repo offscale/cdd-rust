@@ -125,7 +125,7 @@ pub struct {}CliArgs {{
 ",
     );
     out.push_str(
-        ") -> Result<serde_json::Value, String> {
+        ") -> Result<serde_json::Value, WorkflowError> {
 ",
     );
     out.push_str(
@@ -136,28 +136,28 @@ pub struct {}CliArgs {{
         let wf_pascal = to_pascal_case(&wf.workflow_id);
         let wf_snake = to_snake_case(&wf.workflow_id);
         out.push_str(&format!(
-            "        WorkflowCommands::{}(_cli_args) => {{
-",
+            "        WorkflowCommands::{}(cli_args) => {{\n",
             wf_pascal
         ));
         out.push_str(&format!(
-            "            let inputs = {}Inputs::default();
-",
+            "            let mut inputs = {}Inputs::default();\n",
             wf_pascal
         ));
+        if let Some(inp) = &wf.inputs {
+            for f in &inp.input_struct.fields {
+                out.push_str(&format!(
+                    "            if let Some(raw_val) = &cli_args.{f_name} {{\n                if let Ok(parsed) = serde_json::from_str(raw_val) {{\n                    inputs.{f_name} = parsed;\n                }}\n            }}\n",
+                    f_name = f.name
+                ));
+            }
+        }
+        out.push_str("            let _ = &cli_args;\n");
         out.push_str(&format!(
-            "            let res = sdk_client.{}(inputs).await?;
-",
+            "            let res = sdk_client.{}(inputs).await?;\n",
             wf_snake
         ));
-        out.push_str(
-            "            serde_json::to_value(res).map_err(|e| e.to_string())
-",
-        );
-        out.push_str(
-            "        }
-",
-        );
+        out.push_str("            Ok(serde_json::to_value(res)?)\n");
+        out.push_str("        }\n");
     }
     out.push_str(
         "    }

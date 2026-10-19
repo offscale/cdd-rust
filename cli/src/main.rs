@@ -63,7 +63,6 @@ pub struct Cli {
 
 /// All available commands in the CLI.
 #[derive(Subcommand, Debug)]
-#[allow(clippy::large_enum_variant)]
 pub enum Commands {
     /// Synchronize an OpenAPI specification with source code.
     Sync(cdd_cli::sync::SyncArgs),
@@ -72,13 +71,13 @@ pub enum Commands {
     ToDocsJson(cdd_cli::to_docs_json::ToDocsJsonArgs),
     /// Generate code from an OpenAPI specification.
     #[clap(name = "from_openapi")]
-    FromOpenApi(cdd_cli::from_openapi::FromOpenApiArgs),
+    FromOpenApi(Box<cdd_cli::from_openapi::FromOpenApiArgs>),
     /// Generate an OpenAPI specification from source code.
     #[clap(name = "to_openapi")]
     ToOpenApi(cdd_cli::to_openapi::ToOpenApiArgs),
     /// Generate code (SDK, CLI, or Server) from an Arazzo 1.1.0 workflow specification.
     #[clap(name = "from_arazzo")]
-    FromArazzo(cdd_cli::from_arazzo::FromArazzoArgs),
+    FromArazzo(Box<cdd_cli::from_arazzo::FromArazzoArgs>),
     /// Extract an Arazzo 1.1.0 workflow specification from Rust source code.
     #[clap(name = "to_arazzo")]
     ToArazzo(cdd_cli::to_arazzo::ToArazzoArgs),
@@ -100,7 +99,7 @@ pub enum Commands {
     TestGen(cdd_cli::test_gen::TestGenArgs),
     /// Generate a JSON Schema from a Rust struct or enum.
     #[clap(name = "schema-gen")]
-    SchemaGen(cdd_cli::schema_gen::SchemaGenArgs),
+    SchemaGen(Box<cdd_cli::schema_gen::SchemaGenArgs>),
 }
 
 /// Dispatches a parsed [`Cli`] command to its underlying implementation.

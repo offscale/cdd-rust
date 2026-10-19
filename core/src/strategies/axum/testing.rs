@@ -307,9 +307,9 @@ fn expected_status_code(route: &ParsedRoute) -> u16 {
     let Some(status_str) = route.response_status.as_deref() else {
         return 200;
     };
-    let spec: crate::openapi::parse::models::StatusCodeSpec =
-        status_str.parse().expect("infallible StatusCodeSpec parse");
-    spec.representative_code()
+    status_str
+        .parse::<crate::openapi::parse::models::StatusCodeSpec>()
+        .map_or(200, |spec| spec.representative_code())
 }
 
 /// Generates a unit test for a specific Axum handler function to be placed alongside it.

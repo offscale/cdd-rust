@@ -41,11 +41,13 @@ pub fn make_record_field(
     }
 
     let file = parse.tree();
-    Ok(file
-        .syntax()
+    file.syntax()
         .descendants()
         .find_map(ast::RecordField::cast)
-        .expect("valid wrapper struct contains record field"))
+        .ok_or_else(|| AppError::AstMutationError {
+            target: name.to_string(),
+            reason: format!("Failed to construct AST RecordField from '{raw_field}'"),
+        })
 }
 
 /// Generates a complete Rust source string for multiple Models (Structs or Enums).
@@ -687,5 +689,7 @@ mod tests {
         assert!(multi_code.contains("#[serde(rename = \"CustomEnum\")]"));
         assert!(multi_code.contains("/// Unit variant doc"));
         assert!(multi_code.contains("UnitVar,"));
+
+        assert!(make_record_field("//", "", false, 0).is_err());
     }
 }

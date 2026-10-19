@@ -13,6 +13,7 @@ use crate::openapi::parse::ParsedRoute;
 /// The Rust `use` statements required by generated MCP Client modules.
 pub fn handler_imports() -> String {
     let mut imports = String::new();
+    imports.push_str("use cdd_core::error::AppError;\n");
     imports.push_str("use cdd_core::mcp::models::{CallToolRequestParams, CallToolResult, JsonRpcRequest, RequestId, Tool, ToolInputSchema};
 ");
     imports.push_str(
@@ -104,8 +105,8 @@ pub async fn {func_name}(
     args: {struct_name},
     client: Arc<Client>,
     base_url: &str,
-) -> Result<CallToolResult, String> {{
-    let args_val = serde_json::to_value(&args).map_err(|e| e.to_string())?;
+) -> Result<CallToolResult, AppError> {{
+    let args_val = serde_json::to_value(&args)?;
     let call_params = CallToolRequestParams {{
         name: "{func_name}".to_string(),
         arguments: Some(args_val),
@@ -114,15 +115,17 @@ pub async fn {func_name}(
         jsonrpc: "2.0".to_string(),
         id: RequestId::Number(1),
         method: "tools/call".to_string(),
-        params: Some(serde_json::to_value(&call_params).map_err(|e| e.to_string())?),
+        params: Some(serde_json::to_value(&call_params)?),
     }};
     let resp = client
         .post(base_url)
         .json(&rpc_req)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
-    resp.json::<CallToolResult>().await.map_err(|e| e.to_string())
+        .map_err(|e| AppError::General(e.to_string()))?;
+    resp.json::<CallToolResult>()
+        .await
+        .map_err(|e| AppError::General(e.to_string()))
 }}
 "#,
         func_name = func_name,
@@ -194,6 +197,6 @@ mod tests {
         );
         assert!(code.contains("list_pets_tool_definition() -> Tool"));
         assert!(code.contains("CallToolRequestParams"));
-        assert!(code.contains("Result<CallToolResult, String>"));
+        assert!(code.contains("Result<CallToolResult, AppError>"));
     }
 }

@@ -204,6 +204,7 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+derive_more = { version = "2.1", default-features = false, features = ["std", "from", "display", "error"] }
 regex = "1"
 reqwest = { version = "0.12", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }

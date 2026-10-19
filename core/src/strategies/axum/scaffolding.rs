@@ -42,7 +42,7 @@ pub fn handler_signature(route: &crate::openapi::parse::ParsedRoute, args: &[Str
         body.push_str("    let mut headers = HeaderMap::new();\n");
         for header in response_headers {
             body.push_str(&format!(
-                "    headers.insert(\"{}\", \"TODO\".parse().expect(\"invalid header value\"));\n",
+                "    headers.insert(\"{}\", axum::http::HeaderValue::from_static(\"TODO\"));\n",
                 header.name
             ));
         }

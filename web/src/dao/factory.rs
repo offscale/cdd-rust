@@ -56,7 +56,10 @@ mod tests {
     async fn test_factory_stub_and_concrete() {
         let daos = AppDaos::new(DaoConfig::Stub);
         let res = daos.user_dao.get_user(Uuid::new_v4()).await;
-        assert!(matches!(res, Err(ServerError::NotImplemented)));
+        assert!(matches!(
+            res,
+            Err(ServerError(cdd_core::error::AppError::NotImplemented))
+        ));
 
         let manager =
             ConnectionManager::<diesel::PgConnection>::new("postgres://localhost:5432/cdd");

@@ -18,7 +18,7 @@ use crate::openapi::parse::resolver::body::{
 use crate::openapi::parse::resolver::resolve_parameters_with_registry;
 use crate::openapi::parse::resolver::responses::extract_response_details_with_registry;
 use crate::openapi::parse::routes::callbacks::{
-    extract_callback_operations, resolve_callback_object,
+    extract_callback_operations, resolve_callback_object, CallbackResolutionContext,
 };
 use crate::openapi::parse::routes::naming::{derive_handler_name, to_snake_case};
 use crate::openapi::parse::routes::shims::{
@@ -27,41 +27,72 @@ use crate::openapi::parse::routes::shims::{
 };
 use regex::Regex;
 use serde_json::Value as JsonValue;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use url::Url;
 use utoipa::openapi::RefOr;
 
+/// Shared document and scope context passed when building [`ParsedRoute`] entries from a [`ShimPathItem`].
+pub struct RouteBuildContext<'a> {
+    /// Optional OpenAPI `components` scope for resolving references.
+    pub components: Option<&'a ShimComponents>,
+    /// Whether the document is OpenAPI 3.x (`true`) or upgraded Swagger 2.0 (`false`).
+    pub is_oas3: bool,
+    /// Optional base URL path derived from the root `servers` block.
+    pub base_path: Option<String>,
+    /// Optional top-level security requirement array inherited by operations.
+    pub global_security: Option<&'a Vec<serde_json::Value>>,
+    /// Map of `operationId` -> path string for link resolution.
+    pub operation_index: &'a mut HashMap<String, String>,
+    /// Set of seen `operationId` values across the document to enforce uniqueness.
+    pub operation_ids: &'a mut HashSet<String>,
+    /// Map of all path items in the document for local reference resolution.
+    pub all_paths: &'a BTreeMap<String, ShimPathItem>,
+    /// Optional multi-document registry for external `$ref` resolution.
+    pub registry: Option<&'a DocumentRegistry>,
+    /// Optional base URI for relative reference resolution.
+    pub base_uri: Option<&'a Url>,
+}
+
+struct PathRouteSpec<'a> {
+    path: &'a str,
+    method: &'a str,
+    common_params: &'a [RouteParam],
+    kind: RouteKind,
+    components: Option<&'a ShimComponents>,
+    base_uri: Option<&'a Url>,
+    path_base_path: Option<String>,
+    path_servers: Option<Vec<ParsedServer>>,
+    path_summary: Option<String>,
+    path_description: Option<String>,
+    path_extensions: BTreeMap<String, JsonValue>,
+}
+
 /// Helper to iterate methods in a ShimPathItem and extract all operations as Routes.
-#[allow(clippy::too_many_arguments)]
 pub fn parse_path_item(
     routes: &mut Vec<ParsedRoute>,
     path_or_name: &str,
     path_item: &ShimPathItem,
     kind: RouteKind,
-    components: Option<&ShimComponents>,
-    is_oas3: bool,
-    base_path: Option<String>,
-    global_security: Option<&Vec<serde_json::Value>>,
-    operation_index: &mut HashMap<String, String>,
-    operation_ids: &mut std::collections::HashSet<String>,
-    all_paths: &std::collections::BTreeMap<String, ShimPathItem>,
-    registry: Option<&DocumentRegistry>,
-    base_uri: Option<&Url>,
+    ctx: &mut RouteBuildContext<'_>,
 ) -> AppResult<()> {
     let mut path_item = path_item.clone();
     let mut override_components: Option<ShimComponents> = None;
     let mut override_base: Option<Url> = None;
     if let Some(ref_path) = path_item.ref_path.clone() {
         let (resolved, comps_override, base_override) = super::resolve_path_item_ref_with_context(
-            &ref_path, components, all_paths, registry, base_uri,
+            &ref_path,
+            ctx.components,
+            ctx.all_paths,
+            ctx.registry,
+            ctx.base_uri,
         )?;
         path_item = resolved;
         override_components = comps_override;
         override_base = base_override;
     }
 
-    let components_ctx = override_components.as_ref().or(components);
-    let base_ctx = override_base.as_ref().or(base_uri);
+    let components_ctx = override_components.as_ref().or(ctx.components);
+    let base_ctx = override_base.as_ref().or(ctx.base_uri);
 
     let path_summary = path_item.summary.clone();
     let path_description = path_item.description.clone();
@@ -70,7 +101,7 @@ pub fn parse_path_item(
         path_item.servers.as_ref(),
         base_ctx.map(|u| u.as_str()),
     )
-    .or(base_path.clone());
+    .or_else(|| ctx.base_path.clone());
     let path_servers = map_servers(path_item.servers.as_ref());
 
     // Handle common parameters defined at PathItem level.
@@ -78,40 +109,37 @@ pub fn parse_path_item(
     let common_params = resolve_parameters_with_registry(
         common_params_list,
         components_ctx,
-        is_oas3,
-        registry,
+        ctx.is_oas3,
+        ctx.registry,
         base_ctx,
     )?;
 
     let mut add_op = |method: &str, op: Option<ShimOperation>| -> AppResult<()> {
         if let Some(o) = op {
             if let Some(op_id) = &o.operation_id {
-                if !operation_ids.insert(op_id.clone()) {
+                if !ctx.operation_ids.insert(op_id.clone()) {
                     return Err(AppError::General(format!(
                         "Duplicate operationId '{}' detected",
                         op_id
                     )));
                 }
-                operation_index.insert(op_id.clone(), path_or_name.to_string());
+                ctx.operation_index
+                    .insert(op_id.clone(), path_or_name.to_string());
             }
-            routes.push(build_route(
-                path_or_name,
+            let spec = PathRouteSpec {
+                path: path_or_name,
                 method,
-                o,
-                &common_params,
-                kind.clone(),
-                components_ctx,
-                is_oas3,
-                path_base_path.clone(),
-                path_servers.clone(),
-                path_summary.clone(),
-                path_description.clone(),
-                path_extensions.clone(),
-                global_security,
-                operation_ids,
-                registry,
-                base_ctx,
-            )?);
+                common_params: &common_params,
+                kind: kind.clone(),
+                components: components_ctx,
+                base_uri: base_ctx,
+                path_base_path: path_base_path.clone(),
+                path_servers: path_servers.clone(),
+                path_summary: path_summary.clone(),
+                path_description: path_description.clone(),
+                path_extensions: path_extensions.clone(),
+            };
+            routes.push(build_route(spec, o, ctx)?);
         }
         Ok(())
     };
@@ -147,25 +175,28 @@ pub fn parse_path_item(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn build_route(
-    path: &str,
-    method: &str,
+    spec: PathRouteSpec<'_>,
     op: ShimOperation,
-    common_params: &[RouteParam],
-    kind: RouteKind,
-    components: Option<&ShimComponents>,
-    is_oas3: bool,
-    path_base_path: Option<String>,
-    path_servers: Option<Vec<ParsedServer>>,
-    path_summary: Option<String>,
-    path_description: Option<String>,
-    path_extensions: BTreeMap<String, JsonValue>,
-    global_security: Option<&Vec<serde_json::Value>>,
-    operation_ids: &mut std::collections::HashSet<String>,
-    registry: Option<&DocumentRegistry>,
-    base_uri: Option<&Url>,
+    ctx: &mut RouteBuildContext<'_>,
 ) -> AppResult<ParsedRoute> {
+    let PathRouteSpec {
+        path,
+        method,
+        common_params,
+        kind,
+        components,
+        base_uri,
+        path_base_path,
+        path_servers,
+        path_summary,
+        path_description,
+        path_extensions,
+    } = spec;
+    let is_oas3 = ctx.is_oas3;
+    let global_security = ctx.global_security;
+    let registry = ctx.registry;
+
     let base_path =
         super::resolve_base_path_from_servers(op.servers.as_ref(), base_uri.map(|u| u.as_str()))
             .or(path_base_path);
@@ -243,7 +274,7 @@ fn build_route(
         .cloned()
         .collect();
     if !form_params.is_empty() && request_body.is_none() {
-        let is_multipart = form_params.iter().any(|p| p.ty.contains("Vec<u8>"));
+        let is_multipart = form_params.iter().any(|p| p.rust_type().is_bytes());
         request_body = Some(crate::openapi::parse::models::RequestBodyDefinition {
             ty: if is_multipart {
                 "Multipart".to_string()
@@ -261,7 +292,7 @@ fn build_route(
             } else {
                 crate::openapi::parse::models::BodyFormat::Form
             },
-            required: form_params.iter().any(|p| !p.ty.starts_with("Option<")),
+            required: form_params.iter().any(|p| !p.rust_type().is_option()),
             example: None,
             encoding: None,
             item_encoding: None,
@@ -328,17 +359,20 @@ fn build_route(
             let callback_base = cb_base.as_ref().or(base_uri);
 
             for (expression, path_item) in callback_defs {
+                let mut cb_ctx = CallbackResolutionContext {
+                    components: callback_components,
+                    operation_ids: ctx.operation_ids,
+                    registry,
+                    base_uri: callback_base,
+                    global_security,
+                };
                 // Flatten the PathItem inside the callback into ParsedCallback entries
                 extract_callback_operations(
                     &mut parsed_callbacks,
                     cb_name,
                     &expression,
                     &path_item,
-                    callback_components,
-                    operation_ids,
-                    registry,
-                    callback_base,
-                    global_security,
+                    &mut cb_ctx,
                 )?;
             }
         }
@@ -576,15 +610,17 @@ mod additional_tests {
             "/copy",
             &path_item,
             RouteKind::Path,
-            None,
-            true,
-            None,
-            None,
-            &mut operation_index,
-            &mut operation_ids,
-            &all_paths,
-            None,
-            None,
+            &mut RouteBuildContext {
+                components: None,
+                is_oas3: true,
+                base_path: None,
+                global_security: None,
+                operation_index: &mut operation_index,
+                operation_ids: &mut operation_ids,
+                all_paths: &all_paths,
+                registry: None,
+                base_uri: None,
+            },
         )
         .expect_err("expected error");
 
@@ -1237,20 +1273,23 @@ paths:
             extensions: std::collections::BTreeMap::new(),
         };
         let mut r_out = Vec::new();
+        let empty_paths = std::collections::BTreeMap::new();
         assert!(super::parse_path_item(
             &mut r_out,
             "/res",
             &p_err,
             crate::openapi::parse::models::RouteKind::Path,
-            None,
-            true,
-            None,
-            None,
-            &mut std::collections::HashMap::new(),
-            &mut std::collections::HashSet::new(),
-            &std::collections::BTreeMap::new(),
-            None,
-            None,
+            &mut super::RouteBuildContext {
+                components: None,
+                is_oas3: true,
+                base_path: None,
+                global_security: None,
+                operation_index: &mut std::collections::HashMap::new(),
+                operation_ids: &mut std::collections::HashSet::new(),
+                all_paths: &empty_paths,
+                registry: None,
+                base_uri: None,
+            },
         )
         .is_err());
 
@@ -1303,15 +1342,17 @@ paths:
             "/qs-dup",
             &p_err,
             crate::openapi::parse::models::RouteKind::Path,
-            None,
-            true,
-            None,
-            None,
-            &mut std::collections::HashMap::new(),
-            &mut std::collections::HashSet::new(),
-            &std::collections::BTreeMap::new(),
-            None,
-            None,
+            &mut super::RouteBuildContext {
+                components: None,
+                is_oas3: true,
+                base_path: None,
+                global_security: None,
+                operation_index: &mut std::collections::HashMap::new(),
+                operation_ids: &mut std::collections::HashSet::new(),
+                all_paths: &empty_paths,
+                registry: None,
+                base_uri: None,
+            },
         )
         .is_err());
 
@@ -1321,15 +1362,17 @@ paths:
             "/qs-mix",
             &p_err,
             crate::openapi::parse::models::RouteKind::Path,
-            None,
-            true,
-            None,
-            None,
-            &mut std::collections::HashMap::new(),
-            &mut std::collections::HashSet::new(),
-            &std::collections::BTreeMap::new(),
-            None,
-            None,
+            &mut super::RouteBuildContext {
+                components: None,
+                is_oas3: true,
+                base_path: None,
+                global_security: None,
+                operation_index: &mut std::collections::HashMap::new(),
+                operation_ids: &mut std::collections::HashSet::new(),
+                all_paths: &empty_paths,
+                registry: None,
+                base_uri: None,
+            },
         )
         .is_err());
 
@@ -1339,15 +1382,17 @@ paths:
             "/qs-ok",
             &p_err,
             crate::openapi::parse::models::RouteKind::Path,
-            None,
-            true,
-            None,
-            None,
-            &mut std::collections::HashMap::new(),
-            &mut std::collections::HashSet::new(),
-            &std::collections::BTreeMap::new(),
-            None,
-            None,
+            &mut super::RouteBuildContext {
+                components: None,
+                is_oas3: true,
+                base_path: None,
+                global_security: None,
+                operation_index: &mut std::collections::HashMap::new(),
+                operation_ids: &mut std::collections::HashSet::new(),
+                all_paths: &empty_paths,
+                registry: None,
+                base_uri: None,
+            },
         )
         .expect("qs ok");
 
@@ -1384,15 +1429,17 @@ paths:
             "/fd-form",
             &p_err,
             crate::openapi::parse::models::RouteKind::Path,
-            None,
-            false,
-            None,
-            None,
-            &mut std::collections::HashMap::new(),
-            &mut op_ids,
-            &std::collections::BTreeMap::new(),
-            None,
-            None,
+            &mut super::RouteBuildContext {
+                components: None,
+                is_oas3: false,
+                base_path: None,
+                global_security: None,
+                operation_index: &mut std::collections::HashMap::new(),
+                operation_ids: &mut op_ids,
+                all_paths: &empty_paths,
+                registry: None,
+                base_uri: None,
+            },
         )
         .expect("fd form");
         assert!(super::parse_path_item(
@@ -1400,15 +1447,17 @@ paths:
             "/fd-form-dup",
             &p_err,
             crate::openapi::parse::models::RouteKind::Path,
-            None,
-            false,
-            None,
-            None,
-            &mut std::collections::HashMap::new(),
-            &mut op_ids,
-            &std::collections::BTreeMap::new(),
-            None,
-            None,
+            &mut super::RouteBuildContext {
+                components: None,
+                is_oas3: false,
+                base_path: None,
+                global_security: None,
+                operation_index: &mut std::collections::HashMap::new(),
+                operation_ids: &mut op_ids,
+                all_paths: &empty_paths,
+                registry: None,
+                base_uri: None,
+            },
         )
         .is_err());
 
@@ -1420,15 +1469,17 @@ paths:
             "/fd-str-no-rb",
             &p_err,
             crate::openapi::parse::models::RouteKind::Path,
-            None,
-            false,
-            None,
-            None,
-            &mut std::collections::HashMap::new(),
-            &mut std::collections::HashSet::new(),
-            &std::collections::BTreeMap::new(),
-            None,
-            None,
+            &mut super::RouteBuildContext {
+                components: None,
+                is_oas3: false,
+                base_path: None,
+                global_security: None,
+                operation_index: &mut std::collections::HashMap::new(),
+                operation_ids: &mut std::collections::HashSet::new(),
+                all_paths: &empty_paths,
+                registry: None,
+                base_uri: None,
+            },
         )
         .expect("fd str no rb");
 
@@ -1438,15 +1489,17 @@ paths:
             "/fd-mp-no-rb",
             &p_err,
             crate::openapi::parse::models::RouteKind::Path,
-            None,
-            false,
-            None,
-            None,
-            &mut std::collections::HashMap::new(),
-            &mut std::collections::HashSet::new(),
-            &std::collections::BTreeMap::new(),
-            None,
-            None,
+            &mut super::RouteBuildContext {
+                components: None,
+                is_oas3: false,
+                base_path: None,
+                global_security: None,
+                operation_index: &mut std::collections::HashMap::new(),
+                operation_ids: &mut std::collections::HashSet::new(),
+                all_paths: &empty_paths,
+                registry: None,
+                base_uri: None,
+            },
         )
         .expect("fd mp no rb");
 
@@ -1463,15 +1516,17 @@ paths:
             "/fd-mp-with-rb",
             &p_err,
             crate::openapi::parse::models::RouteKind::Path,
-            None,
-            false,
-            None,
-            None,
-            &mut std::collections::HashMap::new(),
-            &mut std::collections::HashSet::new(),
-            &std::collections::BTreeMap::new(),
-            None,
-            None,
+            &mut super::RouteBuildContext {
+                components: None,
+                is_oas3: false,
+                base_path: None,
+                global_security: None,
+                operation_index: &mut std::collections::HashMap::new(),
+                operation_ids: &mut std::collections::HashSet::new(),
+                all_paths: &empty_paths,
+                registry: None,
+                base_uri: None,
+            },
         )
         .expect("fd mp with rb");
 
@@ -1484,15 +1539,17 @@ paths:
             "/empty-add",
             &p_empty_add,
             crate::openapi::parse::models::RouteKind::Path,
-            None,
-            false,
-            None,
-            None,
-            &mut std::collections::HashMap::new(),
-            &mut std::collections::HashSet::new(),
-            &std::collections::BTreeMap::new(),
-            None,
-            None,
+            &mut super::RouteBuildContext {
+                components: None,
+                is_oas3: false,
+                base_path: None,
+                global_security: None,
+                operation_index: &mut std::collections::HashMap::new(),
+                operation_ids: &mut std::collections::HashSet::new(),
+                all_paths: &empty_paths,
+                registry: None,
+                base_uri: None,
+            },
         )
         .is_err());
 
@@ -1509,15 +1566,17 @@ paths:
             "/fd-mp",
             &p_err,
             crate::openapi::parse::models::RouteKind::Path,
-            None,
-            false,
-            None,
-            None,
-            &mut std::collections::HashMap::new(),
-            &mut std::collections::HashSet::new(),
-            &std::collections::BTreeMap::new(),
-            None,
-            None,
+            &mut super::RouteBuildContext {
+                components: None,
+                is_oas3: false,
+                base_path: None,
+                global_security: None,
+                operation_index: &mut std::collections::HashMap::new(),
+                operation_ids: &mut std::collections::HashSet::new(),
+                all_paths: &empty_paths,
+                registry: None,
+                base_uri: None,
+            },
         )
         .expect("fd mp");
 
@@ -1528,15 +1587,17 @@ paths:
                 bad_path,
                 &p_err,
                 crate::openapi::parse::models::RouteKind::Path,
-                None,
-                true,
-                None,
-                None,
-                &mut std::collections::HashMap::new(),
-                &mut std::collections::HashSet::new(),
-                &std::collections::BTreeMap::new(),
-                None,
-                None,
+                &mut super::RouteBuildContext {
+                    components: None,
+                    is_oas3: true,
+                    base_path: None,
+                    global_security: None,
+                    operation_index: &mut std::collections::HashMap::new(),
+                    operation_ids: &mut std::collections::HashSet::new(),
+                    all_paths: &empty_paths,
+                    registry: None,
+                    base_uri: None,
+                },
             )
             .is_err());
         }

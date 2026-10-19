@@ -154,6 +154,102 @@ pub enum AppError {
         reason: String,
     },
 
+    /// Missing required CLI, MCP, or JSON-RPC argument.
+    #[display("Missing required argument: '{argument}'")]
+    #[from(ignore)]
+    #[error(ignore)]
+    MissingArgument {
+        /// The name of the missing required argument.
+        argument: &'static str,
+    },
+
+    /// Requested MCP or JSON-RPC tool does not exist.
+    #[display("Tool not found: {tool}")]
+    #[from(ignore)]
+    #[error(ignore)]
+    ToolNotFound {
+        /// The unrecognized tool name.
+        tool: String,
+    },
+
+    /// Invalid or unsupported specification version for a known standard.
+    #[display("Invalid {spec} Specification Version: {version}")]
+    #[from(ignore)]
+    #[error(ignore)]
+    InvalidSpecVersion {
+        /// The specification standard name (e.g., `"OpenAPI"`, `"Arazzo"`).
+        spec: &'static str,
+        /// The invalid version string encountered.
+        version: String,
+    },
+
+    /// Duplicate identifier encountered where uniqueness is required.
+    #[display("Duplicate {kind} identifier: '{id}'")]
+    #[from(ignore)]
+    #[error(ignore)]
+    DuplicateIdentifier {
+        /// The kind of identifier (e.g., `"operationId"`, `"workflowId"`, `"stepId"`).
+        kind: &'static str,
+        /// The duplicated identifier value.
+        id: String,
+    },
+
+    /// Unresolved reference within a specific document or component scope.
+    #[display("Unresolved Reference '{reference}' in {context}")]
+    #[from(ignore)]
+    #[error(ignore)]
+    UnresolvedReference {
+        /// The reference string that could not be resolved.
+        reference: String,
+        /// The document or component context where resolution was attempted.
+        context: String,
+    },
+
+    /// AST or CST mutation failure when patching or emitting Rust code.
+    #[display("AST Mutation Error in {target}: {reason}")]
+    #[from(ignore)]
+    #[error(ignore)]
+    AstMutationError {
+        /// The AST node, function, or module being mutated.
+        target: String,
+        /// Explanation of why the mutation could not be applied.
+        reason: String,
+    },
+
+    /// Missing configuration or invalid runtime setup.
+    #[from(ignore)]
+    #[error(ignore)]
+    #[display("Configuration Error: {_0}")]
+    ConfigError(String),
+
+    /// Operation or handler functionality is not implemented (e.g., stub mode).
+    #[display("Not implemented")]
+    NotImplemented,
+
+    /// Requested resource or record was not found.
+    #[from(ignore)]
+    #[error(ignore)]
+    #[display("Not Found: {_0}")]
+    NotFound(String),
+
+    /// Threading or mutex synchronization failure.
+    #[from(ignore)]
+    #[error(ignore)]
+    #[display("Synchronization Error: {_0}")]
+    SyncError(String),
+
+    /// Authentication or authorization failure.
+    #[from(ignore)]
+    #[error(ignore)]
+    #[display("Unauthorized: {_0}")]
+    Unauthorized(String),
+
+    /// Request or parameter validation failure.
+    #[from(ignore)]
+    #[error(ignore)]
+    #[display("Validation Error: {_0}")]
+    ValidationError(String),
+
     /// Wrapper for database or schema synchronization errors.
     #[from(ignore)]
     #[error(ignore)]
@@ -161,9 +257,23 @@ pub enum AppError {
     Database(String),
 
     /// Generic application error message.
+    #[from(ignore)]
     #[error(ignore)]
     #[display("General Error: {_0}")]
     General(String),
+}
+
+impl From<String> for AppError {
+    /// Converts an owned `String` into `AppError::General`.
+    ///
+    /// # Arguments
+    /// * `s` - The owned error message string.
+    ///
+    /// # Returns
+    /// * `AppError::General` containing `s`.
+    fn from(s: String) -> Self {
+        AppError::General(s)
+    }
 }
 
 impl From<&str> for AppError {
@@ -190,6 +300,8 @@ mod tests {
     fn test_error_display_and_conversions() {
         let err: AppError = "some error".into();
         assert_eq!(format!("{err}"), "General Error: some error");
+        let owned_err: AppError = String::from("owned error").into();
+        assert_eq!(format!("{owned_err}"), "General Error: owned error");
 
         let ast_err = AppError::AstParse {
             target: "User".to_string(),
@@ -285,6 +397,74 @@ mod tests {
             format!("{src_err}"),
             "Source Description Resolution Error for 'petstore' (./petstore.yaml): file not found"
         );
+
+        let missing_arg = AppError::MissingArgument { argument: "input" };
+        assert_eq!(
+            format!("{missing_arg}"),
+            "Missing required argument: 'input'"
+        );
+
+        let tool_err = AppError::ToolNotFound {
+            tool: "unknown_tool".to_string(),
+        };
+        assert_eq!(format!("{tool_err}"), "Tool not found: unknown_tool");
+
+        let inv_spec = AppError::InvalidSpecVersion {
+            spec: "OpenAPI",
+            version: "2.9.0".to_string(),
+        };
+        assert_eq!(
+            format!("{inv_spec}"),
+            "Invalid OpenAPI Specification Version: 2.9.0"
+        );
+
+        let dup_id = AppError::DuplicateIdentifier {
+            kind: "operationId",
+            id: "getPets".to_string(),
+        };
+        assert_eq!(
+            format!("{dup_id}"),
+            "Duplicate operationId identifier: 'getPets'"
+        );
+
+        let unres_ref = AppError::UnresolvedReference {
+            reference: "#/components/schemas/Pet".to_string(),
+            context: "paths./pets.get".to_string(),
+        };
+        assert_eq!(
+            format!("{unres_ref}"),
+            "Unresolved Reference '#/components/schemas/Pet' in paths./pets.get"
+        );
+
+        let ast_mut = AppError::AstMutationError {
+            target: "config".to_string(),
+            reason: "missing body".to_string(),
+        };
+        assert_eq!(
+            format!("{ast_mut}"),
+            "AST Mutation Error in config: missing body"
+        );
+
+        let cfg_err = AppError::ConfigError("missing secret".to_string());
+        assert_eq!(format!("{cfg_err}"), "Configuration Error: missing secret");
+
+        let not_impl = AppError::NotImplemented;
+        assert_eq!(format!("{not_impl}"), "Not implemented");
+
+        let not_found = AppError::NotFound("user 123".to_string());
+        assert_eq!(format!("{not_found}"), "Not Found: user 123");
+
+        let sync_err = AppError::SyncError("lock poisoned".to_string());
+        assert_eq!(
+            format!("{sync_err}"),
+            "Synchronization Error: lock poisoned"
+        );
+
+        let unauth = AppError::Unauthorized("expired token".to_string());
+        assert_eq!(format!("{unauth}"), "Unauthorized: expired token");
+
+        let val_err = AppError::ValidationError("invalid email".to_string());
+        assert_eq!(format!("{val_err}"), "Validation Error: invalid email");
 
         let db_err = AppError::Database("connection lost".to_string());
         assert_eq!(format!("{db_err}"), "Database Error: connection lost");

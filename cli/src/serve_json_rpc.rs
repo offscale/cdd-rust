@@ -11,7 +11,7 @@ use crate::mcp::dispatch_tool_command;
 use actix_web::{web, HttpResponse, Responder};
 #[cfg(not(coverage))]
 use actix_web::{App, HttpServer};
-use cdd_core::error::AppResult;
+use cdd_core::error::{AppError, AppResult};
 use clap::Args;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -102,7 +102,7 @@ async fn handle_rpc(body: String) -> impl Responder {
                 id,
             },
             Err(e) => {
-                let code = if e.to_string().contains("Missing required argument") {
+                let code = if matches!(e, AppError::MissingArgument { .. }) {
                     -32602
                 } else {
                     -32000
@@ -133,7 +133,7 @@ async fn handle_rpc(body: String) -> impl Responder {
                 }
             }
             Err(e) => {
-                let code = if e.to_string().contains("Missing required argument") {
+                let code = if matches!(e, AppError::MissingArgument { .. }) {
                     -32602
                 } else {
                     -32000
@@ -249,8 +249,11 @@ pub struct ServeJsonRpcConfig {
     pub listen: String,
 }
 
-#[allow(dead_code)]
-fn configure_rpc_app(cfg: &mut web::ServiceConfig) {
+/// Configures the Actix Web service routes for the JSON-RPC 2.0 endpoint.
+///
+/// # Arguments
+/// * `cfg` - Mutable Actix [`web::ServiceConfig`] to register routes on.
+pub fn configure_rpc_app(cfg: &mut web::ServiceConfig) {
     cfg.route("/", web::post().to(handle_rpc));
 }
 

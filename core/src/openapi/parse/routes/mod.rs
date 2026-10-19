@@ -15,7 +15,7 @@ use crate::openapi::parse::models::{ParsedRoute, RouteKind};
 use crate::openapi::parse::normalization::{normalize_boolean_schemas, normalize_nullable_schemas};
 use crate::openapi::parse::ref_utils::normalize_ref_to_local;
 use crate::openapi::parse::registry::DocumentRegistry;
-use crate::openapi::parse::routes::builder::parse_path_item;
+use crate::openapi::parse::routes::builder::{parse_path_item, RouteBuildContext};
 use crate::openapi::parse::routes::shims::{ShimComponents, ShimOpenApi, ShimPathItem, ShimServer};
 use crate::openapi::parse::schemas::refs::compute_base_uri;
 use crate::openapi::parse::validation::{validate_component_keys, validate_openapi_root};
@@ -106,20 +106,23 @@ pub(crate) fn parse_openapi_routes_from_value(
 
     // 1. Parse standard Paths
     for (path_str, path_item) in paths {
+        let mut route_ctx = RouteBuildContext {
+            components,
+            is_oas3,
+            base_path: base_path.clone(),
+            global_security,
+            operation_index: &mut operation_index,
+            operation_ids: &mut operation_ids,
+            all_paths: paths,
+            registry,
+            base_uri: base_uri.as_ref(),
+        };
         parse_path_item(
             &mut routes,
             path_str,
             path_item,
             RouteKind::Path,
-            components,
-            is_oas3,
-            base_path.clone(),
-            global_security,
-            &mut operation_index,
-            &mut operation_ids,
-            paths,
-            registry,
-            base_uri.as_ref(),
+            &mut route_ctx,
         )?;
     }
 
@@ -148,34 +151,37 @@ pub(crate) fn parse_openapi_routes_from_value(
                 },
             };
 
+            let mut webhook_ctx = RouteBuildContext {
+                components,
+                is_oas3,
+                base_path: None, // Webhooks generally don't use server prefix logic like paths
+                global_security,
+                operation_index: &mut operation_index,
+                operation_ids: &mut operation_ids,
+                all_paths: paths,
+                registry,
+                base_uri: base_uri.as_ref(),
+            };
             parse_path_item(
                 &mut routes,
                 name,
                 &resolved,
                 RouteKind::Webhook,
-                components,
-                is_oas3,
-                None, // Webhooks generally don't use server prefix logic like paths
-                global_security,
-                &mut operation_index,
-                &mut operation_ids,
-                paths,
-                registry,
-                base_uri.as_ref(),
+                &mut webhook_ctx,
             )?;
         }
     }
 
-    resolve_response_link_targets(
-        &mut routes,
-        &operation_index,
-        openapi.self_uri.as_deref(),
+    let link_ctx = OperationParseContext {
+        operation_index: &operation_index,
+        self_uri: openapi.self_uri.as_deref(),
         paths,
-        openapi.webhooks.as_ref().map(|w| &w.items),
-        openapi.components.as_ref(),
+        webhooks: openapi.webhooks.as_ref().map(|w| &w.items),
+        components: openapi.components.as_ref(),
         registry,
-        base_uri.as_ref(),
-    )?;
+        base_uri: base_uri.as_ref(),
+    };
+    resolve_response_link_targets(&mut routes, &link_ctx)?;
     validate_link_operation_ids(&routes)?;
 
     Ok(routes)
@@ -192,20 +198,25 @@ fn resolve_entry_base_uri(openapi: &ShimOpenApi, retrieval_uri: Option<&str>) ->
     if let Ok(url) = Url::parse(&base_str) {
         return Some(url);
     }
-    let dummy = Url::parse("http://example.invalid/").expect("valid dummy base");
-    dummy.join(&base_str).ok()
+    Url::parse("http://example.invalid/")
+        .ok()
+        .and_then(|dummy| dummy.join(&base_str).ok())
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Shared document context for resolving operation links and references across paths and webhooks.
+struct OperationParseContext<'a> {
+    operation_index: &'a HashMap<String, String>,
+    self_uri: Option<&'a str>,
+    paths: &'a BTreeMap<String, ShimPathItem>,
+    webhooks: Option<&'a BTreeMap<String, RefOr<ShimPathItem>>>,
+    components: Option<&'a ShimComponents>,
+    registry: Option<&'a DocumentRegistry>,
+    base_uri: Option<&'a Url>,
+}
+
 fn resolve_response_link_targets(
     routes: &mut [ParsedRoute],
-    operation_index: &HashMap<String, String>,
-    self_uri: Option<&str>,
-    paths: &BTreeMap<String, ShimPathItem>,
-    webhooks: Option<&BTreeMap<String, RefOr<ShimPathItem>>>,
-    components: Option<&ShimComponents>,
-    registry: Option<&DocumentRegistry>,
-    base_uri: Option<&Url>,
+    ctx: &OperationParseContext<'_>,
 ) -> AppResult<()> {
     for link in routes
         .iter_mut()
@@ -214,12 +225,18 @@ fn resolve_response_link_targets(
     {
         if let Some(op_ref) = link.operation_ref.as_ref() {
             if let Some(resolved) = resolve_operation_ref_to_path(
-                op_ref, self_uri, paths, webhooks, components, registry, base_uri,
+                op_ref,
+                ctx.self_uri,
+                ctx.paths,
+                ctx.webhooks,
+                ctx.components,
+                ctx.registry,
+                ctx.base_uri,
             ) {
                 link.resolved_operation_ref = Some(resolved);
             } else if is_absolute_uri(op_ref) {
                 link.resolved_operation_ref = Some(op_ref.clone());
-            } else if normalize_ref_to_local(op_ref, self_uri).is_some() {
+            } else if normalize_ref_to_local(op_ref, ctx.self_uri).is_some() {
                 return Err(AppError::General(format!(
                     "Link '{}' operationRef '{}' does not resolve to a known Operation Object",
                     link.name, op_ref
@@ -228,7 +245,7 @@ fn resolve_response_link_targets(
         } else if let Some(path) = link
             .operation_id
             .as_ref()
-            .and_then(|op_id| operation_index.get(op_id))
+            .and_then(|op_id| ctx.operation_index.get(op_id))
         {
             link.resolved_operation_ref = Some(path.clone());
         }

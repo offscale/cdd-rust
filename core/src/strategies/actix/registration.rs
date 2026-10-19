@@ -20,11 +20,11 @@ pub fn route_registration_statement(route: &ParsedRoute, handler_full_path: &str
         "TRACE" => "trace()".to_string(),
         "OPTIONS" => "options()".to_string(),
         "QUERY" => {
-            "method(actix_web::http::Method::from_bytes(b\"QUERY\").expect(\"expected value\"))"
+            "method(actix_web::http::Method::from_bytes(b\"QUERY\").unwrap_or(actix_web::http::Method::GET))"
                 .to_string()
         }
         str_method => format!(
-            "method(actix_web::http::Method::from_bytes(b\"{}\").expect(\"expected value\"))",
+            "method(actix_web::http::Method::from_bytes(b\"{}\").unwrap_or(actix_web::http::Method::GET))",
             str_method
         ),
     };

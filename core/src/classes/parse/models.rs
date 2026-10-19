@@ -163,6 +163,13 @@ pub struct ParsedField {
     pub external_docs: Option<ParsedExternalDocs>,
 }
 
+impl ParsedField {
+    /// Returns the structured [`crate::openapi::parse::models::RustType`] AST for this field's type.
+    pub fn rust_type(&self) -> crate::openapi::parse::models::RustType {
+        crate::openapi::parse::models::RustType::parse(&self.ty)
+    }
+}
+
 /// Represents a fully parsed struct including field and doc metadata.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ParsedStruct {
@@ -200,6 +207,15 @@ pub struct ParsedVariant {
     pub aliases: Option<Vec<String>>,
     /// Whether the variant is marked as deprecated.
     pub is_deprecated: bool,
+}
+
+impl ParsedVariant {
+    /// Returns the structured [`crate::openapi::parse::models::RustType`] for the variant payload, if any.
+    pub fn rust_type(&self) -> Option<crate::openapi::parse::models::RustType> {
+        self.ty
+            .as_deref()
+            .map(crate::openapi::parse::models::RustType::parse)
+    }
 }
 
 /// Represents a fully parsed enum.
@@ -285,6 +301,32 @@ mod tests {
 
         assert_eq!(model_struct.name(), "User");
         assert_eq!(model_enum.name(), "Pet");
+
+        let f = ParsedField {
+            name: "id".to_string(),
+            ty: "Option<Uuid>".to_string(),
+            description: None,
+            rename: None,
+            is_skipped: false,
+            is_read_only: false,
+            is_write_only: false,
+            is_deprecated: false,
+            external_docs: None,
+        };
+        assert!(f.rust_type().is_uuid());
+
+        let v = ParsedVariant {
+            name: "Cat".to_string(),
+            ty: Some("String".to_string()),
+            description: None,
+            rename: None,
+            aliases: None,
+            is_deprecated: false,
+        };
+        assert_eq!(
+            v.rust_type(),
+            Some(crate::openapi::parse::models::RustType::String)
+        );
     }
 
     #[test]

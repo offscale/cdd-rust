@@ -13,6 +13,7 @@ use crate::openapi::parse::ParsedRoute;
 /// The Rust `use` statements required by generated MCP Server modules.
 pub fn handler_imports() -> String {
     let mut imports = String::new();
+    imports.push_str("use cdd_core::error::AppError;\n");
     imports.push_str(
         "use cdd_core::mcp::models::{CallToolResult, CallToolResultContent, JsonRpcResponse, RequestId, TextContent, Tool, ToolInputSchema};
 ",
@@ -95,8 +96,8 @@ pub fn {func_name}_tool_definition() -> Tool {{
 }}
 
 /// Executes the `{func_name}` MCP server tool and formats the result as a JSON-RPC 2.0 SSE event.
-pub async fn {func_name}(args: {struct_name}, auth: String) -> Result<String, String> {{
-    let payload = serde_json::to_value(&args).map_err(|e| e.to_string())?;
+pub async fn {func_name}(args: {struct_name}, auth: String) -> Result<String, AppError> {{
+    let payload = serde_json::to_value(&args)?;
     let tool_result = CallToolResult {{
         content: vec![CallToolResultContent::Text(TextContent {{
             text: serde_json::json!({{
@@ -112,10 +113,10 @@ pub async fn {func_name}(args: {struct_name}, auth: String) -> Result<String, St
     let rpc_resp = JsonRpcResponse {{
         jsonrpc: "2.0".to_string(),
         id: RequestId::Number(1),
-        result: Some(serde_json::to_value(&tool_result).map_err(|e| e.to_string())?),
+        result: Some(serde_json::to_value(&tool_result)?),
         error: None,
     }};
-    let serialized = serde_json::to_string(&rpc_resp).map_err(|e| e.to_string())?;
+    let serialized = serde_json::to_string(&rpc_resp)?;
     Ok(format!("event: message
 data: {{}}
 

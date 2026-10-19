@@ -79,12 +79,12 @@ pub fn handler_signature(route: &crate::openapi::parse::ParsedRoute, args: &[Str
         body.push_str("    let qs = serde_qs::Config::new().array_format(serde_qs::ArrayFormat::Unindexed).serialize_string(&query).unwrap_or_default();\n");
         body.push_str("    let url = if url.contains('?') { format!(\"{}&{}\", url, qs) } else { format!(\"{}?{}\", url, qs) };\n");
         body.push_str(&format!(
-            "    let mut req = client.request(reqwest::Method::from_bytes(b\"{}\").expect(\"valid method\"), url);\n",
+            "    let mut req = client.request(reqwest::Method::from_bytes(b\"{}\").unwrap_or(reqwest::Method::GET), url);\n",
             method
         ));
     } else {
         body.push_str(&format!(
-            "    let mut req = client.request(reqwest::Method::from_bytes(b\"{}\").expect(\"valid method\"), url);\n",
+            "    let mut req = client.request(reqwest::Method::from_bytes(b\"{}\").unwrap_or(reqwest::Method::GET), url);\n",
             method
         ));
     }

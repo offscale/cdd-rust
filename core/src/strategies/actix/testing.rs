@@ -791,11 +791,11 @@ pub fn test_request_builder(method: &str, uri: &str, body_setup: &str) -> String
     let builder_call = match method_lower.as_str() {
         "get" | "post" | "put" | "delete" | "patch" => format!("{}()", method_lower),
         "query" => {
-            "method(actix_web::http::Method::from_bytes(b\"QUERY\").expect(\"expected value\"))"
+            "method(actix_web::http::Method::from_bytes(b\"QUERY\").unwrap_or(actix_web::http::Method::GET))"
                 .to_string()
         }
         _ => format!(
-            "method(actix_web::http::Method::from_bytes(b\"{}\").expect(\"expected value\"))",
+            "method(actix_web::http::Method::from_bytes(b\"{}\").unwrap_or(actix_web::http::Method::GET))",
             method.to_uppercase()
         ),
     };
@@ -1730,7 +1730,7 @@ mod tests {
 
         let query_req = test_request_builder("QUERY", "/search", body);
         assert!(query_req.contains(
-            "method(actix_web::http::Method::from_bytes(b\"QUERY\").expect(\"expected value\"))"
+            "method(actix_web::http::Method::from_bytes(b\"QUERY\").unwrap_or(actix_web::http::Method::GET))"
         ));
 
         let custom_req = test_request_builder("PROPFIND", "/files", body);

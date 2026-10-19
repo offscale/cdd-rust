@@ -324,10 +324,7 @@ pub fn parse_openapi_spec_with_registry(
         };
 
         for (name, ref_or_schema) in &components.schemas {
-            if has_dynamic_ref {
-                let raw_map = raw_schemas
-                    .as_ref()
-                    .expect("has_dynamic_ref implies raw_schemas");
+            if let Some(raw_map) = raw_schemas.as_ref().filter(|_| has_dynamic_ref) {
                 let resolved_map = resolve_dynamic_refs_for_component(
                     name,
                     raw_map,

@@ -94,16 +94,17 @@ fn ref_doc_matches_self(ref_doc: &str, self_uri: &str) -> bool {
 
     // Fallback: compare raw relative paths.
     if !self_uri.contains("://") && !ref_doc.contains("://") {
-        let base = Url::parse(DUMMY_BASE).expect("valid dummy base");
-        let self_norm = base
-            .join(self_uri)
-            .map(|url| url.path().to_string())
-            .unwrap_or_else(|_| self_uri.to_string());
-        let ref_norm = base
-            .join(ref_doc)
-            .map(|url| url.path().to_string())
-            .unwrap_or_else(|_| ref_doc.to_string());
-        return Path::new(&ref_norm) == Path::new(&self_norm);
+        if let Ok(base) = Url::parse(DUMMY_BASE) {
+            let self_norm = base
+                .join(self_uri)
+                .map(|url| url.path().to_string())
+                .unwrap_or_else(|_| self_uri.to_string());
+            let ref_norm = base
+                .join(ref_doc)
+                .map(|url| url.path().to_string())
+                .unwrap_or_else(|_| ref_doc.to_string());
+            return Path::new(&ref_norm) == Path::new(&self_norm);
+        }
     }
 
     false

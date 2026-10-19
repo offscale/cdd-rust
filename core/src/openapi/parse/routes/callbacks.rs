@@ -17,18 +17,34 @@ use std::collections::{BTreeMap, HashSet};
 use url::Url;
 use utoipa::openapi::RefOr;
 
+/// Result tuple of resolving a Callback reference: `(path_item_map, override_components, override_base_uri)`.
+pub type ResolvedCallbackObject = (
+    BTreeMap<String, ShimPathItem>,
+    Option<ShimComponents>,
+    Option<Url>,
+);
+
+/// Shared resolution context passed when extracting callback operations from a Path Item.
+pub struct CallbackResolutionContext<'a> {
+    /// Optional OpenAPI `components` scope for resolving nested references.
+    pub components: Option<&'a ShimComponents>,
+    /// Set of seen `operationId` values across the document to enforce uniqueness.
+    pub operation_ids: &'a mut HashSet<String>,
+    /// Optional multi-document registry for external `$ref` resolution.
+    pub registry: Option<&'a DocumentRegistry>,
+    /// Optional base URI for relative reference resolution.
+    pub base_uri: Option<&'a Url>,
+    /// Optional top-level security requirement array inherited by operations.
+    pub global_security: Option<&'a Vec<serde_json::Value>>,
+}
+
 /// Resolves a Callback object which can be an inline map or a Reference.
-#[allow(clippy::type_complexity)]
 pub fn resolve_callback_object(
     cb_ref: &RefOr<BTreeMap<String, ShimPathItem>>,
     components: Option<&ShimComponents>,
     registry: Option<&DocumentRegistry>,
     base_uri: Option<&Url>,
-) -> AppResult<(
-    BTreeMap<String, ShimPathItem>,
-    Option<ShimComponents>,
-    Option<Url>,
-)> {
+) -> AppResult<ResolvedCallbackObject> {
     match cb_ref {
         RefOr::T(map) => Ok((map.clone(), None, None)),
         RefOr::Ref(r) => {
@@ -76,17 +92,12 @@ pub fn resolve_callback_object(
 }
 
 /// Helper to iterate methods in a Callback Path Item and extract operations.
-#[allow(clippy::too_many_arguments)]
 pub fn extract_callback_operations(
     callbacks: &mut Vec<ParsedCallback>,
     name: &str,
     expression: &str,
     path_item: &ShimPathItem,
-    components: Option<&ShimComponents>,
-    operation_ids: &mut HashSet<String>,
-    registry: Option<&DocumentRegistry>,
-    base_uri: Option<&Url>,
-    global_security: Option<&Vec<serde_json::Value>>,
+    ctx: &mut CallbackResolutionContext<'_>,
 ) -> AppResult<()> {
     let mut path_item = path_item.clone();
     let mut override_components: Option<ShimComponents> = None;
@@ -95,18 +106,18 @@ pub fn extract_callback_operations(
         let empty_paths = BTreeMap::new();
         let (resolved, comps_override, base_override) = super::resolve_path_item_ref_with_context(
             ref_path,
-            components,
+            ctx.components,
             &empty_paths,
-            registry,
-            base_uri,
+            ctx.registry,
+            ctx.base_uri,
         )?;
         path_item = resolved;
         override_components = comps_override;
         override_base = base_override;
     }
 
-    let components_ctx = override_components.as_ref().or(components);
-    let base_ctx = override_base.as_ref().or(base_uri);
+    let components_ctx = override_components.as_ref().or(ctx.components);
+    let base_ctx = override_base.as_ref().or(ctx.base_uri);
 
     let parsed_expression = RuntimeExpression::parse_expression(expression)?;
     let common_params_list = path_item.parameters.as_deref().unwrap_or(&[]);
@@ -114,14 +125,14 @@ pub fn extract_callback_operations(
         common_params_list,
         components_ctx,
         true,
-        registry,
+        ctx.registry,
         base_ctx,
     )?;
 
     let mut add_cb_op = |method: &str, op: Option<&ShimOperation>| -> AppResult<()> {
         if let Some(o) = op {
             if let Some(op_id) = &o.operation_id {
-                if !operation_ids.insert(op_id.clone()) {
+                if !ctx.operation_ids.insert(op_id.clone()) {
                     return Err(AppError::General(format!(
                         "Duplicate operationId '{}' detected",
                         op_id
@@ -133,16 +144,19 @@ pub fn extract_callback_operations(
                 op_params_list,
                 components_ctx,
                 true,
-                registry,
+                ctx.registry,
                 base_ctx,
             )?;
             let params = merge_callback_params(&op_params, &common_params, method)?;
 
             let mut req_body = None;
             if let Some(rb) = &o.request_body {
-                if let Some(def) =
-                    extract_request_body_type_with_registry(rb, components_ctx, registry, base_ctx)?
-                {
+                if let Some(def) = extract_request_body_type_with_registry(
+                    rb,
+                    components_ctx,
+                    ctx.registry,
+                    base_ctx,
+                )? {
                     req_body = Some(def);
                 }
             }
@@ -152,10 +166,15 @@ pub fn extract_callback_operations(
                 if requirements.is_empty() {
                     Vec::new()
                 } else {
-                    parse_security_requirements(requirements, components_ctx, registry, base_ctx)
+                    parse_security_requirements(
+                        requirements,
+                        components_ctx,
+                        ctx.registry,
+                        base_ctx,
+                    )
                 }
-            } else if let Some(global) = global_security {
-                parse_security_requirements(global, components_ctx, registry, base_ctx)
+            } else if let Some(global) = ctx.global_security {
+                parse_security_requirements(global, components_ctx, ctx.registry, base_ctx)
             } else {
                 Vec::new()
             };
@@ -171,7 +190,7 @@ pub fn extract_callback_operations(
             ) = if let Some(details) = extract_response_details_with_registry(
                 &o.responses,
                 components_ctx,
-                registry,
+                ctx.registry,
                 base_ctx,
             )? {
                 (
@@ -424,16 +443,20 @@ mod tests {
         path_item.get = Some(op);
 
         let mut callbacks = Vec::new();
+        let mut op_ids = HashSet::new();
+        let mut ctx = CallbackResolutionContext {
+            components: None,
+            operation_ids: &mut op_ids,
+            registry: None,
+            base_uri: None,
+            global_security: None,
+        };
         extract_callback_operations(
             &mut callbacks,
             "OnEvent",
             "$request.body#/callbackUrl",
             &path_item,
-            None,
-            &mut HashSet::new(),
-            None,
-            None,
-            None,
+            &mut ctx,
         )
         .expect("Failed to extract callback operations");
 
@@ -459,16 +482,20 @@ mod tests {
         path_item.get = Some(empty_operation());
 
         let mut callbacks = Vec::new();
+        let mut op_ids = HashSet::new();
+        let mut ctx = CallbackResolutionContext {
+            components: None,
+            operation_ids: &mut op_ids,
+            registry: None,
+            base_uri: None,
+            global_security: None,
+        };
         let err = extract_callback_operations(
             &mut callbacks,
             "OnEvent",
             "not-a-runtime-expression",
             &path_item,
-            None,
-            &mut HashSet::new(),
-            None,
-            None,
-            None,
+            &mut ctx,
         )
         .expect_err("expected error");
 
@@ -482,18 +509,16 @@ mod tests {
 
         let mut callbacks = Vec::new();
         let expr = "https://notify.example.com?url={$request.body#/url}";
-        extract_callback_operations(
-            &mut callbacks,
-            "OnEvent",
-            expr,
-            &path_item,
-            None,
-            &mut HashSet::new(),
-            None,
-            None,
-            None,
-        )
-        .expect("Failed to extract callback operations");
+        let mut op_ids = HashSet::new();
+        let mut ctx = CallbackResolutionContext {
+            components: None,
+            operation_ids: &mut op_ids,
+            registry: None,
+            base_uri: None,
+            global_security: None,
+        };
+        extract_callback_operations(&mut callbacks, "OnEvent", expr, &path_item, &mut ctx)
+            .expect("Failed to extract callback operations");
 
         assert_eq!(callbacks.len(), 1);
         assert_eq!(callbacks[0].expression.as_str(), expr);
@@ -509,17 +534,21 @@ mod tests {
 
         let mut callbacks = Vec::new();
         let global_security = vec![json!({ "ApiKeyAuth": [] })];
+        let mut op_ids = HashSet::new();
+        let mut ctx = CallbackResolutionContext {
+            components: None,
+            operation_ids: &mut op_ids,
+            registry: None,
+            base_uri: None,
+            global_security: Some(&global_security),
+        };
 
         extract_callback_operations(
             &mut callbacks,
             "OnSecure",
             "$request.body#/url",
             &path_item,
-            None,
-            &mut HashSet::new(),
-            None,
-            None,
-            Some(&global_security),
+            &mut ctx,
         )
         .expect("Failed to extract callback operations");
 
@@ -543,16 +572,20 @@ mod tests {
         path_item.additional_operations = Some(additional);
 
         let mut callbacks = Vec::new();
+        let mut op_ids = HashSet::new();
+        let mut ctx = CallbackResolutionContext {
+            components: None,
+            operation_ids: &mut op_ids,
+            registry: None,
+            base_uri: None,
+            global_security: None,
+        };
         extract_callback_operations(
             &mut callbacks,
             "OnExtra",
             "$request.body#/url",
             &path_item,
-            None,
-            &mut HashSet::new(),
-            None,
-            None,
-            None,
+            &mut ctx,
         )
         .expect("Failed to extract callback operations");
 
@@ -572,16 +605,20 @@ mod tests {
         path_item.post = Some(op);
 
         let mut callbacks = Vec::new();
+        let mut op_ids = HashSet::new();
+        let mut ctx = CallbackResolutionContext {
+            components: None,
+            operation_ids: &mut op_ids,
+            registry: None,
+            base_uri: None,
+            global_security: None,
+        };
         extract_callback_operations(
             &mut callbacks,
             "OnEvent",
             "$request.body#/url",
             &path_item,
-            None,
-            &mut HashSet::new(),
-            None,
-            None,
-            None,
+            &mut ctx,
         )
         .expect("Failed to extract callback operations");
 
@@ -613,16 +650,20 @@ mod tests {
         path_item.ref_path = Some("#/components/pathItems/RefItem".to_string());
 
         let mut callbacks = Vec::new();
+        let mut op_ids_ref = HashSet::new();
+        let mut ctx_ref = CallbackResolutionContext {
+            components: Some(&components),
+            operation_ids: &mut op_ids_ref,
+            registry: None,
+            base_uri: None,
+            global_security: None,
+        };
         extract_callback_operations(
             &mut callbacks,
             "OnRef",
             "$request.body#/url",
             &path_item,
-            Some(&components),
-            &mut HashSet::new(),
-            None,
-            None,
-            None,
+            &mut ctx_ref,
         )
         .expect("Failed to extract callback operations");
 
@@ -698,16 +739,19 @@ paths: {}
         p_sec.delete = Some(op2.clone());
 
         let mut cbs = Vec::new();
+        let mut ctx_dup = CallbackResolutionContext {
+            components: None,
+            operation_ids: &mut op_ids,
+            registry: None,
+            base_uri: None,
+            global_security: None,
+        };
         assert!(extract_callback_operations(
             &mut cbs,
             "Dup",
             "$request.body#/url",
             &p_sec,
-            None,
-            &mut op_ids,
-            None,
-            None,
-            None,
+            &mut ctx_dup,
         )
         .is_err());
 
@@ -730,18 +774,15 @@ paths: {}
         p_sec2.options = Some(op_patch.clone());
         p_sec2.head = Some(op_patch.clone());
         p_sec2.trace = Some(op_patch);
-        extract_callback_operations(
-            &mut cbs,
-            "Sec",
-            "$request.body#/url",
-            &p_sec2,
-            None,
-            &mut op_ids,
-            None,
-            None,
-            None,
-        )
-        .expect("sec");
+        let mut ctx_sec = CallbackResolutionContext {
+            components: None,
+            operation_ids: &mut op_ids,
+            registry: None,
+            base_uri: None,
+            global_security: None,
+        };
+        extract_callback_operations(&mut cbs, "Sec", "$request.body#/url", &p_sec2, &mut ctx_sec)
+            .expect("sec");
 
         // Cover resolve_callback_object when components lacks 'callbacks' key or ref is not a callbacks ref
         let empty_comps = ShimComponents::default();
@@ -778,16 +819,20 @@ paths: {}
         let mut op_qs = empty_operation();
         op_qs.parameters = Some(vec![RefOr::T(qs_param("qs2"))]);
         p_qs.get = Some(op_qs);
+        let mut op_ids_qs = HashSet::new();
+        let mut ctx_qs = CallbackResolutionContext {
+            components: None,
+            operation_ids: &mut op_ids_qs,
+            registry: None,
+            base_uri: None,
+            global_security: None,
+        };
         assert!(extract_callback_operations(
             &mut cbs,
             "QsDup",
             "$request.body#/url",
             &p_qs,
-            None,
-            &mut HashSet::new(),
-            None,
-            None,
-            None,
+            &mut ctx_qs,
         )
         .is_err());
 
@@ -799,16 +844,20 @@ paths: {}
         let mut op_qs_mix = empty_operation();
         op_qs_mix.parameters = Some(vec![RefOr::T(qs_param("qs1"))]);
         p_qs_mix.get = Some(op_qs_mix);
+        let mut op_ids_qsm = HashSet::new();
+        let mut ctx_qsm = CallbackResolutionContext {
+            components: None,
+            operation_ids: &mut op_ids_qsm,
+            registry: None,
+            base_uri: None,
+            global_security: None,
+        };
         assert!(extract_callback_operations(
             &mut cbs,
             "QsMix",
             "$request.body#/url",
             &p_qs_mix,
-            None,
-            &mut HashSet::new(),
-            None,
-            None,
-            None,
+            &mut ctx_qsm,
         )
         .is_err());
 
@@ -819,16 +868,20 @@ paths: {}
         op_dup_override.responses =
             crate::openapi::parse::routes::shims::ShimResponses::from(Responses::new());
         p_dup_override.get = Some(op_dup_override);
+        let mut op_ids_do = HashSet::new();
+        let mut ctx_do = CallbackResolutionContext {
+            components: None,
+            operation_ids: &mut op_ids_do,
+            registry: None,
+            base_uri: None,
+            global_security: None,
+        };
         extract_callback_operations(
             &mut cbs,
             "DupOverride",
             "$request.body#/url",
             &p_dup_override,
-            None,
-            &mut HashSet::new(),
-            None,
-            None,
-            None,
+            &mut ctx_do,
         )
         .expect("dup override");
 
@@ -838,16 +891,20 @@ paths: {}
         op_qs_only.responses =
             crate::openapi::parse::routes::shims::ShimResponses::from(Responses::new());
         p_qs_only.get = Some(op_qs_only);
+        let mut op_ids_qso = HashSet::new();
+        let mut ctx_qso = CallbackResolutionContext {
+            components: None,
+            operation_ids: &mut op_ids_qso,
+            registry: None,
+            base_uri: None,
+            global_security: None,
+        };
         extract_callback_operations(
             &mut cbs,
             "QsOnly",
             "$request.body#/url",
             &p_qs_only,
-            None,
-            &mut HashSet::new(),
-            None,
-            None,
-            None,
+            &mut ctx_qso,
         )
         .expect("qs only");
     }

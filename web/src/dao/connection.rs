@@ -53,11 +53,11 @@ impl DbConfig {
 /// * `(String, String)` tuple of `(admin_url, db_name)`.
 ///
 /// # Errors
-/// * Returns [`ServerError::ConfigError`] if the URL cannot be parsed or the database name is invalid.
+/// * Returns [`ServerError`] wrapping [`cdd_core::error::AppError::ConfigError`] if the URL cannot be parsed or the database name is invalid.
 pub fn parse_ephemeral_db_url(db_url: &str) -> Result<(String, String), ServerError> {
     let mut parsed = match Url::parse(db_url) {
         Ok(u) => u,
-        Err(e) => return Err(ServerError::ConfigError(format!("Invalid DB URL: {e}"))),
+        Err(e) => return Err(ServerError::config_error(format!("Invalid DB URL: {e}"))),
     };
     let db_name = parsed.path().trim_start_matches('/').trim().to_string();
 
@@ -69,7 +69,7 @@ pub fn parse_ephemeral_db_url(db_url: &str) -> Result<(String, String), ServerEr
         }
     }
     if !is_valid_name {
-        return Err(ServerError::ConfigError(format!(
+        return Err(ServerError::config_error(format!(
             "Invalid or unsafe database name in URL: '{db_name}'"
         )));
     }
@@ -87,7 +87,7 @@ pub fn parse_ephemeral_db_url(db_url: &str) -> Result<(String, String), ServerEr
 /// * R2D2 [`Pool`] of [`PgConnection`] instances.
 ///
 /// # Errors
-/// * Returns [`ServerError::ConfigError`] if ephemeral setup or pool initialization fails.
+/// * Returns [`ServerError`] wrapping [`cdd_core::error::AppError::ConfigError`] if ephemeral setup or pool initialization fails.
 #[cfg(not(target_os = "wasi"))]
 pub fn create_pool(
     config: &DbConfig,
@@ -111,7 +111,7 @@ fn run_ephemeral_setup(db_url: &str) -> Result<(), ServerError> {
     let _ = diesel::debug_query::<diesel::pg::Pg, _>(&query).to_string();
 
     if base_url.contains(":1/") {
-        return Err(ServerError::ConfigError(format!(
+        return Err(ServerError::config_error(format!(
             "Failed to connect to postgres for setup: {base_url}"
         )));
     }
@@ -121,6 +121,7 @@ fn run_ephemeral_setup(db_url: &str) -> Result<(), ServerError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cdd_core::error::AppError;
 
     #[test]
     fn test_db_config_from_env() {
@@ -162,7 +163,10 @@ mod tests {
             is_ephemeral: false,
         };
         let pool_res = create_pool(&config);
-        assert!(matches!(pool_res, Err(ServerError::ConfigError(_))));
+        assert!(matches!(
+            pool_res,
+            Err(ServerError(AppError::ConfigError(_)))
+        ));
 
         let valid_non_ephemeral = DbConfig {
             database_url: "postgres://localhost/cdd".to_string(),
@@ -178,7 +182,10 @@ mod tests {
             is_ephemeral: true,
         };
         let pool_res = create_pool(&config);
-        assert!(matches!(pool_res, Err(ServerError::ConfigError(_))));
+        assert!(matches!(
+            pool_res,
+            Err(ServerError(AppError::ConfigError(_)))
+        ));
     }
 
     #[test]
@@ -188,7 +195,10 @@ mod tests {
             is_ephemeral: true,
         };
         let pool_res = create_pool(&config);
-        assert!(matches!(pool_res, Err(ServerError::ConfigError(_))));
+        assert!(matches!(
+            pool_res,
+            Err(ServerError(AppError::ConfigError(_)))
+        ));
 
         let local_cfg = DbConfig {
             database_url: "postgres://localhost/postgres".to_string(),
