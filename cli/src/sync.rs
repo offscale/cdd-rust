@@ -32,7 +32,7 @@ pub enum SyncTruth {
 #[derive(clap::Args, Debug, Clone)]
 pub struct SyncArgs {
     /// The source of truth for the synchronization.
-    #[clap(long, value_enum, default_value_t = SyncTruth::Db)]
+    #[clap(long, value_enum, default_value_t = SyncTruth::Db, env = "CDD_TRUTH")]
     pub truth: SyncTruth,
 
     /// Path to the Diesel schema file (e.g. web/src/schema.rs).

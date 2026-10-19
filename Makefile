@@ -1,4 +1,4 @@
-.PHONY: install_base install_deps build_docs build test run help all build_wasm build_docker run_docker
+.PHONY: install_base install_deps deps build_docs build test run help all build_wasm build_docker run_docker
 
 # If the first argument is "run", we can pass the rest of the arguments to the target
 ifeq (run,$(firstword $(MAKECMDGOALS)))
@@ -11,12 +11,13 @@ all: help
 help:
 	@echo "Available commands:"
 	@echo "  install_base   - Install Rust and required targets"
-	@echo "  install_deps   - Install dependencies"
+	@echo "  deps           - Fetch Cargo dependencies"
+	@echo "  install_deps   - Install dependencies and pre-commit hooks"
 	@echo "  build_docs     - Build the API docs. Use DOC_DIR=<path> to specify alternative directory."
 	@echo "  build          - Build the CLI binary. Use BIN_DIR=<path> to specify alternative directory."
 	@echo "  test           - Run the test suite."
 	@echo "  run            - Run the CLI tool."
-	@echo "  build_wasm     - Build the WASM target (Note: currently unsupported)"
+	@echo "  build_wasm     - Build the WASM (wasm32-wasip1) target."
 	@echo "  build_docker   - Build alpine and debian Docker images."
 	@echo "  run_docker     - Run the built Docker images to test them."
 	@echo "  setup_hooks    - Setup git pre-commit hooks."
@@ -24,14 +25,15 @@ help:
 
 install_base:
 	rustup update
-	rustup target add wasm32-unknown-unknown || true
-	rustup target add wasm32-unknown-emscripten || true
+	rustup target add wasm32-wasip1 || true
 
 setup_hooks:
 	pre-commit install
 
-install_deps:
+deps:
 	cargo fetch
+
+install_deps: deps
 	$(MAKE) setup_hooks
 
 

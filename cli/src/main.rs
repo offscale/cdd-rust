@@ -9,9 +9,14 @@
 //! - `sync`: Pipeline DB -> Diesel -> Model -> Schema -> OpenAPI.
 //! - `from_openapi`: Generate code from an OpenAPI specification.
 //! - `to_openapi`: Generate an OpenAPI specification from source code.
+//! - `from_arazzo`: Generate code from an Arazzo 1.1.0 workflow specification.
+//! - `to_arazzo`: Extract an Arazzo 1.1.0 workflow specification from source code.
 //! - `to_docs_json`: Generate JSON documentation.
 //! - `serve_json_rpc`: Expose CLI interface as a JSON-RPC server.
 //! - `mcp`: Run the generator as an MCP server.
+//! - `scaffold`: Scaffold handler functions from OpenAPI routes.
+//! - `test-gen`: Generate integration tests from OpenAPI contracts.
+//! - `schema-gen`: Generate JSON Schemas or OpenAPI 3.2.0 specs from Rust structs/enums.
 
 use cdd_cli::generator::DieselMapper;
 use cdd_cli::TargetMode;
@@ -28,10 +33,17 @@ use clap::{Parser, Subcommand};
 Standard Commands:
   from_openapi    Generate code from an OpenAPI specification.
   to_openapi      Generate an OpenAPI specification from source code.
+  from_arazzo     Generate code from an Arazzo 1.1.0 workflow specification.
+  to_arazzo       Extract an Arazzo 1.1.0 workflow specification from code.
   sync            Synchronize an OpenAPI specification with source code.
   to_docs_json    Generate JSON documentation with code snippets.
   serve_json_rpc  Expose CLI interface as a JSON-RPC server.
-  mcp             Run the generator as an MCP server over stdio."
+  mcp             Run the generator as an MCP server over stdio.
+
+Language-Specific Commands:
+  scaffold        Scaffold handler functions from OpenAPI routes.
+  test-gen        Generate integration tests based on OpenAPI contracts.
+  schema-gen      Generate a JSON Schema from a Rust struct or enum."
 )]
 pub struct Cli {
     /// The subcommand to execute.
@@ -80,6 +92,15 @@ pub enum Commands {
     /// Run the generator as an MCP server over stdio.
     #[clap(name = "mcp")]
     Mcp(cdd_cli::mcp::McpArgs),
+    /// Scaffold handler functions from OpenAPI routes.
+    #[clap(name = "scaffold")]
+    Scaffold(cdd_cli::scaffold::ScaffoldArgs),
+    /// Generate integration tests based on OpenAPI contracts.
+    #[clap(name = "test-gen")]
+    TestGen(cdd_cli::test_gen::TestGenArgs),
+    /// Generate a JSON Schema from a Rust struct or enum.
+    #[clap(name = "schema-gen")]
+    SchemaGen(cdd_cli::schema_gen::SchemaGenArgs),
 }
 
 /// Dispatches a parsed [`Cli`] command to its underlying implementation.
@@ -107,6 +128,9 @@ pub fn dispatch_cli(cli: &Cli) -> AppResult<()> {
             "Server feature is not compiled or not supported on this platform".to_string(),
         )),
         Commands::Mcp(args) => cdd_cli::mcp::run_mcp_server(args),
+        Commands::Scaffold(args) => cdd_cli::scaffold::run_scaffold_for_target(args, &cli.target),
+        Commands::TestGen(args) => cdd_cli::test_gen::run_test_gen_for_target(args, &cli.target),
+        Commands::SchemaGen(args) => cdd_cli::schema_gen::run_schema_gen(args),
     }
 }
 
@@ -175,5 +199,23 @@ mod tests {
 
         let mcp_cli = Cli::parse_from(["cdd-rust", "mcp"]);
         assert!(dispatch_cli(&mcp_cli).is_ok());
+
+        let scaffold_err =
+            Cli::parse_from(["cdd-rust", "scaffold", "-i", "/nonexistent_openapi.yaml"]);
+        assert!(dispatch_cli(&scaffold_err).is_err());
+
+        let test_gen_err =
+            Cli::parse_from(["cdd-rust", "test-gen", "-i", "/nonexistent_openapi.yaml"]);
+        assert!(dispatch_cli(&test_gen_err).is_err());
+
+        let schema_gen_err = Cli::parse_from([
+            "cdd-rust",
+            "schema-gen",
+            "-i",
+            "/nonexistent_model.rs",
+            "--name",
+            "User",
+        ]);
+        assert!(dispatch_cli(&schema_gen_err).is_err());
     }
 }

@@ -33,9 +33,12 @@ pub mod to_openapi;
 
 pub use from_arazzo::{from_arazzo, FromArazzoConfig, FromArazzoSubcommand};
 pub use from_openapi::{from_openapi, FromOpenApiConfig, FromOpenApiSubcommand, ServerFramework};
+pub use scaffold::{run_scaffold, run_scaffold_for_target, ScaffoldArgs};
+pub use schema_gen::{run_schema_gen, SchemaGenArgs};
 #[cfg(all(feature = "server", not(target_os = "wasi")))]
 pub use serve_json_rpc::{serve_json_rpc, ServeJsonRpcConfig};
-pub use sync::{sync, SyncConfig};
+pub use sync::{sync, SyncConfig, SyncTruth};
+pub use test_gen::{run_test_gen, run_test_gen_for_target, TestGenArgs};
 pub use to_arazzo::{to_arazzo, ToArazzoConfig};
 pub use to_docs_json::{to_docs_json, ToDocsJsonConfig};
 pub use to_openapi::{to_openapi, ToOpenApiConfig};

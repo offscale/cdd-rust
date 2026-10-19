@@ -111,7 +111,9 @@ def main():
     print("Calculating doc coverage...")
     doc_cov = "0.00"
     try:
-        subprocess.run(["cargo", "+nightly", "--version"], capture_output=True, check=True)
+        subprocess.run(
+            ["cargo", "+nightly", "--version"], capture_output=True, check=True
+        )
 
         targets = [
             ("cdd-core", ["--lib"]),

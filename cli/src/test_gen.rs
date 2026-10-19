@@ -7,8 +7,11 @@
 use std::fs;
 use std::path::PathBuf;
 
+use crate::TargetMode;
 use cdd_core::openapi::parse::parse_openapi_routes;
-use cdd_core::strategies::BackendStrategy;
+use cdd_core::strategies::{
+    ActixStrategy, AxumStrategy, BackendStrategy, ClapCliStrategy, ReqwestStrategy,
+};
 use cdd_core::tests::emit::generate_contract_tests_file;
 use cdd_core::{AppError, AppResult};
 
@@ -37,6 +40,21 @@ pub struct TestGenArgs {
     /// The generated code calls it as: `test::init_service({factory}(App::new()))`.
     #[clap(long, default_value = "crate::http::routes::config")]
     pub app_factory: String,
+}
+
+/// Dispatches [`run_test_gen`] using the strategy corresponding to [`TargetMode`].
+///
+/// # Arguments
+///
+/// * `args` - Command arguments.
+/// * `target` - The target mode selecting the backend strategy.
+pub fn run_test_gen_for_target(args: &TestGenArgs, target: &TargetMode) -> AppResult<()> {
+    match target {
+        TargetMode::ServerActix => run_test_gen(args, &ActixStrategy),
+        TargetMode::ServerAxum => run_test_gen(args, &AxumStrategy),
+        TargetMode::ClientReqwest => run_test_gen(args, &ReqwestStrategy),
+        TargetMode::ClientInternal => run_test_gen(args, &ClapCliStrategy),
+    }
 }
 
 /// Executes the test generation.
@@ -134,6 +152,10 @@ paths:
 
         let err = run_test_gen(&args, &ActixStrategy).expect_err("expected error");
         assert!(format!("{}", err).contains("OpenAPI file not found"));
+        assert!(run_test_gen_for_target(&args, &TargetMode::ServerActix).is_err());
+        assert!(run_test_gen_for_target(&args, &TargetMode::ServerAxum).is_err());
+        assert!(run_test_gen_for_target(&args, &TargetMode::ClientReqwest).is_err());
+        assert!(run_test_gen_for_target(&args, &TargetMode::ClientInternal).is_err());
 
         let bad_openapi = dir.path().join("bad.yaml");
         fs::write(&bad_openapi, "not valid openapi: [").expect("write");

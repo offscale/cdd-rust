@@ -2,6 +2,7 @@
 import subprocess
 import sys
 
+
 def main():
     print("Adding wasm32-wasip1 target...")
     try:
@@ -13,12 +14,22 @@ def main():
     print("Building WASM target...")
     try:
         subprocess.run(
-            ["cargo", "build", "-p", "cdd-cli", "--release", "--target", "wasm32-wasip1", "--no-default-features"], 
-            check=True
+            [
+                "cargo",
+                "build",
+                "-p",
+                "cdd-cli",
+                "--release",
+                "--target",
+                "wasm32-wasip1",
+                "--no-default-features",
+            ],
+            check=True,
         )
     except subprocess.CalledProcessError:
         print("WASM build failed")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

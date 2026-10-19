@@ -8,8 +8,8 @@ edition = "2021"
 derive_more = { version = "2.1", default-features = false, features = ["std", "from", "display", "error"] }
 
 # AST Parsing
-ra_ap_syntax = { version = "0.0", default-features = false }
-ra_ap_edition = { version = "0.0", default-features = false }
+ra_ap_syntax = { version = "0.0.308", default-features = false }
+ra_ap_edition = { version = "0.0.308", default-features = false }
 
 # Regex for attributes and Arazzo criteria
 regex = { version = "1.13", default-features = false, features = ["std", "perf"] }

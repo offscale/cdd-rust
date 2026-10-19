@@ -5,6 +5,7 @@ IF "%1"=="" GOTO help
 IF "%1"=="help" GOTO help
 IF "%1"=="all" GOTO help
 IF "%1"=="install_base" GOTO install_base
+IF "%1"=="deps" GOTO install_deps
 IF "%1"=="install_deps" GOTO install_deps
 IF "%1"=="build_docs" GOTO build_docs
 IF "%1"=="docs" GOTO docs
@@ -34,7 +35,7 @@ GOTO :EOF
 
 :install_base
 rustup update
-rustup target add wasm32-unknown-unknown
+rustup target add wasm32-wasip1
 GOTO :EOF
 
 :install_deps
@@ -81,8 +82,8 @@ target\release\cdd-rust.exe %RUN_ARGS%
 GOTO :EOF
 
 :build_wasm
-ECHO Attempting WASM build. See WASM.md for current limitations.
-cargo build -p cdd-cli --target wasm32-unknown-unknown --release || ECHO WASM build is currently unsupported. See WASM.md for details.
+rustup target add wasm32-wasip1
+cargo build -p cdd-cli --release --target wasm32-wasip1 --no-default-features
 GOTO :EOF
 
 :build_docker

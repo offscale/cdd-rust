@@ -1,15 +1,17 @@
 # Compliance
 
 `cdd-rust` is fully compliant with the following standards:
-- **OpenAPI Specification**: 3.2.0 (Full Support)
+- **OpenAPI Specification**: 3.2.0 (Full Support) & Swagger 2.0 (Automatic Upgrade & Full Support)
 - **Arazzo Specification**: 1.1.0 (Full Support)
+- **Model Context Protocol (MCP)**: 1.0.0 (`stdio` Server & Generated Client/Server Adapters)
 - **JSON Schema Dialect**: 2020-12
 - **Rust Edition**: 2021
 
 ## Conformance Verification
 
-The toolchain has been fully verified against the universal conformance suite via `../scripts/check_all_conformance.sh`. All features, including callbacks, links, and examples, are successfully roundtripped and marked as green in the `ECOSYSTEM_COMPLIANCE_OAS_3_2_0.md` tracking document.
-## Support Matrix
+The toolchain has been verified against the universal conformance suite via `../scripts/check_all_conformance.sh`. All features—including callbacks, webhooks, links, runtime expressions, and examples—are roundtripped and verified in [`conformance/`](conformance/).
+
+## OpenAPI 3.2.0 & Swagger 2.0 Support Matrix
 
 | Specification Concept       | Status |
 | --------------------------- | ------ |

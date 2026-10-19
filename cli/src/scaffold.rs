@@ -10,10 +10,13 @@
 //! 3. Generates or Updates module files (e.g., `handlers/users.rs`) with `async fn` signatures.
 //! 4. (Optional) Injects route registrations into a shared config function (e.g., in `lib.rs`).
 
+use crate::TargetMode;
 use cdd_core::functions::emit::update_handler_module;
 use cdd_core::openapi::parse::{parse_openapi_routes, ParsedRoute};
 use cdd_core::routes::emit::register_routes;
-use cdd_core::strategies::BackendStrategy;
+use cdd_core::strategies::{
+    ActixStrategy, AxumStrategy, BackendStrategy, ClapCliStrategy, ReqwestStrategy,
+};
 use cdd_core::{AppError, AppResult};
 use std::collections::HashMap;
 use std::fs;
@@ -50,6 +53,21 @@ pub struct ScaffoldArgs {
     /// Note: The patcher is non-destructive by default.
     #[clap(long)]
     pub force: bool,
+}
+
+/// Dispatches [`run_scaffold`] using the strategy corresponding to [`TargetMode`].
+///
+/// # Arguments
+///
+/// * `args` - Command arguments including paths.
+/// * `target` - The target mode selecting the backend strategy.
+pub fn run_scaffold_for_target(args: &ScaffoldArgs, target: &TargetMode) -> AppResult<()> {
+    match target {
+        TargetMode::ServerActix => run_scaffold(args, &ActixStrategy),
+        TargetMode::ServerAxum => run_scaffold(args, &AxumStrategy),
+        TargetMode::ClientReqwest => run_scaffold(args, &ReqwestStrategy),
+        TargetMode::ClientInternal => run_scaffold(args, &ClapCliStrategy),
+    }
 }
 
 /// Executes the scaffolding process.
@@ -323,5 +341,9 @@ paths:
             force: false,
         };
         assert!(run_scaffold(&args_missing, &ActixStrategy).is_err());
+        assert!(run_scaffold_for_target(&args_missing, &TargetMode::ServerActix).is_err());
+        assert!(run_scaffold_for_target(&args_missing, &TargetMode::ServerAxum).is_err());
+        assert!(run_scaffold_for_target(&args_missing, &TargetMode::ClientReqwest).is_err());
+        assert!(run_scaffold_for_target(&args_missing, &TargetMode::ClientInternal).is_err());
     }
 }

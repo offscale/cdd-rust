@@ -2,13 +2,12 @@
 
 <!-- BADGES_START -->
 [![License](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![CI/CD](https://github.com/offscale/cdd-rust/workflows/CI/badge.svg)](https://github.com/offscale/cdd-rust/actions)
-[![Coverage](https://codecov.io/gh/offscale/cdd-rust/branch/master/graph/badge.svg)](https://codecov.io/gh/offscale/cdd-rust)
+[![CI/CD](https://github.com/SamuelMarks/cdd-rust/actions/workflows/ci.yml/badge.svg)](https://github.com/SamuelMarks/cdd-rust/actions)
 <!-- BADGES_END -->
 
-The **cdd-rust** tool acts as a dedicated compiler and transpiler. Its fundamental architecture follows standard compiler design principles, divided into three distinct phases: **Frontend (Parsing)**, **Intermediate Representation (IR)**, and **Backend (Emitting)**.
+The **cdd-rust** tool acts as a dedicated lossless compiler and transpiler. Its fundamental architecture follows standard compiler design principles, divided into three distinct phases: **Frontend (Parsing)**, **Intermediate Representation (IR)**, and **Backend (Emitting & Surgical Patching)**.
 
-This decoupled design ensures that any format capable of being parsed into the IR can subsequently be emitted into any supported output format, whether that is a server-side route, a client-side SDK, a database ORM, or an OpenAPI specification.
+This decoupled design ensures that any format capable of being parsed into the IR can subsequently be emitted or patched into any supported output format—whether that is an Actix-Web or Axum server route, a Reqwest client SDK, a Clap CLI, a Diesel ORM model, an Arazzo 1.1.0 workflow orchestrator, an MCP adapter, or an OpenAPI 3.2.0 specification.
 
 ## 🏗 High-Level Overview
 
@@ -21,22 +20,22 @@ graph TD
     classDef endpoint fill:#ffffff,stroke:#20344b,stroke-width:1px,color:#20344b,font-family:Google Sans
 
     subgraph Frontend [Parsers]
-        A[OpenAPI .yaml/.json]:::endpoint --> P1(OpenAPI Parser):::frontend
-        B[Rust Models / Source]:::endpoint --> P2(Rust Parser):::frontend
-        C[Actix Routes]:::endpoint --> P3(Framework Parser):::frontend
-        D[Reqwest Client SDKs]:::endpoint --> P4(Ext Parser):::frontend
+        A[OpenAPI / Swagger / Arazzo]:::endpoint --> P1(Spec Parser):::frontend
+        B[Rust Models / Source]:::endpoint --> P2(ra_ap_syntax CST Parser):::frontend
+        C[Actix-Web & Axum Routes]:::endpoint --> P3(Strategy Route Parser):::frontend
+        D[Reqwest SDK & Clap CLI]:::endpoint --> P4(Client & Workflow Parser):::frontend
     end
 
     subgraph Core [Intermediate Representation]
-        IR((CDD IR)):::core
+        IR((CDD IR & Semantic Diff)):::core
     end
 
-    subgraph Backend [Emitters]
-        E1(OpenAPI Emitter):::backend --> X[OpenAPI .yaml/.json]:::endpoint
-        E2(Rust Emitter):::backend --> Y[Rust Models / Structs]:::endpoint
-        E3(Server Emitter):::backend --> Z[Actix Routes / Controllers]:::endpoint
-        E4(Client Emitter):::backend --> W[Reqwest Client SDKs]:::endpoint
-        E5(Data Emitter):::backend --> V[Diesel ORM / Clap CLI]:::endpoint
+    subgraph Backend [Emitters & CST Patchers]
+        E1(OpenAPI & Arazzo Emitter):::backend --> X[OpenAPI 3.2.0 & Arazzo 1.1.0]:::endpoint
+        E2(CST Struct & Enum Patcher):::backend --> Y[Rust Models / Structs]:::endpoint
+        E3(Server Strategy Emitter):::backend --> Z[Actix-Web & Axum Controllers]:::endpoint
+        E4(Client Strategy Emitter):::backend --> W[Reqwest SDKs & Workflows]:::endpoint
+        E5(ORM, CLI & MCP Emitter):::backend --> V[Diesel ORM / Clap CLI / MCP]:::endpoint
     end
 
     P1 --> IR
@@ -57,37 +56,36 @@ graph TD
 
 The Frontend's responsibility is to read an input source and translate it into the universal CDD Intermediate Representation (IR).
 
-* **Static Analysis (AST-Driven)**: For `Rust` source code, the tool **does not** use dynamic reflection or execute the code. Instead, it reads the source files, generates an Abstract Syntax Tree (AST) using the `syn` crate, and navigates the tree to extract classes, structs, functions, type signatures, API client definitions, server routes, and docstrings.
-* **OpenAPI Parsing**: For OpenAPI and JSON Schema inputs, the parser normalizes the structure, resolving internal `$ref`s and extracting properties, endpoints (client or server perspectives), and metadata into the IR.
+* **Static Analysis (CST-Driven via `ra_ap_syntax`)**: For `Rust` source code, the tool **does not** use dynamic reflection or execute the code. Instead, it parses source files into a lossless Concrete Syntax Tree (CST) using `ra_ap_syntax` (`rust-analyzer`'s syntax tree engine for Rust Edition 2021), preserving whitespace, comments, docstrings, and attributes while extracting structs, enums, functions, type signatures, Reqwest client calls, Actix-Web/Axum server routes, and Arazzo workflow steps.
+* **OpenAPI, Swagger & Arazzo Parsing**: For OpenAPI 3.2.0, Swagger 2.0, JSON Schema (2020-12), and Arazzo 1.1.0 inputs, the parser normalizes legacy specifications, resolves internal and external `$ref`s (`DocumentRegistry`), and extracts models, routes, security schemes, webhooks, callbacks, and multi-step workflow graphs into the IR.
 
-### 2. Intermediate Representation (IR)
+### 2. Intermediate Representation (IR) & Semantic Diffing
 
-The Intermediate Representation is the crucial "glue" of the architecture. It is a normalized, language-agnostic data structure that represents concepts like:
-* **Models**: Entities containing typed properties, required fields, defaults, and descriptions.
-* **Endpoints / Operations**: HTTP verbs, paths, path/query/body parameters, and responses. In the IR, an operation is an abstract concept that can represent *either* a Server Route receiving a request *or* an API Client dispatching a request.
-* **Metadata**: Tooling hints, docstrings, and validations.
+The Intermediate Representation (`cdd-core`) is the normalized, language-agnostic data structure representing:
+* **Models (`ParsedStruct` / `ParsedEnum` / `JsonSchema`)**: Entities containing typed fields, serde/utoipa attributes, required constraints, defaults, and rustdoc descriptions.
+* **Endpoints / Operations (`ParsedRoute`)**: HTTP verbs, paths, path/query/header/cookie parameters, request bodies, security requirements, links, callbacks, webhooks, and responses.
+* **Workflows (`ArazzoDocument` / `Workflow` / `Step`)**: Multi-step operation DAGs, runtime expressions, criteria, and success/failure actions.
+* **Structural Diffs (`StructDiff` / `FieldChange`)**: Computed differences between existing CST nodes and target specifications to drive lossless in-place patching.
 
-By standardizing on a single IR (heavily inspired by OpenAPI / JSON Schema primitives), the system guarantees that parsing logic and emitting logic remain completely decoupled.
+### 3. The Backend (Emitters & Surgical Patchers)
 
-### 3. The Backend (Emitters)
+The Backend takes the universal IR (and optional CST diffs) and emits or patches target outputs via the `BackendStrategy`, `CliStrategy`, and `WorkflowStrategy` traits:
 
-The Backend's responsibility is to take the universal IR and generate valid target output. Emitters can be written to support various environments (e.g., Client vs Server, Web vs CLI).
-
-* **Code Generation**: Emitters iterate over the IR and generate idiomatic `Rust` source code utilizing the `quote` crate.
-  * A **Server Emitter** creates Actix-web routing controllers and request-validation logic.
-  * A **Client Emitter** creates Reqwest API wrappers, fetch functions, and response-parsing logic.
-* **Database & CLI Generation**: Emitters can also target Diesel ORM models or Clap command-line parsers by mapping IR properties to database columns or CLI arguments.
-* **Specification Generation**: Emitters translating back to OpenAPI serialize the IR into standard Swagger 2.0 and OpenAPI 3.2.0 JSON or YAML, rigorously formatting descriptions, type constraints, and endpoint schemas based on what was parsed from the source code.
+* **Lossless CST Patcher (`cdd_core::classes::patcher`)**: Modifies existing `.rs` files in-place without disturbing user comments, formatting, or custom handler bodies.
+* **Server Emitters (`ActixStrategy`, `AxumStrategy`, `McpServerStrategy`)**: Create and update Actix-Web and Axum route handlers, router configurations, MCP server handlers, and contract tests.
+* **Client & CLI Emitters (`ReqwestStrategy`, `ClapCliStrategy`, `McpClientStrategy`)**: Create async Reqwest API clients, Arazzo workflow orchestrators, Clap v4 CLI binaries, and MCP client adapters.
+* **Database ORM Sync (`DieselMapper`)**: Bridges Diesel `schema.rs` (`dsync`), Rust structs, and OpenAPI schemas.
+* **Specification Emitters**: Serialize the IR into compliant OpenAPI 3.2.0, JSON Schema 2020-12, and Arazzo 1.1.0 JSON or YAML documents.
 
 ## 🔄 Extensibility
 
-Because of the IR-centric design, adding support for a new `Rust` framework (e.g., a new Client library, Web framework, or ORM) requires minimal effort:
-1. **To support parsing a new framework**: Write a parser that converts the framework's AST/DSL into the CDD IR. Once written, the framework can automatically be exported to OpenAPI, Client SDKs, CLI parsers, or any other existing output target.
-2. **To support emitting a new framework**: Write an emitter that converts the CDD IR into the framework's DSL/AST. Once written, the framework can automatically be generated from OpenAPI or any other supported input.
+Because of the strategy and IR design, adding support for a new `Rust` framework requires minimal effort:
+1. **To support parsing a new framework**: Implement extraction into `ParsedRoute` / `ParsedStruct` in `cdd-core`.
+2. **To support emitting a new framework**: Implement the `BackendStrategy` / `WorkflowStrategy` traits in `cdd_core::strategies`.
 
 ## 🛡 Design Principles
 
-1. **A Single Source of Truth**: Developers should be able to maintain their definitions in whichever format is most ergonomic for their team (OpenAPI files, Native Code, Client libraries, ORM models) and generate the rest.
-2. **Zero-Execution Parsing**: Ensure security and resilience by strictly statically analyzing inputs. The compiler must never need to run the target code to understand its structure.
-3. **Lossless Conversion**: Maximize the retention of metadata (e.g., type annotations, docstrings, default values, validators) during the transition `Source -> IR -> Target`.
-4. **Symmetric Operations**: An Endpoint in the IR holds all the information necessary to generate both the Server-side controller that fulfills it, and the Client-side SDK method that calls it.
+1. **A Single Source of Truth**: Maintain definitions in whichever format is most ergonomic (OpenAPI/Arazzo files, Rust structs/handlers, or Diesel `schema.rs`) and synchronize the rest.
+2. **Zero-Execution Parsing**: Strictly statically analyze inputs without compiling or executing untrusted target code.
+3. **Lossless Conversion**: Retain formatting, comments, docstrings, type annotations, and attributes across `Source ⇄ CST/IR ⇄ Target`.
+4. **Symmetric Operations**: Every operation and workflow in the IR holds all metadata required to emit both server handlers and client SDK/CLI orchestrators.
