@@ -16,12 +16,9 @@ use ra_ap_syntax::{ast::HasDocComments, AstToken};
 pub fn extract_doc_comment<N: HasDocComments>(node: &N) -> Option<String> {
     let mut docs = Vec::new();
     for doc in node.doc_comments() {
-        let text = doc
-            .text()
-            .trim_start_matches("///")
-            .trim_start_matches("//!")
-            .trim()
-            .to_string();
+        let raw_text = doc.text();
+        let stripped = raw_text.trim_start_matches("///").trim_start_matches("//!");
+        let text = stripped.trim().to_string();
         if !text.is_empty() {
             docs.push(text);
         }

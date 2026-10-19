@@ -273,11 +273,9 @@ fn select_best_media<'a, F>(
 where
     F: Fn(&str) -> bool,
 {
-    content
-        .iter()
-        .filter(|(k, _)| predicate(k))
-        .max_by_key(|(k, _)| media_specificity_score(k, preferred))
-        .map(|(k, v)| (k.as_str(), v))
+    let filtered = content.iter().filter(|(k, _)| predicate(k));
+    let (k, v) = filtered.max_by_key(|(k, _)| media_specificity_score(k, preferred))?;
+    Some((k.as_str(), v))
 }
 
 fn media_specificity_score(media_type: &str, preferred: Option<&str>) -> (i32, i32, usize) {

@@ -371,15 +371,12 @@ pub trait BackendStrategy: CodegenStrategy {
     }
 
     /// Generates a unit test for a specific handler function to be placed alongside it.
-    fn handler_unit_test(&self, route: &ParsedRoute) -> String {
-        let _ = route;
+    fn handler_unit_test(&self, _route: &ParsedRoute) -> String {
         String::new()
     }
 
     /// Allows the strategy to fully override test function generation.
-    fn generate_custom_test(&self, route: &ParsedRoute, app_factory: &str) -> Option<String> {
-        let _ = route;
-        let _ = app_factory;
+    fn generate_custom_test(&self, _route: &ParsedRoute, _app_factory: &str) -> Option<String> {
         None
     }
 }

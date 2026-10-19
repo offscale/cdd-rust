@@ -156,12 +156,11 @@ pub fn validate_arazzo_document(doc: &ArazzoDocument) -> AppResult<()> {
 
     let mut seen_sources = HashSet::new();
     for (idx, src) in doc.source_descriptions.iter().enumerate() {
-        if src.name.is_empty()
-            || !src
-                .name
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-        {
+        let valid_chars = src
+            .name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b));
+        if src.name.is_empty() || !valid_chars {
             return Err(AppError::ArazzoValidation {
                 path: format!("/sourceDescriptions/{}/name", idx),
                 reason: format!("Invalid sourceDescription name '{}'", src.name),
@@ -332,7 +331,7 @@ pub fn resolve_source_descriptions(
 
         if let Some(dir) = base_dir {
             let candidate = dir.join(&src.url);
-            if candidate.exists() && candidate.is_file() {
+            if candidate.is_file() {
                 let raw_yaml = std::fs::read_to_string(&candidate)?;
                 registry.register_openapi_yaml(&src.url, &raw_yaml)?;
                 let parsed = parse_openapi_document_with_registry(
@@ -451,10 +450,8 @@ fn dfs_visit(
     }
 
     visiting.push(node.to_string());
-    if let Some(deps) = adj.get(node) {
-        for dep in deps {
-            dfs_visit(dep, adj, visited, visiting, order, scope_name)?;
-        }
+    for dep in &adj[node] {
+        dfs_visit(dep, adj, visited, visiting, order, scope_name)?;
     }
     let _ = visiting.pop();
     visited.insert(node.to_string());
@@ -489,7 +486,7 @@ fn validate_param_or_reusable(
                 section: ComponentSection::Parameters,
                 name,
             } => {
-                let exists = matches!(components, Some(c) if c.parameters.contains_key(&name));
+                let exists = components.is_some_and(|c| c.parameters.contains_key(&name));
                 if !exists {
                     return Err(AppError::ReferenceResolution {
                         reference: r.reference.to_string(),
@@ -531,8 +528,7 @@ fn validate_success_action_or_reusable(
                     section: ComponentSection::SuccessActions,
                     name,
                 } => {
-                    let exists =
-                        matches!(components, Some(c) if c.success_actions.contains_key(&name));
+                    let exists = components.is_some_and(|c| c.success_actions.contains_key(&name));
                     if !exists {
                         return Err(AppError::ReferenceResolution {
                             reference: r.reference.to_string(),
@@ -575,8 +571,7 @@ fn validate_failure_action_or_reusable(
                     section: ComponentSection::FailureActions,
                     name,
                 } => {
-                    let exists =
-                        matches!(components, Some(c) if c.failure_actions.contains_key(&name));
+                    let exists = components.is_some_and(|c| c.failure_actions.contains_key(&name));
                     if !exists {
                         return Err(AppError::ReferenceResolution {
                             reference: r.reference.to_string(),
@@ -1684,6 +1679,19 @@ workflows:
             Some("https://example.com/specs/workflows.yaml")
         );
 
+        let empty_linked = resolve_source_descriptions(&doc, None, &mut reg).expect("none dir");
+        assert!(empty_linked.is_empty());
+
+        let mut dir_doc = doc.clone();
+        dir_doc.source_descriptions.push(SourceDescription {
+            name: "dir_src".to_string(),
+            url: ".".to_string(),
+            source_type: Some(SourceDescriptionType::OpenApi),
+            extensions: BTreeMap::new(),
+        });
+        let mut dir_reg = DocumentRegistry::new();
+        let _ = resolve_source_descriptions(&dir_doc, Some(&dir), &mut dir_reg).expect("dir entry");
+
         let linked = resolve_source_descriptions(&doc, Some(&dir), &mut reg).expect("linked");
         assert!(linked.contains_key("petstore"));
 
@@ -1712,6 +1720,42 @@ workflows:
         };
         assert!(resolve_step_operation(&unknown_step, &linked).is_none());
 
+        let unknown_src_step = WorkflowStep {
+            target: StepTarget::OperationId("$sourceDescriptions.unknown.createPet".to_string()),
+            ..unknown_step.clone()
+        };
+        assert!(resolve_step_operation(&unknown_src_step, &linked).is_none());
+
+        let unknown_op_in_src_step = WorkflowStep {
+            target: StepTarget::OperationId("$sourceDescriptions.petstore.missingOp".to_string()),
+            ..unknown_step.clone()
+        };
+        assert!(resolve_step_operation(&unknown_op_in_src_step, &linked).is_none());
+
+        let short_ptr_step = WorkflowStep {
+            target: StepTarget::OperationPath(
+                "{$sourceDescriptions.petstore.url}#/paths".to_string(),
+            ),
+            ..unknown_step.clone()
+        };
+        assert!(resolve_step_operation(&short_ptr_step, &linked).is_none());
+
+        let non_paths_ptr_step = WorkflowStep {
+            target: StepTarget::OperationPath(
+                "{$sourceDescriptions.petstore.url}#/webhooks/newPet/post".to_string(),
+            ),
+            ..unknown_step.clone()
+        };
+        assert!(resolve_step_operation(&non_paths_ptr_step, &linked).is_none());
+
+        let wrong_method_step = WorkflowStep {
+            target: StepTarget::OperationPath(
+                "{$sourceDescriptions.petstore.url}#/paths/~1pets/delete".to_string(),
+            ),
+            ..unknown_step.clone()
+        };
+        assert!(resolve_step_operation(&wrong_method_step, &linked).is_none());
+
         let unknown_path_step = WorkflowStep {
             target: StepTarget::OperationPath(
                 "{$sourceDescriptions.petstore.url}#/paths/~1missing/get".to_string(),
@@ -1739,12 +1783,34 @@ info:
 
     #[test]
     fn test_validation_error_branches() {
+        let edge_valid = r#"
+arazzo: 1.1.0
+x-: ignored_bare_ext
+info:
+  title: T
+  version: '1'
+sourceDescriptions:
+  - name: s1
+    url: ./a.yaml
+workflows:
+  - workflowId: w1
+    inputs:
+      $ref: '#/definitions/External'
+      required: [123]
+    steps:
+      - stepId: s1
+        operationId: op1
+"#;
+        assert!(parse_arazzo_document(edge_valid).is_ok());
+
         let invalid_cases = [
             "not_an_object",
             "{}",
             "arazzo: 123",
             "arazzo: 2.0.0",
             "arazzo: 1.1.0\ninfo:\n  title: T\n  version: '1'\nsourceDescriptions:\n  - name: s1\n    url: ./a.yaml\nworkflows:\n  - workflowId: w1\n    dependsOn: [123]\n    steps:\n      - stepId: s1\n        operationId: op1",
+            "arazzo: 1.1.0\ninfo:\n  title: T\n  version: '1'\nsourceDescriptions:\n  - name: ''\n    url: ./a.yaml\nworkflows: []",
+            "arazzo: 1.1.0\ninfo:\n  title: T\n  version: '1'\nsourceDescriptions:\n  - name: s1\n    url: ./a.yaml\ncomponents: {}\nworkflows:\n  - workflowId: w1\n    inputs:\n      $ref: '#/components/inputs/Missing'\n    steps:\n      - stepId: s1\n        operationId: op1",
             "arazzo: 1.1.0
 $self: 123",
             "arazzo: 1.1.0

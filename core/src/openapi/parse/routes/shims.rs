@@ -45,12 +45,12 @@ impl<'de> Deserialize<'de> for ShimPaths {
         for (key, value) in raw {
             if key.starts_with("x-") {
                 extensions.insert(key, value);
-                continue;
+            } else {
+                let path_item = serde_json::from_value::<ShimPathItem>(value).map_err(|e| {
+                    DeError::custom(format!("Failed to parse path item '{}': {}", key, e))
+                })?;
+                items.insert(key, path_item);
             }
-            let path_item = serde_json::from_value::<ShimPathItem>(value).map_err(|e| {
-                DeError::custom(format!("Failed to parse path item '{}': {}", key, e))
-            })?;
-            items.insert(key, path_item);
         }
 
         Ok(Self { items, extensions })
@@ -94,12 +94,12 @@ impl<'de> Deserialize<'de> for ShimWebhooks {
         for (key, value) in raw {
             if key.starts_with("x-") {
                 extensions.insert(key, value);
-                continue;
+            } else {
+                let item = serde_json::from_value::<RefOr<ShimPathItem>>(value).map_err(|e| {
+                    DeError::custom(format!("Failed to parse webhook '{}': {}", key, e))
+                })?;
+                items.insert(key, item);
             }
-            let item = serde_json::from_value::<RefOr<ShimPathItem>>(value).map_err(|e| {
-                DeError::custom(format!("Failed to parse webhook '{}': {}", key, e))
-            })?;
-            items.insert(key, item);
         }
 
         Ok(Self { items, extensions })

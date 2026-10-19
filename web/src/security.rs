@@ -171,12 +171,16 @@ where
     type Future = Ready<Result<Self::Transform, Self::InitError>>;
 
     fn new_transform(&self, service: S) -> Self::Future {
-        ready(Ok(HybridAuthMiddleware {
+        let enforce_auth = self.enforce_auth;
+        let is_mock_mode = self.is_mock_mode;
+        let user_dao = self.user_dao.clone();
+        let mw = HybridAuthMiddleware {
             service,
-            enforce_auth: self.enforce_auth,
-            is_mock_mode: self.is_mock_mode,
-            user_dao: self.user_dao.clone(),
-        }))
+            enforce_auth,
+            is_mock_mode,
+            user_dao,
+        };
+        ready(Ok(mw))
     }
 }
 
@@ -192,6 +196,7 @@ pub struct HybridAuthMiddleware<S> {
     user_dao: Arc<dyn UserDao>,
 }
 
+/// Validates the extracted bearer token against mock or database credentials.
 async fn validate_request_token(
     token_opt: Option<String>,
     is_mock_mode: bool,
@@ -210,11 +215,32 @@ async fn validate_request_token(
         .is_some()
 }
 
+/// Extracts the Bearer token from the `Authorization` HTTP header, if present.
 fn extract_bearer_token(req: &ServiceRequest) -> Option<String> {
     let header_val = req.headers().get("Authorization")?;
     let header_str = header_val.to_str().ok()?;
     let bearer = header_str.strip_prefix("Bearer ")?;
     Some(bearer.to_string())
+}
+
+/// Attaches the default API Key and OAuth2 marker extensions to the incoming request.
+fn attach_auth_extensions(req: &ServiceRequest) {
+    let mut ext = req.extensions_mut();
+    ext.insert(ApiKey);
+    ext.insert(OAuth2::<()>(PhantomData));
+    ext.insert(PetstoreAuth::<(scopes::WritePets, scopes::ReadPets)>(
+        PhantomData,
+    ));
+}
+
+/// Constructs a 401 Unauthorized `ServiceResponse` preserving the original request context.
+fn build_unauthorized_response(
+    res: ServiceResponse<actix_web::body::BoxBody>,
+) -> ServiceResponse<actix_web::body::BoxBody> {
+    let body = HttpResponse::Unauthorized().body("Unauthorized: Invalid token");
+    let unauthorized = body.map_into_boxed_body();
+    let (req_ext, _) = res.into_parts();
+    ServiceResponse::new(req_ext, unauthorized)
 }
 
 impl<S, B> Service<ServiceRequest> for HybridAuthMiddleware<S>
@@ -239,13 +265,7 @@ where
         let is_mock_mode = self.is_mock_mode;
         let user_dao = self.user_dao.clone();
         let token_opt = extract_bearer_token(&req);
-
-        req.extensions_mut().insert(ApiKey);
-        req.extensions_mut().insert(OAuth2::<()>(PhantomData));
-        req.extensions_mut()
-            .insert(PetstoreAuth::<(scopes::WritePets, scopes::ReadPets)>(
-                PhantomData,
-            ));
+        attach_auth_extensions(&req);
 
         if !enforce_auth {
             let fut = self.service.call(req);
@@ -257,11 +277,7 @@ where
             let is_valid = validate_request_token(token_opt, is_mock_mode, user_dao).await;
             let res = fut.await?.map_into_boxed_body();
             if !is_valid {
-                let unauthorized = HttpResponse::Unauthorized()
-                    .body("Unauthorized: Invalid token")
-                    .map_into_boxed_body();
-                let (req_ext, _) = res.into_parts();
-                return Ok(ServiceResponse::new(req_ext, unauthorized));
+                return Ok(build_unauthorized_response(res));
             }
             Ok(res)
         })

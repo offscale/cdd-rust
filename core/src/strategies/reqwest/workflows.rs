@@ -754,6 +754,11 @@ components:
       properties:
         petId:
           type: string
+  parameters:
+    sharedParam:
+      name: shared
+      in: query
+      value: 1
 workflows:
   - workflowId: loginFlow
     inputs:
@@ -761,9 +766,19 @@ workflows:
       properties:
         userName:
           type: string
+        user_id:
+          type: string
     steps:
       - stepId: authStep
         operationId: loginUser
+        parameters:
+          - reference: $components.parameters.sharedParam
+        successCriteria:
+          - condition: $statusCode == 201
+        onSuccess:
+          - name: gotoWf
+            type: goto
+            workflowId: buyPet
         outputs:
           token: $response.body#/token
       - stepId: resolvedOpId

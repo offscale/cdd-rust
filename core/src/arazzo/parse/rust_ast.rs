@@ -13,8 +13,8 @@ use crate::arazzo::models::{
     StepTarget, SuccessAction, SuccessActionType, Workflow, WorkflowStep,
 };
 use crate::arazzo::parse::document::{parse_arazzo_document, to_pascal_case};
-use crate::classes::parse::extract_model;
-use crate::classes::parse::models::{ParsedModel, ParsedStruct};
+use crate::classes::parse::extract_struct;
+use crate::classes::parse::models::ParsedStruct;
 use crate::error::{AppError, AppResult};
 use crate::openapi::parse::models::RuntimeExpression;
 use indexmap::IndexMap;
@@ -178,13 +178,10 @@ pub fn extract_workflows_from_rust(code: &str) -> AppResult<Vec<Workflow>> {
     let mut struct_schemas: BTreeMap<String, ParsedSchema> = BTreeMap::new();
     for node in tree.syntax().descendants() {
         if let Some(st) = ast::Struct::cast(node) {
-            if let Some(name_node) = st.name() {
-                let s_name = name_node.text().to_string();
-                if let Ok(ParsedModel::Struct(parsed_st)) = extract_model(code, &s_name) {
-                    let raw_schema = struct_to_json_schema(&parsed_st);
-                    struct_schemas.insert(s_name, ParsedSchema::new(raw_schema, parsed_st));
-                }
-            }
+            let s_name = st.name().map(|n| n.text().to_string()).unwrap_or_default();
+            let parsed_st = extract_struct(code, &s_name)?;
+            let raw_schema = struct_to_json_schema(&parsed_st);
+            struct_schemas.insert(s_name, ParsedSchema::new(raw_schema, parsed_st));
         }
     }
 
@@ -228,7 +225,6 @@ fn extract_workflow_from_fn(
 
     let is_async = func.async_token().is_some();
     let has_wf_tag = fn_text.contains("@ARAZZO_WORKFLOW_ID:")
-        || fn_text.starts_with("/// @ARAZZO")
         || fn_name.starts_with("workflow_")
         || fn_name.starts_with("test_workflow_");
 
@@ -352,9 +348,7 @@ fn extract_steps_from_fn_body(fn_text: &str, workflow_id: &str) -> AppResult<Vec
             if let Some((ctx_part, cond_part)) = crit_raw.trim().split_once("condition=") {
                 cond = cond_part.trim().to_string();
                 if let Some(c) = ctx_part.trim().strip_prefix("context=") {
-                    if let Ok(re) = RuntimeExpression::parse(c.trim()) {
-                        ctx_opt = Some(re);
-                    }
+                    ctx_opt = RuntimeExpression::parse(c.trim()).ok();
                 }
             }
             current_criteria.push(Criterion {
@@ -407,40 +401,39 @@ fn extract_steps_from_fn_body(fn_text: &str, workflow_id: &str) -> AppResult<Vec
                     }));
                 }
             }
-        } else if trimmed.starts_with("let step_")
-            && trimmed.contains(".await")
-            && current_step_id.is_none()
+        } else if let Some((lhs, rhs)) = trimmed
+            .strip_prefix("let step_")
+            .filter(|_| trimmed.contains(".await") && current_step_id.is_none())
+            .and_then(|_| trimmed.split_once('='))
         {
             // Handwritten Rust workflow step pattern: `let step_<name> = client.<op>(...).await?;`
-            if let Some((lhs, rhs)) = trimmed.split_once('=') {
-                let step_var = lhs
-                    .trim()
-                    .trim_start_matches("let ")
-                    .trim_start_matches("mut ")
-                    .trim();
-                let step_id = step_var
-                    .strip_prefix("step_")
-                    .unwrap_or(step_var)
-                    .to_string();
-                let op_id = extract_callee_name(rhs).unwrap_or(step_id.clone());
-                let params = extract_inline_call_params(rhs);
-                steps.push(WorkflowStep {
-                    step_id,
-                    description: None,
-                    target: StepTarget::OperationId(op_id),
-                    parameters: params,
-                    request_body: None,
-                    success_criteria: Vec::new(),
-                    on_success: Vec::new(),
-                    on_failure: Vec::new(),
-                    outputs: IndexMap::new(),
-                    timeout: None,
-                    correlation_id: None,
-                    action: None,
-                    depends_on: Vec::new(),
-                    extensions: BTreeMap::new(),
-                });
-            }
+            let step_var = lhs
+                .trim()
+                .trim_start_matches("let ")
+                .trim_start_matches("mut ")
+                .trim();
+            let step_id = step_var
+                .strip_prefix("step_")
+                .unwrap_or(step_var)
+                .to_string();
+            let op_id = extract_callee_name(rhs).unwrap_or(step_id.clone());
+            let params = extract_inline_call_params(rhs);
+            steps.push(WorkflowStep {
+                step_id,
+                description: None,
+                target: StepTarget::OperationId(op_id),
+                parameters: params,
+                request_body: None,
+                success_criteria: Vec::new(),
+                on_success: Vec::new(),
+                on_failure: Vec::new(),
+                outputs: IndexMap::new(),
+                timeout: None,
+                correlation_id: None,
+                action: None,
+                depends_on: Vec::new(),
+                extensions: BTreeMap::new(),
+            });
         }
     }
 
@@ -502,37 +495,37 @@ fn extract_callee_name(rhs: &str) -> Option<String> {
 fn extract_inline_call_params(rhs: &str) -> Vec<ParameterOrReusable> {
     let mut params = Vec::new();
     if let Some((_, after_open)) = rhs.split_once('(') {
-        if let Some((args_str, _)) = after_open.rsplit_once(')') {
-            for (idx, arg) in args_str.split(',').enumerate() {
-                let a = arg.trim();
-                if a.is_empty() || a == "&client" || a == "&self.client" || a == "base_url" {
+        let args_str = after_open
+            .rsplit_once(')')
+            .map(|(s, _)| s)
+            .unwrap_or(after_open);
+        for (idx, arg) in args_str.split(',').enumerate() {
+            let a = arg.trim();
+            if a.is_empty() || a == "&client" || a == "&self.client" || a == "base_url" {
+                continue;
+            }
+            let inp_opt = match a.strip_prefix("inputs.") {
+                Some(s) => Some(s),
+                None => a.strip_prefix("&inputs."),
+            };
+            if let Some(inp_field) = inp_opt {
+                let clean_field = inp_field.trim_end_matches(".clone()");
+                if let Ok(re) = RuntimeExpression::parse(&format!("$inputs.{}", clean_field)) {
+                    params.push(ParameterOrReusable::Parameter(ArazzoParameter {
+                        name: clean_field.to_string(),
+                        in_loc: Some(ArazzoParamLocation::Query),
+                        value: ParameterValue::Expression(re),
+                        extensions: BTreeMap::new(),
+                    }));
                     continue;
                 }
-                let inp_opt = match a.strip_prefix("inputs.") {
-                    Some(s) => Some(s),
-                    None => a.strip_prefix("&inputs."),
-                };
-                if let Some(inp_field) = inp_opt {
-                    let clean_field = inp_field.trim_end_matches(".clone()");
-                    if let Ok(re) = RuntimeExpression::parse(&format!("$inputs.{}", clean_field)) {
-                        params.push(ParameterOrReusable::Parameter(ArazzoParameter {
-                            name: clean_field.to_string(),
-                            in_loc: Some(ArazzoParamLocation::Query),
-                            value: ParameterValue::Expression(re),
-                            extensions: BTreeMap::new(),
-                        }));
-                        continue;
-                    }
-                }
-                params.push(ParameterOrReusable::Parameter(ArazzoParameter {
-                    name: format!("arg_{}", idx),
-                    in_loc: Some(ArazzoParamLocation::Query),
-                    value: ParameterValue::Literal(JsonValue::String(
-                        a.trim_matches('"').to_string(),
-                    )),
-                    extensions: BTreeMap::new(),
-                }));
             }
+            params.push(ParameterOrReusable::Parameter(ArazzoParameter {
+                name: format!("arg_{}", idx),
+                in_loc: Some(ArazzoParamLocation::Query),
+                value: ParameterValue::Literal(JsonValue::String(a.trim_matches('"').to_string())),
+                extensions: BTreeMap::new(),
+            }));
         }
     }
     params
@@ -716,8 +709,16 @@ workflows:
 /// @ARAZZO_SUMMARY: Handwritten summary
 /// @ARAZZO_DESCRIPTION: Handwritten description
 /// @ARAZZO_SOURCE: users_api|./users.yaml|openapi
+/// @ARAZZO_SOURCE: invalid_single_part
 
 use serde::{Deserialize, Serialize};
+
+pub struct IgnoredTupleStruct(pub String);
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OptionalOnlyInputs {
+    pub opt_field: Option<String>,
+}
 
 /// Input struct for checkout.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -734,22 +735,42 @@ pub struct CheckoutFlowInputs {
     pub express: bool,
 }
 
+///
+/// # Heading ignored
 /// Checkout workflow orchestrator.
+/// Second summary line ignored.
+/// @ARAZZO_WORKFLOW_JSON: {invalid_json}
 /// @ARAZZO_WORKFLOW_ID: checkoutFlow
-/// @ARAZZO_DEPENDS_ON: fallback
+/// @ARAZZO_DEPENDS_ON: fallback, , sync_tagged
 pub async fn workflow_checkout_flow(inputs: CheckoutFlowInputs) -> Result<(), String> {
-    let step_fetch_cart = client::get_cart(&client, inputs.user_id.clone(), "active").await?;
+    let step_fetch_cart = client::get_cart(&self.client, base_url, &client, inputs.user_id.clone(), &inputs..clone(), "active").await?;
+    let step_no_parens = client_ping.await?;
     let step_anon = ().await;
+    let step_not_awaited = 42;
     // @ARAZZO_STEP_ID: chargeCard
     // @ARAZZO_STEP_DEPENDS_ON: fetch_cart
     req_builder = req_builder.timeout(std::time::Duration::from_millis(2500));
     let max_attempts: u32 = 3;
+    let max_attempts: u32 = 1;
+    let max_attempts: u32 = not_a_num;
     // @ARAZZO_CRITERION: context=$statusCode condition=$statusCode == 200
+    // @ARAZZO_CRITERION: invalid_no_condition
+    // @ARAZZO_CRITERION: no_ctx condition=$statusCode == 200
+    // @ARAZZO_CRITERION: context=bad_ctx condition=$statusCode == 200
     // @ARAZZO_ON_SUCCESS: goto step confirmOrder
     // @ARAZZO_ON_SUCCESS: end
+    // @ARAZZO_ON_SUCCESS: ignore_other
     // @ARAZZO_STEP_ID: confirmOrder
     Ok(())
 }
+
+/// @ARAZZO_WORKFLOW_ID: sync_tagged
+pub fn tagged_sync_workflow() {
+    // @ARAZZO_STEP_ID: syncStep
+}
+
+pub fn main() {}
+pub fn execute_workflow_cli() {}
 
 pub async fn handle_workflow_server_flow() {
     do_server().await;
@@ -783,13 +804,13 @@ pub mod nested_dup {
         assert_eq!(doc.info.title, "Handwritten Workflow");
         assert_eq!(doc.info.version, "0.2.0");
         assert_eq!(doc.source_descriptions[0].name, "users_api");
-        assert_eq!(doc.workflows.len(), 4);
+        assert_eq!(doc.workflows.len(), 5);
         assert_eq!(doc.workflows[0].workflow_id, "checkoutFlow");
         assert!(doc.workflows[0].inputs.is_some());
-        assert_eq!(doc.workflows[0].steps.len(), 4);
+        assert_eq!(doc.workflows[0].steps.len(), 5);
         assert_eq!(doc.workflows[0].steps[0].step_id, "fetch_cart");
-        assert_eq!(doc.workflows[0].steps[2].step_id, "chargeCard");
-        assert_eq!(doc.workflows[0].steps[2].timeout, Some(2500));
+        assert_eq!(doc.workflows[0].steps[3].step_id, "chargeCard");
+        assert_eq!(doc.workflows[0].steps[3].timeout, Some(2500));
 
         let min_doc = extract_arazzo_document_from_rust(
             "pub async fn workflow_min() { call().await; }",

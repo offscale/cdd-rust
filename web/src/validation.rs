@@ -33,9 +33,9 @@ where
     type Future = Ready<Result<Self::Transform, Self::InitError>>;
 
     fn new_transform(&self, service: S) -> Self::Future {
-        ready(Ok(StrictValidationMiddleware {
-            service: Rc::new(service),
-        }))
+        let service = Rc::new(service);
+        let mw = StrictValidationMiddleware { service };
+        ready(Ok(mw))
     }
 }
 
@@ -43,6 +43,29 @@ where
 pub struct StrictValidationMiddleware<S> {
     /// Wrapped inner Actix service.
     service: Rc<S>,
+}
+
+/// Returns `true` when the request is a write operation (`POST`, `PUT`, `PATCH`) with `Content-Type: text/plain`.
+fn is_unsupported_text_plain_write(req: &ServiceRequest) -> bool {
+    let is_write = matches!(*req.method(), Method::POST | Method::PUT | Method::PATCH);
+    if !is_write {
+        return false;
+    }
+    let Some(ct) = req.headers().get(actix_web::http::header::CONTENT_TYPE) else {
+        return false;
+    };
+    let Ok(ct_str) = ct.to_str() else {
+        return false;
+    };
+    ct_str.starts_with("text/plain")
+}
+
+/// Builds the 415 Unsupported Media Type JSON response for rejected `text/plain` write payloads.
+fn unsupported_media_type_response() -> HttpResponse {
+    let payload = serde_json::json!({
+        "error": "Unsupported Media Type: text/plain is not accepted for write operations"
+    });
+    HttpResponse::UnsupportedMediaType().json(payload)
 }
 
 impl<S, B> Service<ServiceRequest> for StrictValidationMiddleware<S>
@@ -66,20 +89,9 @@ where
         let srv = self.service.clone();
 
         Box::pin(async move {
-            let is_write = matches!(*req.method(), Method::POST | Method::PUT | Method::PATCH);
-            if is_write {
-                if let Some(ct) = req.headers().get(actix_web::http::header::CONTENT_TYPE) {
-                    if let Ok(ct_str) = ct.to_str() {
-                        if ct_str.starts_with("text/plain") {
-                            let resp = HttpResponse::UnsupportedMediaType()
-                                .json(serde_json::json!({
-                                    "error": "Unsupported Media Type: text/plain is not accepted for write operations"
-                                }))
-                                .map_into_right_body();
-                            return Ok(req.into_response(resp));
-                        }
-                    }
-                }
+            if is_unsupported_text_plain_write(&req) {
+                let resp = unsupported_media_type_response().map_into_right_body();
+                return Ok(req.into_response(resp));
             }
 
             let res = srv.call(req).await?;

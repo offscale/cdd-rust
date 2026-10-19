@@ -507,14 +507,14 @@ impl DocumentRegistry {
             .find_map(|candidate| self.inline_schema_anchors.get(candidate))
     }
 
-    fn schema_from_target<'a>(&'a self, target: &SchemaTarget) -> Option<&'a Schema> {
+    fn schema_from_target(&self, target: &SchemaTarget) -> Option<&Schema> {
         match target {
             SchemaTarget::Root(doc) => self.docs[*doc].schema_root.as_ref(),
-            SchemaTarget::Component { doc, name } => self.docs[*doc]
-                .components
-                .as_ref()
-                .and_then(|c| c.schemas.get(name))
-                .and_then(extract_concrete_schema),
+            SchemaTarget::Component { doc, name } => {
+                let comps = self.docs[*doc].components.as_ref()?;
+                let schema_ref = comps.schemas.get(name)?;
+                extract_concrete_schema(schema_ref)
+            }
         }
     }
 }

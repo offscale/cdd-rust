@@ -33,7 +33,7 @@ pub enum ArazzoFormat {
 /// A canonical `serde_json::Value` representing the Arazzo 1.1.0 document.
 ///
 /// # Errors
-/// Returns [`AppError`] if validation fails prior to emission.
+/// Returns [`crate::error::AppError`] if validation fails prior to emission.
 pub fn generate_arazzo_document(doc: &ArazzoDocument) -> AppResult<JsonValue> {
     crate::arazzo::parse::validate_arazzo_document(doc)?;
 
@@ -79,7 +79,7 @@ pub fn generate_arazzo_document(doc: &ArazzoDocument) -> AppResult<JsonValue> {
 /// The formatted specification string.
 ///
 /// # Errors
-/// Returns [`AppError`] if document validation or serialization fails.
+/// Returns [`crate::error::AppError`] if document validation or serialization fails.
 pub fn serialize_arazzo_document(doc: &ArazzoDocument, format: ArazzoFormat) -> AppResult<String> {
     let val = generate_arazzo_document(doc)?;
     match format {
@@ -688,7 +688,14 @@ workflows:
         let yaml2 = "arazzo: 1.1.0\ninfo:\n  title: Minimal\n  version: 1.0.0\nsourceDescriptions:\n  - name: s1\n    url: ./s1.yaml\ncomponents: {}\nworkflows:\n  - workflowId: w0\n    steps:\n      - stepId: st0\n        operationId: op0\n  - workflowId: w1\n    dependsOn: [w0]\n    inputs:\n      type: object\n      properties:\n        a:\n          type: string\n    parameters:\n      - name: wfParam\n        in: header\n        value: 'v'\n    successActions:\n      - name: wfEnd\n        type: end\n    failureActions:\n      - name: wfFail\n        type: end\n    steps:\n      - stepId: st1\n        operationPath: '{$sourceDescriptions.s1.url}#/paths/~1p/get'\n        parameters:\n          - name: p1\n            value: 'v1'\n        requestBody:\n          replacements:\n            - target: /a\n              value: 'b'\n        outputs:\n          o1:\n            context: $response.body\n            selector: /a\n      - stepId: st2\n        dependsOn: [st1]\n        channelPath: /ch\n        action: receive\n        correlationId: $response.body#/id\n      - stepId: st3\n        dependsOn: [st2]\n        workflowId: w0\n";
         let mut doc2 = parse_arazzo_document(yaml2).expect("parse 2");
         doc2.components = Some(ArazzoComponents::default());
-        let json2 = serialize_arazzo_document(&doc2, ArazzoFormat::Json).expect("emit 2");
+        let json2_empty = serialize_arazzo_document(&doc2, ArazzoFormat::Json).expect("emit 2a");
+        assert!(parse_arazzo_document(&json2_empty).is_ok());
+        let mut empty_comps = ArazzoComponents::default();
+        empty_comps
+            .extensions
+            .insert("x-comp".to_string(), JsonValue::Bool(true));
+        doc2.components = Some(empty_comps);
+        let json2 = serialize_arazzo_document(&doc2, ArazzoFormat::Json).expect("emit 2b");
         assert!(parse_arazzo_document(&json2).is_ok());
 
         // Also test Reusable in step parameters, step onSuccess, and step onFailure
