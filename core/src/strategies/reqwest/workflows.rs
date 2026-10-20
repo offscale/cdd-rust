@@ -171,27 +171,8 @@ pub struct {} {{
     Ok(out)
 }
 
-/// Emits the Reqwest Client SDK workflow orchestrator module (`WorkflowsClient` + methods).
-///
-/// # Arguments
-/// * `doc` - The parsed [`ArazzoDocument`].
-/// * `linked_specs` - Map of linked [`ParsedOpenApi`] specifications.
-///
-/// # Returns
-/// Valid Rust source code containing models and the `WorkflowsClient` implementation.
-///
-/// # Errors
-/// Returns [`crate::error::AppError`] if emission fails.
-pub fn emit_workflow_module(
-    doc: &ArazzoDocument,
-    linked_specs: &BTreeMap<String, ParsedOpenApi>,
-) -> AppResult<String> {
-    let mut out = emit_workflow_models(doc, linked_specs)?;
-
-    let canonical_json =
-        serde_json::to_string(&crate::arazzo::emit::generate_arazzo_document(doc)?)
-            .unwrap_or_default();
-
+/// Emits the standard Arazzo document metadata header comments (`@ARAZZO_VERSION`, `@ARAZZO_TITLE`, etc.).
+pub(crate) fn emit_arazzo_header_comments(out: &mut String, doc: &ArazzoDocument) {
     out.push_str(&format!("/// @ARAZZO_VERSION: {}\n", doc.arazzo));
     if let Some(self_uri) = &doc.self_uri {
         out.push_str(&format!("/// @ARAZZO_SELF: {}\n", self_uri));
@@ -212,7 +193,27 @@ pub fn emit_workflow_module(
             src.name, src.url, st
         ));
     }
-    out.push_str(&format!("/// @ARAZZO_SPEC_JSON: {}\n", canonical_json));
+}
+
+/// Emits the Reqwest Client SDK workflow orchestrator module (`WorkflowsClient` + methods).
+///
+/// # Arguments
+/// * `doc` - The parsed [`ArazzoDocument`].
+/// * `linked_specs` - Map of linked [`ParsedOpenApi`] specifications.
+///
+/// # Returns
+/// Valid Rust source code containing models and the `WorkflowsClient` implementation.
+///
+/// # Errors
+/// Returns [`crate::error::AppError`] if emission fails.
+pub fn emit_workflow_module(
+    doc: &ArazzoDocument,
+    linked_specs: &BTreeMap<String, ParsedOpenApi>,
+) -> AppResult<String> {
+    crate::arazzo::parse::validate_arazzo_document(doc)?;
+    let mut out = emit_workflow_models(doc, linked_specs)?;
+
+    emit_arazzo_header_comments(&mut out, doc);
     out.push_str("/// Client SDK orchestrator for Arazzo 1.1.0 workflows.\n");
     out.push_str("#[derive(Debug, Clone)]\n");
     out.push_str("pub struct WorkflowsClient {\n");
@@ -321,6 +322,91 @@ pub fn emit_workflow_tests(doc: &ArazzoDocument, crate_name: &str) -> AppResult<
     Ok(out)
 }
 
+/// Formats a [`RuntimeExpressionOrSelector`] into its canonical runtime expression string.
+pub(crate) fn format_expr_or_selector(val: &RuntimeExpressionOrSelector) -> String {
+    match val {
+        RuntimeExpressionOrSelector::Expression(expr) => expr.as_str().to_string(),
+        RuntimeExpressionOrSelector::Selector(sel) => {
+            format!("{}{}", sel.context.as_str(), sel.selector)
+        }
+    }
+}
+
+/// Emits workflow-level doc annotations (`@ARAZZO_WORKFLOW_ID`, `@ARAZZO_DEPENDS_ON`, `@ARAZZO_WORKFLOW_OUTPUT`).
+pub(crate) fn emit_workflow_doc_annotations(out: &mut String, wf: &Workflow, indent: &str) {
+    if let Some(summary) = &wf.summary {
+        out.push_str(&format!("{indent}/// {summary}\n"));
+    } else {
+        out.push_str(&format!(
+            "{indent}/// Executes workflow `{}`.\n",
+            wf.workflow_id
+        ));
+    }
+    out.push_str(&format!(
+        "{indent}/// @ARAZZO_WORKFLOW_ID: {}\n",
+        wf.workflow_id
+    ));
+    if !wf.depends_on.is_empty() {
+        out.push_str(&format!(
+            "{indent}/// @ARAZZO_DEPENDS_ON: {}\n",
+            wf.depends_on.join(",")
+        ));
+    }
+    for (out_key, out_expr) in &wf.outputs {
+        out.push_str(&format!(
+            "{indent}/// @ARAZZO_WORKFLOW_OUTPUT: {}={}\n",
+            out_key,
+            format_expr_or_selector(out_expr)
+        ));
+    }
+}
+
+/// Emits step-level comment annotations (`@ARAZZO_STEP_ID`, `@ARAZZO_STEP_TARGET`, `@ARAZZO_STEP_PARAM`, `@ARAZZO_STEP_DEPENDS_ON`).
+pub(crate) fn emit_step_doc_annotations(out: &mut String, step: &WorkflowStep, indent: &str) {
+    out.push_str(&format!("{indent}// @ARAZZO_STEP_ID: {}\n", step.step_id));
+    match &step.target {
+        StepTarget::OperationId(op_id) => {
+            out.push_str(&format!(
+                "{indent}// @ARAZZO_STEP_TARGET: operationId={op_id}\n"
+            ));
+        }
+        StepTarget::OperationPath(op_path) => {
+            out.push_str(&format!(
+                "{indent}// @ARAZZO_STEP_TARGET: operationPath={op_path}\n"
+            ));
+        }
+        StepTarget::ChannelPath(ch) => {
+            out.push_str(&format!(
+                "{indent}// @ARAZZO_STEP_TARGET: channelPath={ch}\n"
+            ));
+        }
+        StepTarget::WorkflowId(sub_wf) => {
+            out.push_str(&format!(
+                "{indent}// @ARAZZO_STEP_TARGET: workflowId={sub_wf}\n"
+            ));
+        }
+    }
+    if !step.depends_on.is_empty() {
+        out.push_str(&format!(
+            "{indent}// @ARAZZO_STEP_DEPENDS_ON: {}\n",
+            step.depends_on.join(",")
+        ));
+    }
+    for param in &step.parameters {
+        if let ParameterOrReusable::Parameter(p) = param {
+            let loc_str = p.in_loc.as_ref().map(|l| l.as_str()).unwrap_or("query");
+            let val_str = match &p.value {
+                ParameterValue::Expression(expr) => expr.as_str().to_string(),
+                ParameterValue::Literal(lit) => lit.to_string(),
+            };
+            out.push_str(&format!(
+                "{indent}// @ARAZZO_STEP_PARAM: {}|{}|{}\n",
+                p.name, loc_str, val_str
+            ));
+        }
+    }
+}
+
 fn emit_workflow_method(
     out: &mut String,
     wf: &Workflow,
@@ -328,27 +414,8 @@ fn emit_workflow_method(
 ) {
     let wf_snake = to_snake_case(&wf.workflow_id);
     let wf_pascal = to_pascal_case(&wf.workflow_id);
-    let wf_json =
-        serde_json::to_string(&serde_json::to_value(wf).unwrap_or_default()).unwrap_or_default();
 
-    out.push_str(&format!(
-        "    /// Executes workflow `{}`.\n",
-        wf.workflow_id
-    ));
-    if let Some(summary) = &wf.summary {
-        out.push_str(&format!("    /// {}\n", summary));
-    }
-    out.push_str(&format!(
-        "    /// @ARAZZO_WORKFLOW_ID: {}\n",
-        wf.workflow_id
-    ));
-    if !wf.depends_on.is_empty() {
-        out.push_str(&format!(
-            "    /// @ARAZZO_DEPENDS_ON: {}\n",
-            wf.depends_on.join(",")
-        ));
-    }
-    out.push_str(&format!("    /// @ARAZZO_WORKFLOW_JSON: {}\n", wf_json));
+    emit_workflow_doc_annotations(out, wf, "    ");
     out.push_str(&format!(
         "    #[allow(unused_variables, unused_mut, clippy::let_and_return)]\n    pub async fn {}(&self, inputs: {}Inputs) -> Result<{}Outputs, WorkflowError> {{\n",
         wf_snake, wf_pascal, wf_pascal
@@ -407,13 +474,7 @@ fn emit_step_execution(
     let step_snake = to_snake_case(&step.step_id);
     let step_pascal = to_pascal_case(&step.step_id);
 
-    out.push_str(&format!("        // @ARAZZO_STEP_ID: {}\n", step.step_id));
-    if !step.depends_on.is_empty() {
-        out.push_str(&format!(
-            "        // @ARAZZO_STEP_DEPENDS_ON: {}\n",
-            step.depends_on.join(",")
-        ));
-    }
+    emit_step_doc_annotations(out, step, "        ");
 
     let first_src_var = "self_uri";
     let resolved_route = resolve_step_operation(step, linked_specs);
@@ -716,6 +777,11 @@ fn emit_step_execution(
         step_snake, wf_pascal, step_pascal
     ));
     for (out_key, out_expr) in &step.outputs {
+        out.push_str(&format!(
+            "        // @ARAZZO_STEP_OUTPUT: {}={}\n",
+            out_key,
+            format_expr_or_selector(out_expr)
+        ));
         let field_name = to_snake_case(out_key);
         let val_code = match out_expr {
             RuntimeExpressionOrSelector::Expression(expr) => {
@@ -738,15 +804,18 @@ fn emit_step_execution(
 }
 
 fn emit_criterion_check(out: &mut String, crit: &Criterion) {
-    let ctx_str = crit
-        .context
-        .as_ref()
-        .map(|c| c.as_str())
-        .unwrap_or("$statusCode");
-    out.push_str(&format!(
-        "        // @ARAZZO_CRITERION: context={} condition={}\n",
-        ctx_str, crit.condition
-    ));
+    if let Some(ctx) = &crit.context {
+        out.push_str(&format!(
+            "        // @ARAZZO_CRITERION: context={} condition={}\n",
+            ctx.as_str(),
+            crit.condition
+        ));
+    } else {
+        out.push_str(&format!(
+            "        // @ARAZZO_CRITERION: condition={}\n",
+            crit.condition
+        ));
+    }
     if matches!(crit.criterion_type, Some(CriterionType::Regex)) {
         out.push_str(&format!(
             "        let re = regex::Regex::new({:?})?;\n        if !re.is_match(&resp_body.to_string()) {{ return Err(WorkflowError::Execution(format!(\"Regex criterion failed: {{}}\", {:?}))); }}\n",

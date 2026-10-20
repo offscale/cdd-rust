@@ -386,7 +386,7 @@ mod tests {
                 "body: Value".to_string(),
             ],
         );
-        let parse = std::mem::ManuallyDrop::new(SourceFile::parse(&sig, Edition::Edition2021));
+        let parse = SourceFile::parse(&sig, Edition::Edition2021);
         assert!(
             parse.errors().is_empty(),
             "AST errors: {:?}",
@@ -426,8 +426,7 @@ mod tests {
             &custom_route,
             &["id: String".to_string(), "body: Option<Value>".to_string()],
         );
-        let parse_custom =
-            std::mem::ManuallyDrop::new(SourceFile::parse(&sig_custom, Edition::Edition2021));
+        let parse_custom = SourceFile::parse(&sig_custom, Edition::Edition2021);
         assert!(parse_custom.errors().is_empty());
         assert!(sig_custom.contains("Method::from_bytes"));
         assert!(sig_custom.contains("req = req.form(payload);"));

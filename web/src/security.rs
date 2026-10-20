@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::future::{ready, Ready};
 use std::marker::PhantomData;
+use std::rc::Rc;
 use std::sync::Arc;
 
 /// Marker extractor type for API Key authentication schemes.
@@ -279,7 +280,7 @@ where
         let is_mock_mode = self.is_mock_mode;
         let user_dao = self.user_dao.clone();
         let mw = HybridAuthMiddleware {
-            service,
+            service: Rc::new(service),
             enforce_auth,
             is_mock_mode,
             user_dao,
@@ -290,8 +291,8 @@ where
 
 /// The Hybrid Authentication Middleware service instance.
 pub struct HybridAuthMiddleware<S> {
-    /// Wrapped inner Actix service.
-    service: S,
+    /// Reference-counted wrapped inner Actix service.
+    service: Rc<S>,
     /// Whether authentication is strictly enforced.
     enforce_auth: bool,
     /// Whether the server is running in mock/stub mode.
@@ -312,8 +313,9 @@ async fn validate_request_token(
     if is_mock_mode {
         return token == "mock-token-123" || verify_jwt(&token).is_ok();
     }
+    let lookup_name = verify_jwt(&token).map(|c| c.sub).unwrap_or(token);
     user_dao
-        .get_user_by_name(&token)
+        .get_user_by_name(&lookup_name)
         .await
         .unwrap_or(None)
         .is_some()
@@ -337,16 +339,6 @@ fn attach_auth_extensions(req: &ServiceRequest) {
     ));
 }
 
-/// Constructs a 401 Unauthorized `ServiceResponse` preserving the original request context.
-fn build_unauthorized_response(
-    res: ServiceResponse<actix_web::body::BoxBody>,
-) -> ServiceResponse<actix_web::body::BoxBody> {
-    let body = HttpResponse::Unauthorized().body("Unauthorized: Invalid token");
-    let unauthorized = body.map_into_boxed_body();
-    let (req_ext, _) = res.into_parts();
-    ServiceResponse::new(req_ext, unauthorized)
-}
-
 impl<S, B> Service<ServiceRequest> for HybridAuthMiddleware<S>
 where
     S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
@@ -365,24 +357,27 @@ where
     }
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
-        let enforce_auth = self.enforce_auth;
-        let is_mock_mode = self.is_mock_mode;
-        let user_dao = self.user_dao.clone();
-        let token_opt = extract_bearer_token(&req);
-        attach_auth_extensions(&req);
-
-        if !enforce_auth {
+        if !self.enforce_auth {
+            attach_auth_extensions(&req);
             let fut = self.service.call(req);
             return Box::pin(async move { Ok(fut.await?.map_into_boxed_body()) });
         }
 
-        let fut = self.service.call(req);
+        let service = self.service.clone();
+        let is_mock_mode = self.is_mock_mode;
+        let user_dao = self.user_dao.clone();
+        let token_opt = extract_bearer_token(&req);
+
         Box::pin(async move {
             let is_valid = validate_request_token(token_opt, is_mock_mode, user_dao).await;
-            let res = fut.await?.map_into_boxed_body();
             if !is_valid {
-                return Ok(build_unauthorized_response(res));
+                let unauthorized = HttpResponse::Unauthorized()
+                    .body("Unauthorized: Invalid token")
+                    .map_into_boxed_body();
+                return Ok(req.into_response(unauthorized));
             }
+            attach_auth_extensions(&req);
+            let res = service.call(req).await?.map_into_boxed_body();
             Ok(res)
         })
     }
@@ -398,9 +393,9 @@ mod tests {
 
     #[actix_web::test]
     async fn test_jwt_creation_and_verification() {
-        let token = create_jwt("user-123").expect("must succeed");
+        let token = create_jwt("john.doe@example.com").expect("must succeed with dots in sub");
         let claims = verify_jwt(&token).expect("must succeed");
-        assert_eq!(claims.sub, "user-123");
+        assert_eq!(claims.sub, "john.doe@example.com");
 
         // Two different secrets of the exact same length must fail verification
         let cfg_alpha = SecurityConfig {

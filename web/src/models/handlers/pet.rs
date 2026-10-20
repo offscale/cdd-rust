@@ -44,9 +44,27 @@ pub struct UploadFileQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use actix_web::{test, web, App, HttpResponse};
 
-    #[test]
-    fn test_pet_handler_models_serde() {
+    #[actix_web::test]
+    async fn test_pet_handler_models_actix_extractors() {
+        let app = test::init_service(
+            App::new()
+                .route(
+                    "/form",
+                    web::post().to(|f: web::Form<UpdatePetWithFormForm>| async move {
+                        HttpResponse::Ok().json(f.into_inner())
+                    }),
+                )
+                .route(
+                    "/upload",
+                    web::post().to(|q: web::Query<UploadFileQuery>| async move {
+                        HttpResponse::Ok().json(q.into_inner())
+                    }),
+                ),
+        )
+        .await;
+
         let q = FindPetsByStatusQuery {
             status: vec!["available".to_string()],
         };
@@ -54,23 +72,33 @@ mod tests {
         let parsed: FindPetsByStatusQuery = serde_json::from_str(&json).expect("must deserialize");
         assert_eq!(parsed, q);
 
+        let req = test::TestRequest::post()
+            .uri("/form")
+            .set_form(UpdatePetWithFormForm {
+                name: Some("Rex".to_string()),
+                status: Some("available".to_string()),
+            })
+            .to_request();
+        let extracted_form: UpdatePetWithFormForm = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(extracted_form.name.as_deref(), Some("Rex"));
+
+        let req = test::TestRequest::post()
+            .uri("/upload?additional_metadata=meta")
+            .to_request();
+        let extracted_upload: UploadFileQuery = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(
+            extracted_upload.additional_metadata.as_deref(),
+            Some("meta")
+        );
+
         let tags = FindPetsByTagsQuery {
             tags: vec!["tag1".to_string()],
         };
-        assert_eq!(tags.tags.len(), 1);
+        assert_eq!(tags.tags, vec!["tag1".to_string()]);
 
-        let form = UpdatePetWithFormForm {
-            name: Some("Rex".to_string()),
-            status: None,
+        let headers = DeletePetHeaders {
+            api_key: Some("k".to_string()),
         };
-        assert_eq!(form.name.as_deref(), Some("Rex"));
-
-        let headers = DeletePetHeaders { api_key: None };
-        assert!(headers.api_key.is_none());
-
-        let upload = UploadFileQuery {
-            additional_metadata: Some("meta".to_string()),
-        };
-        assert_eq!(upload.additional_metadata.as_deref(), Some("meta"));
+        assert_eq!(headers.api_key.as_deref(), Some("k"));
     }
 }

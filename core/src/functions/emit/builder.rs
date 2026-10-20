@@ -36,6 +36,10 @@ fn update_handler_module_dyn(
     }
 
     let existing_fns = extract_fn_names(&new_source);
+    let existing_tests: std::collections::HashSet<String> =
+        crate::tests::parse::extract_test_functions(&new_source)?
+            .into_iter()
+            .collect();
     let mut added_structs = extract_struct_names(&new_source);
     let mut tests_code = String::new();
 
@@ -46,11 +50,15 @@ fn update_handler_module_dyn(
                     new_source.push_str(&query_struct.code);
                     new_source.push('\n');
 
-                    tests_code.push_str(&format!(
-                        "    #[test]\n    fn test_{}_deserialize() {{\n        let _ = serde_json::from_str::<super::{}>(\"{{}}\");\n    }}\n",
-                        to_snake_case(&query_struct.name),
-                        query_struct.name
-                    ));
+                    let query_test_name =
+                        format!("test_{}_deserialize", to_snake_case(&query_struct.name));
+                    if !existing_tests.contains(&query_test_name) {
+                        tests_code.push_str(&format!(
+                            "    #[test]\n    fn {}() {{\n        let parsed = serde_json::from_str::<super::{}>(\"{{}}\").expect(\"default query deserialization must succeed\");\n        assert!(!format!(\"{{:?}}\", parsed).is_empty());\n    }}\n",
+                            query_test_name,
+                            query_struct.name
+                        ));
+                    }
                 }
             }
             let code = generate_function(route, strategy).unwrap_or_default();
@@ -74,7 +82,7 @@ fn update_handler_module_dyn(
 
 /// Injects generated unit test items into an existing `mod tests` CST node or appends a new `mod tests` block.
 fn inject_into_mod_tests(source: &mut String, tests_code: &str) {
-    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(source, Edition::Edition2021));
+    let parse = SourceFile::parse(source, Edition::Edition2021);
     let insert_pos = parse
         .tree()
         .syntax()
@@ -254,9 +262,26 @@ mod tests {
         let mut q_route_collision = q_route.clone();
         q_route_collision.handler_name = "search__items".into();
         let updated_both =
-            update_handler_module("", &[q_route, q_route_collision], &strategy).expect("both");
+            update_handler_module("", &[q_route.clone(), q_route_collision], &strategy)
+                .expect("both");
         assert!(updated_both.contains("pub async fn search_items"));
         assert!(updated_both.contains("pub async fn search__items"));
+
+        // Source where the query test already exists in `mod tests`
+        let src_with_existing_test =
+            "mod tests {\n    #[test]\n    fn test_search_items_query_deserialize() {}\n}\n";
+        let updated_with_test = update_handler_module(
+            src_with_existing_test,
+            std::slice::from_ref(&q_route),
+            &strategy,
+        )
+        .expect("existing query test");
+        assert_eq!(
+            updated_with_test
+                .matches("fn test_search_items_query_deserialize")
+                .count(),
+            1
+        );
 
         let reqwest_code =
             update_handler_module("", &[], &crate::strategies::ReqwestStrategy).expect("empty");

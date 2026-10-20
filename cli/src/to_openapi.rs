@@ -89,7 +89,8 @@ fn parse_cargo_toml_metadata(content: &str) -> (Option<String>, Option<String>) 
         } else if in_package {
             if let Some((k, v)) = line.split_once('=') {
                 let key = k.trim();
-                let val = v.trim().trim_matches('"').trim_matches(char::from(39u8));
+                let v_clean = v.split('#').next().unwrap_or(v).trim();
+                let val = v_clean.trim_matches('"').trim_matches(char::from(39u8));
                 let is_valid = !val.is_empty() && !val.starts_with('{');
                 if key == "name" && is_valid {
                     name = Some(val.to_string());

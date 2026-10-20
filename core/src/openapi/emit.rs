@@ -350,95 +350,11 @@ impl OpenApiTag {
     }
 }
 
-/// Server metadata for OpenAPI `servers`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OpenApiServer {
-    /// Server URL (may be relative).
-    pub url: String,
-    /// Optional description for the server.
-    pub description: Option<String>,
-    /// Optional unique name for the server.
-    pub name: Option<String>,
-    /// Optional variable definitions for server URL templating.
-    pub variables: std::collections::BTreeMap<String, OpenApiServerVariable>,
-}
+/// Server metadata for OpenAPI `servers` (unified with [`ParsedServer`]).
+pub type OpenApiServer = ParsedServer;
 
-impl OpenApiServer {
-    /// Creates a new server with the required URL.
-    pub fn new(url: impl Into<String>) -> Self {
-        Self {
-            url: url.into(),
-            description: None,
-            name: None,
-            variables: std::collections::BTreeMap::new(),
-        }
-    }
-
-    /// Sets the server description.
-    pub fn with_description(mut self, description: impl Into<String>) -> Self {
-        self.description = Some(description.into());
-        self
-    }
-
-    /// Sets the server name.
-    pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
-        self
-    }
-
-    /// Adds a server variable definition.
-    pub fn with_variable(
-        mut self,
-        name: impl Into<String>,
-        variable: OpenApiServerVariable,
-    ) -> Self {
-        self.variables.insert(name.into(), variable);
-        self
-    }
-
-    /// Replaces the server variables map.
-    pub fn with_variables(
-        mut self,
-        variables: std::collections::BTreeMap<String, OpenApiServerVariable>,
-    ) -> Self {
-        self.variables = variables;
-        self
-    }
-}
-
-/// Server variable metadata for templated server URLs.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OpenApiServerVariable {
-    /// Allowed enum values (if constrained).
-    pub enum_values: Option<Vec<String>>,
-    /// Default value for substitution.
-    pub default: String,
-    /// Optional description.
-    pub description: Option<String>,
-}
-
-impl OpenApiServerVariable {
-    /// Creates a new server variable with the required default.
-    pub fn new(default: impl Into<String>) -> Self {
-        Self {
-            enum_values: None,
-            default: default.into(),
-            description: None,
-        }
-    }
-
-    /// Sets enum values for the variable.
-    pub fn with_enum_values(mut self, values: Vec<String>) -> Self {
-        self.enum_values = Some(values);
-        self
-    }
-
-    /// Sets the variable description.
-    pub fn with_description(mut self, description: impl Into<String>) -> Self {
-        self.description = Some(description.into());
-        self
-    }
-}
+/// Server variable metadata for templated server URLs (unified with [`ParsedServerVariable`]).
+pub type OpenApiServerVariable = ParsedServerVariable;
 
 /// Generates a JSON Schema object from a parsed Rust model (struct or enum).
 ///
@@ -682,9 +598,9 @@ pub fn generate_openapi_document_with_routes_and_components(
     }
 
     if !merged.is_empty() {
-        if let Value::Object(doc_obj) = &mut doc {
-            doc_obj.insert("components".to_string(), Value::Object(merged));
-        }
+        doc.as_object_mut()
+            .expect("doc object")
+            .insert("components".to_string(), Value::Object(merged));
     }
 
     Ok(doc)
@@ -739,7 +655,7 @@ fn insert_route_operation(
     if let Some(servers) = route.path_servers.as_ref().filter(|s| !s.is_empty()) {
         path_item
             .entry("servers".to_string())
-            .or_insert_with(|| parsed_servers_value(servers));
+            .or_insert_with(|| servers_value(servers));
     }
     if !route.path_params.is_empty() && !path_item.contains_key("parameters") {
         let params = route
@@ -758,15 +674,12 @@ fn insert_route_operation(
         return Ok(());
     }
 
-    if !path_item.contains_key("additionalOperations") {
-        path_item.insert(
-            "additionalOperations".to_string(),
-            Value::Object(Map::new()),
-        );
-    }
-    if let Some(Value::Object(add_ops)) = path_item.get_mut("additionalOperations") {
-        add_ops.insert(route.method.clone(), op);
-    }
+    path_item
+        .entry("additionalOperations".to_string())
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .expect("additionalOperations map")
+        .insert(route.method.clone(), op);
     target.insert(route.path.clone(), Value::Object(path_item));
     Ok(())
 }
@@ -841,7 +754,7 @@ fn build_operation(
 
     if let Some(servers) = route.servers_override.as_ref() {
         if !servers.is_empty() {
-            op.insert("servers".to_string(), parsed_servers_value(servers));
+            op.insert("servers".to_string(), servers_value(servers));
         }
     } else if emit_operation_servers && route.path_servers.is_none() {
         if let Some(base_path) = route.base_path.as_ref() {
@@ -947,42 +860,6 @@ fn server_value(server: &OpenApiServer) -> Value {
 }
 
 fn server_variable_value(variable: &OpenApiServerVariable) -> Value {
-    let mut obj = Map::new();
-    obj.insert("default".to_string(), json!(variable.default));
-    if let Some(values) = &variable.enum_values {
-        obj.insert("enum".to_string(), json!(values));
-    }
-    if let Some(desc) = &variable.description {
-        obj.insert("description".to_string(), json!(desc));
-    }
-    Value::Object(obj)
-}
-
-fn parsed_servers_value(servers: &[ParsedServer]) -> Value {
-    let entries = servers.iter().map(parsed_server_value).collect::<Vec<_>>();
-    Value::Array(entries)
-}
-
-fn parsed_server_value(server: &ParsedServer) -> Value {
-    let mut obj = Map::new();
-    obj.insert("url".to_string(), json!(server.url));
-    if let Some(desc) = &server.description {
-        obj.insert("description".to_string(), json!(desc));
-    }
-    if let Some(name) = &server.name {
-        obj.insert("name".to_string(), json!(name));
-    }
-    if !server.variables.is_empty() {
-        let mut vars = Map::new();
-        for (var_name, var) in &server.variables {
-            vars.insert(var_name.clone(), parsed_server_variable_value(var));
-        }
-        obj.insert("variables".to_string(), Value::Object(vars));
-    }
-    Value::Object(obj)
-}
-
-fn parsed_server_variable_value(variable: &ParsedServerVariable) -> Value {
     let mut obj = Map::new();
     obj.insert("default".to_string(), json!(variable.default));
     if let Some(values) = &variable.enum_values {
@@ -1548,7 +1425,7 @@ fn build_link(link: &ParsedLink) -> Value {
         obj.insert("requestBody".to_string(), val);
     }
     if let Some(server) = &link.server {
-        obj.insert("server".to_string(), parsed_server_value(server));
+        obj.insert("server".to_string(), server_value(server));
     } else if let Some(server_url) = &link.server_url {
         obj.insert("server".to_string(), json!({ "url": server_url }));
     }
@@ -1610,15 +1487,12 @@ fn insert_callback_operation(
         return;
     }
 
-    if !path_item.contains_key("additionalOperations") {
-        path_item.insert(
-            "additionalOperations".to_string(),
-            Value::Object(Map::new()),
-        );
-    }
-    if let Some(Value::Object(add_ops)) = path_item.get_mut("additionalOperations") {
-        add_ops.insert(callback.method.clone(), op);
-    }
+    path_item
+        .entry("additionalOperations".to_string())
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .expect("additionalOperations map")
+        .insert(callback.method.clone(), op);
 }
 
 fn build_callback_operation(
@@ -1733,11 +1607,7 @@ fn encoding_info_value(info: &crate::openapi::parse::models::EncodingInfo) -> Va
 }
 
 fn schema_from_rust_type(ty: &str) -> (Value, bool) {
-    if is_binary_type(ty) {
-        return (binary_schema_value(), is_optional_type(ty));
-    }
-    let parsed = parse_rust_type(ty);
-    (shape_to_schema(&parsed.shape), parsed.is_optional)
+    crate::type_mapping::map_rust_type_to_unwrapped_openapi_schema(ty)
 }
 
 fn param_source_str(source: &ParamSource) -> &'static str {
@@ -1787,12 +1657,10 @@ fn is_sequential_media_type(media_type: &str) -> bool {
 }
 
 fn schema_item_schema(schema: &Value) -> Option<Value> {
-    if let Value::Object(obj) = schema {
-        if obj.get("type").and_then(|v| v.as_str()) == Some("array") {
-            return obj.get("items").cloned();
-        }
-    }
-    None
+    schema
+        .as_object()
+        .filter(|obj| obj.get("type").and_then(|v| v.as_str()) == Some("array"))
+        .and_then(|obj| obj.get("items").cloned())
 }
 
 /// Generates schema for a struct.
@@ -1864,13 +1732,12 @@ fn generate_struct_schema(struct_def: &ParsedStruct, dialect: Option<&str>) -> A
             let (json_name, mut field_schema, is_optional) =
                 process_field(field, struct_def.rename_all.as_ref());
 
-            if let Value::Object(obj) = &mut field_schema {
-                if field.is_deprecated {
-                    obj.insert("deprecated".to_string(), json!(true));
-                }
-                if let Some(ext) = &field.external_docs {
-                    obj.insert("externalDocs".to_string(), external_docs_value(ext));
-                }
+            let obj = field_schema.as_object_mut().expect("field schema object");
+            if field.is_deprecated {
+                obj.insert("deprecated".to_string(), json!(true));
+            }
+            if let Some(ext) = &field.external_docs {
+                obj.insert("externalDocs".to_string(), external_docs_value(ext));
             }
 
             properties.insert(json_name.clone(), field_schema);
@@ -1934,16 +1801,17 @@ fn generate_enum_schema(enum_def: &ParsedEnum, dialect: Option<&str>) -> AppResu
 
         // Determine variant schema
         let mut sub_schema = if let Some(ty) = &variant.ty {
-            map_type_to_schema(ty)
+            crate::type_mapping::map_base_type_to_openapi_schema(ty)
         } else {
             // Unit variant -> Enum::A -> "A"
             json!({ "type": "string", "const": variant_name })
         };
 
         if variant.is_deprecated {
-            if let Value::Object(sub_obj) = &mut sub_schema {
-                sub_obj.insert("deprecated".to_string(), json!(true));
-            }
+            sub_schema
+                .as_object_mut()
+                .expect("variant schema object")
+                .insert("deprecated".to_string(), json!(true));
         }
 
         one_of.push(sub_schema);
@@ -1994,225 +1862,21 @@ fn process_field(field: &ParsedField, rename_all: Option<&RenameRule>) -> (Strin
         .or_else(|| rename_all.map(|rule| rule.apply(&field.name)))
         .unwrap_or_else(|| field.name.clone());
 
-    // 2. Parse Type (special-case binary payloads)
-    let (mut schema, is_optional) = if is_binary_type(&field.ty) {
-        (binary_schema_value(), is_optional_type(&field.ty))
-    } else {
-        let parsed = parse_rust_type(&field.ty);
-        let schema = shape_to_schema(&parsed.shape);
-        (schema, parsed.is_optional)
-    };
+    // 2. Parse Type via unified type_mapping subsystem
+    let (mut schema, is_optional) = crate::type_mapping::map_rust_type_to_openapi_schema(&field.ty);
 
-    if is_optional {
-        schema = make_nullable_schema(schema);
+    let obj = schema.as_object_mut().expect("field schema object");
+    if let Some(desc) = &field.description {
+        obj.insert("description".to_string(), json!(desc));
     }
-
-    if let Value::Object(obj) = &mut schema {
-        if let Some(desc) = &field.description {
-            obj.insert("description".to_string(), json!(desc));
-        }
-        if field.is_read_only {
-            obj.insert("readOnly".to_string(), json!(true));
-        }
-        if field.is_write_only {
-            obj.insert("writeOnly".to_string(), json!(true));
-        }
+    if field.is_read_only {
+        obj.insert("readOnly".to_string(), json!(true));
+    }
+    if field.is_write_only {
+        obj.insert("writeOnly".to_string(), json!(true));
     }
 
     (name, schema, is_optional)
-}
-
-fn binary_schema_value() -> Value {
-    json!({
-        "type": "string",
-        "contentEncoding": "base64",
-        "contentMediaType": "application/octet-stream"
-    })
-}
-
-fn make_nullable_schema(schema: Value) -> Value {
-    if let Value::Object(obj) = &schema {
-        if let Some(Value::String(s)) = obj.get("type") {
-            let mut new_obj = obj.clone();
-            new_obj.insert("type".to_string(), json!([s, "null"]));
-            return Value::Object(new_obj);
-        }
-    }
-
-    json!({ "anyOf": [schema, { "type": "null" }] })
-}
-
-fn is_optional_type(ty: &str) -> bool {
-    let ty = ty.trim();
-    ty.starts_with("Option<") && ty.ends_with('>')
-}
-
-fn is_binary_type(ty: &str) -> bool {
-    let ty = ty.trim();
-    if is_optional_type(ty) {
-        let inner = &ty[7..ty.len() - 1];
-        return is_binary_type(inner);
-    }
-
-    if let Some(inner) = strip_generic(ty, "Vec") {
-        return inner.trim() == "u8";
-    }
-
-    matches!(ty, "&[u8]" | "[u8]" | "Bytes" | "ByteBuf")
-        || ["::Bytes", "::ByteBuf"].iter().any(|s| ty.ends_with(s))
-}
-
-/// Parses the Rust type string to identify wrappers like `Option<...>` and `Vec<...>`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum TypeShape {
-    Base(String),
-    Vec(Box<TypeShape>),
-    Map(Box<TypeShape>),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ParsedType {
-    shape: TypeShape,
-    is_optional: bool,
-}
-
-/// Parses the Rust type string to identify wrappers like `Option<...>`, `Vec<...>`,
-/// and map-like containers (`HashMap`/`BTreeMap`).
-fn parse_rust_type(ty: &str) -> ParsedType {
-    parse_rust_type_inner(ty.trim(), true)
-}
-
-fn parse_rust_type_inner(ty: &str, allow_optional: bool) -> ParsedType {
-    if allow_optional {
-        if let Some(inner) = strip_generic(ty, "Option") {
-            let parsed = parse_rust_type_inner(inner, false);
-            return ParsedType {
-                shape: parsed.shape,
-                is_optional: true,
-            };
-        }
-    }
-
-    if let Some(inner) = strip_generic(ty, "Vec") {
-        let parsed = parse_rust_type_inner(inner, false);
-        return ParsedType {
-            shape: TypeShape::Vec(Box::new(parsed.shape)),
-            is_optional: false,
-        };
-    }
-
-    if let Some(map_inner) = strip_map_generic(ty) {
-        let parsed = parse_rust_type_inner(map_inner.as_str(), false);
-        return ParsedType {
-            shape: TypeShape::Map(Box::new(parsed.shape)),
-            is_optional: false,
-        };
-    }
-
-    ParsedType {
-        shape: TypeShape::Base(ty.to_string()),
-        is_optional: false,
-    }
-}
-
-fn strip_generic<'a>(ty: &'a str, target: &str) -> Option<&'a str> {
-    let (base, inner) = split_generic(ty)?;
-    if base == target {
-        Some(inner)
-    } else {
-        None
-    }
-}
-
-fn strip_map_generic(ty: &str) -> Option<String> {
-    let (base, inner) = split_generic(ty)?;
-    if matches!(base, "HashMap" | "BTreeMap") {
-        let args = split_generic_args(inner);
-        if args.len() == 2 {
-            return Some(args[1].trim().to_string());
-        }
-    }
-    None
-}
-
-fn split_generic(ty: &str) -> Option<(&str, &str)> {
-    let start = ty.find('<')?;
-    if !ty.ends_with('>') {
-        return None;
-    }
-    let base = ty[..start].trim();
-    let base = base.split("::").last().unwrap_or(base);
-    let inner = &ty[start + 1..ty.len() - 1];
-    Some((base, inner))
-}
-
-fn split_generic_args(inner: &str) -> Vec<String> {
-    let mut args = Vec::new();
-    let mut depth = 0usize;
-    let mut current = String::new();
-
-    for ch in inner.chars() {
-        match ch {
-            '<' => {
-                depth += 1;
-                current.push(ch);
-            }
-            '>' => {
-                depth = depth.saturating_sub(1);
-                current.push(ch);
-            }
-            ',' if depth == 0 => {
-                args.push(current.trim().to_string());
-                current.clear();
-            }
-            _ => current.push(ch),
-        }
-    }
-
-    if !current.trim().is_empty() {
-        args.push(current.trim().to_string());
-    }
-
-    args
-}
-
-fn shape_to_schema(shape: &TypeShape) -> Value {
-    match shape {
-        TypeShape::Base(ty) => map_type_to_schema(ty),
-        TypeShape::Vec(inner) => json!({
-            "type": "array",
-            "items": shape_to_schema(inner)
-        }),
-        TypeShape::Map(inner) => json!({
-            "type": "object",
-            "additionalProperties": shape_to_schema(inner)
-        }),
-    }
-}
-
-/// Maps a "clean" Rust type to a base JSON Schema object.
-fn map_type_to_schema(ty: &str) -> Value {
-    match ty {
-        "i8" | "i16" | "i32" | "u8" | "u16" | "u32" | "isize" | "usize" => {
-            json!({ "type": "integer", "format": "int32" })
-        }
-        "i64" | "u64" => json!({ "type": "integer", "format": "int64" }),
-
-        "f32" | "f64" => json!({ "type": "number" }),
-
-        "bool" => json!({ "type": "boolean" }),
-
-        "String" | "&str" | "char" => json!({ "type": "string" }),
-        "Uuid" => json!({ "type": "string", "format": "uuid" }),
-        "NaiveDate" => json!({ "type": "string", "format": "date" }),
-        "NaiveDateTime" | "DateTime<Utc>" | "DateTime<Local>" => {
-            json!({ "type": "string", "format": "date-time" })
-        }
-        "Decimal" => json!({ "type": "string", "format": "decimal" }),
-
-        // Fallback
-        other => json!({ "$ref": format!("#/components/schemas/{}", other) }),
-    }
 }
 
 #[cfg(test)]

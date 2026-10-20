@@ -98,7 +98,7 @@ fn extract_arazzo_from_directory(args: &ToArazzoArgs) -> AppResult<ArazzoDocumen
     let mut seen_ids = std::collections::HashSet::new();
     for file in rust_files {
         let code = fs::read_to_string(&file)?;
-        if code.contains("@ARAZZO_SPEC_JSON:") {
+        if code.contains("@ARAZZO_VERSION:") && code.contains("@ARAZZO_TITLE:") {
             return extract_arazzo_document_from_rust(
                 &code,
                 args.title.as_deref(),
@@ -246,7 +246,7 @@ workflows:
             parse_arazzo_document(&fs::read_to_string(&out_json).expect("read")).expect("parse");
         assert_eq!(reparsed_json.info.title, "Custom");
 
-        // Test handwritten Rust directory without @ARAZZO_SPEC_JSON
+        // Test handwritten Rust directory without Arazzo header comments
         let hw_dir = dir.path().join("hw_crate");
         fs::create_dir_all(&hw_dir).expect("mkdir");
         fs::write(

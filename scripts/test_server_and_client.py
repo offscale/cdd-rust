@@ -151,8 +151,6 @@ async fn main() -> std::io::Result<()> {
             spec_file,
             "-o",
             client_dir,
-            "--target",
-            "client-reqwest",
             "--tests",
         ],
         stdout=subprocess.DEVNULL,

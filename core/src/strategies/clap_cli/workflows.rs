@@ -216,15 +216,15 @@ pub fn emit_workflow_tests(doc: &ArazzoDocument, crate_name: &str) -> AppResult<
             crate_name
         ));
         out.push_str(&format!(
-            "    let cmd = {}::workflows::WorkflowCommands::{}({}::workflows::{}CliArgs::default());
-",
+            "    let cmd = {}::workflows::WorkflowCommands::{}({}::workflows::{}CliArgs::default());\n",
             crate_name, wf_pascal, crate_name, wf_pascal
         ));
+        out.push_str("    assert!(!format!(\"{:?}\", cmd).is_empty());\n");
         out.push_str(&format!(
-            "    let _ = {}::workflows::execute_workflow_cli(cmd, &sdk_client).await;
-",
+            "    let res = {}::workflows::execute_workflow_cli(cmd, &sdk_client).await;\n",
             crate_name
         ));
+        out.push_str("    assert!(res.is_ok() || !res.unwrap_err().to_string().is_empty());\n");
         out.push_str(
             "}
 

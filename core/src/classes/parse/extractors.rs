@@ -8,14 +8,15 @@ use crate::classes::parse::attributes::extract_attributes;
 use crate::classes::parse::models::{
     ParsedEnum, ParsedField, ParsedModel, ParsedStruct, ParsedVariant,
 };
+use crate::docstrings::parse::extract_doc_comment;
 use crate::error::{AppError, AppResult};
 use ra_ap_edition::Edition;
 use ra_ap_syntax::ast::{self, HasName};
-use ra_ap_syntax::{AstNode, SourceFile, SyntaxKind, SyntaxNode};
+use ra_ap_syntax::{AstNode, SourceFile};
 
 /// Extracts the names of all structs and enums defined in the provided Rust source code.
 pub fn extract_struct_names(code: &str) -> AppResult<Vec<String>> {
-    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(code, Edition::Edition2021));
+    let parse = SourceFile::parse(code, Edition::Edition2021);
     let file = parse.tree();
     let mut names = Vec::new();
 
@@ -50,7 +51,7 @@ pub fn extract_struct_fields(code: &str, struct_name: &str) -> AppResult<Vec<Par
 
 /// Parsing function to extract a full model definition (struct or enum).
 pub fn extract_model(code: &str, name: &str) -> AppResult<ParsedModel> {
-    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(code, Edition::Edition2021));
+    let parse = SourceFile::parse(code, Edition::Edition2021);
     let file = parse.tree();
 
     // 1. Try to find Struct
@@ -71,7 +72,7 @@ pub fn extract_model(code: &str, name: &str) -> AppResult<ParsedModel> {
 }
 
 fn parse_struct_node(struct_def: ast::Struct, name: &str) -> AppResult<ParsedStruct> {
-    let struct_desc = extract_doc_comment(struct_def.syntax());
+    let struct_desc = extract_doc_comment(&struct_def);
     let struct_attrs = extract_attributes(struct_def.syntax());
 
     let mut fields = Vec::new();
@@ -96,7 +97,7 @@ fn parse_struct_node(struct_def: ast::Struct, name: &str) -> AppResult<ParsedStr
                     fields.push(ParsedField {
                         name: fname,
                         ty: ty_str,
-                        description: extract_doc_comment(field.syntax()),
+                        description: extract_doc_comment(&field),
                         rename: attrs.rename,
                         is_skipped: attrs.is_skipped,
                         is_read_only,
@@ -120,7 +121,7 @@ fn parse_struct_node(struct_def: ast::Struct, name: &str) -> AppResult<ParsedStr
                     fields.push(ParsedField {
                         name: i.to_string(),
                         ty: ty_str,
-                        description: extract_doc_comment(field.syntax()),
+                        description: extract_doc_comment(&field),
                         rename: attrs.rename,
                         is_skipped: attrs.is_skipped,
                         is_read_only,
@@ -146,7 +147,7 @@ fn parse_struct_node(struct_def: ast::Struct, name: &str) -> AppResult<ParsedStr
 }
 
 fn parse_enum_node(enum_def: ast::Enum, name: &str) -> AppResult<ParsedEnum> {
-    let desc = extract_doc_comment(enum_def.syntax());
+    let desc = extract_doc_comment(&enum_def);
     let attrs = extract_attributes(enum_def.syntax());
 
     let mut variants = Vec::new();
@@ -173,7 +174,7 @@ fn parse_enum_node(enum_def: ast::Enum, name: &str) -> AppResult<ParsedEnum> {
         variants.push(ParsedVariant {
             name: vname,
             ty: vty,
-            description: extract_doc_comment(variant.syntax()),
+            description: extract_doc_comment(&variant),
             rename: vattrs.rename,
             aliases: None,
             is_deprecated: false,
@@ -193,26 +194,6 @@ fn parse_enum_node(enum_def: ast::Enum, name: &str) -> AppResult<ParsedEnum> {
         discriminator_mapping: None,
         discriminator_default_mapping: None,
     })
-}
-
-/// Helper to extract `///` comments from a syntax node's trivia children.
-pub(crate) fn extract_doc_comment(node: &SyntaxNode) -> Option<String> {
-    let mut lines = Vec::new();
-
-    for child in node.children_with_tokens() {
-        if child.kind() == SyntaxKind::COMMENT {
-            let text = child.to_string();
-            if let Some(content) = text.strip_prefix("///") {
-                lines.push(content.strip_prefix(' ').unwrap_or(content).to_owned());
-            }
-        }
-    }
-
-    if lines.is_empty() {
-        None
-    } else {
-        Some(lines.join("\n").trim().to_string())
-    }
 }
 
 #[cfg(test)]

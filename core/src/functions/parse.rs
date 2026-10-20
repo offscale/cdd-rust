@@ -29,7 +29,7 @@ use std::collections::BTreeMap;
 /// # Errors
 /// Returns [`crate::error::AppError`] if AST parsing fails critically.
 pub fn extract_routes_from_functions(code: &str) -> AppResult<Vec<ParsedRoute>> {
-    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(code, Edition::Edition2021));
+    let parse = SourceFile::parse(code, Edition::Edition2021);
     let mut routes = Vec::new();
 
     for node in parse.tree().syntax().descendants() {
@@ -64,7 +64,7 @@ pub fn extract_routes_from_functions(code: &str) -> AppResult<Vec<ParsedRoute>> 
 /// # Errors
 /// Returns [`crate::error::AppError`] if AST parsing fails critically.
 pub fn extract_routes_from_axum(code: &str) -> AppResult<Vec<ParsedRoute>> {
-    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(code, Edition::Edition2021));
+    let parse = SourceFile::parse(code, Edition::Edition2021);
     let mut routes = Vec::new();
 
     for node in parse.tree().syntax().descendants() {
@@ -94,7 +94,7 @@ pub fn extract_routes_from_axum(code: &str) -> AppResult<Vec<ParsedRoute>> {
 /// # Errors
 /// Returns [`crate::error::AppError`] if AST parsing fails critically.
 pub fn extract_routes_from_mcp(code: &str) -> AppResult<Vec<ParsedRoute>> {
-    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(code, Edition::Edition2021));
+    let parse = SourceFile::parse(code, Edition::Edition2021);
     let mut routes = Vec::new();
 
     for node in parse.tree().syntax().descendants() {
@@ -179,7 +179,7 @@ fn parse_actix_route(func: &ast::Fn) -> Option<ParsedRoute> {
                     .trim_matches('"')
                     .to_string();
 
-                let summary = parse_doc_comments(func);
+                let summary = crate::docstrings::parse::extract_doc_comment(func);
                 return Some(build_basic_route(
                     route_path,
                     method_str,
@@ -227,8 +227,7 @@ fn parse_method_call_route(call: &ast::MethodCallExpr) -> Option<ParsedRoute> {
     }
     let normalized_path = normalize_axum_path(trimmed_path);
 
-    let second_text = second_arg.syntax().text().to_string();
-    let (method, handler_name) = extract_method_and_handler(&second_text)?;
+    let (method, handler_name) = extract_method_and_handler(&second_arg)?;
 
     Some(build_basic_route(
         normalized_path,
@@ -238,39 +237,42 @@ fn parse_method_call_route(call: &ast::MethodCallExpr) -> Option<ParsedRoute> {
     ))
 }
 
-fn extract_method_and_handler(expr_text: &str) -> Option<(String, String)> {
-    let lower = expr_text.to_lowercase();
-    let method = if lower.contains("get(") {
-        "GET"
-    } else if lower.contains("post(") {
-        "POST"
-    } else if lower.contains("put(") {
-        "PUT"
-    } else if lower.contains("delete(") {
-        "DELETE"
-    } else if lower.contains("patch(") {
-        "PATCH"
-    } else if lower.contains("head(") {
-        "HEAD"
-    } else if lower.contains("options(") {
-        "OPTIONS"
-    } else if lower.contains("trace(") {
-        "TRACE"
-    } else {
-        "POST"
-    };
+fn extract_method_and_handler(expr: &ast::Expr) -> Option<(String, String)> {
+    let mut detected_method: Option<String> = None;
+    let mut handler_arg: Option<ast::Expr> = None;
 
-    // Extract handler identifier from `.to(path::handler)` or `routing::get(path::handler)`
-    let handler_raw = if let Some(to_idx) = expr_text.find(".to(") {
-        let after_to = &expr_text[to_idx + 4..];
-        after_to.split(')').next().unwrap_or("")
-    } else {
-        let open_idx = expr_text.rfind('(')?;
-        let after_open = &expr_text[open_idx + 1..];
-        after_open.split(')').next().unwrap_or("")
-    };
+    for node in expr.syntax().descendants() {
+        if let Some(mcall) = ast::MethodCallExpr::cast(node.clone()) {
+            handler_arg = mcall.arg_list().and_then(|l| l.args().next());
+        } else if let Some(call) = ast::CallExpr::cast(node) {
+            let callee = call.expr()?;
+            let seg = callee
+                .syntax()
+                .text()
+                .to_string()
+                .rsplit("::")
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_uppercase();
+            if matches!(
+                seg.as_str(),
+                "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS" | "TRACE"
+            ) {
+                detected_method = Some(seg);
+            }
+            if handler_arg.is_none() {
+                handler_arg = call.arg_list().and_then(|l| l.args().next());
+            }
+        }
+    }
 
-    let handler_name = handler_raw
+    let method = detected_method.unwrap_or_else(|| "POST".to_string());
+    let target_expr = handler_arg?;
+    let handler_name = target_expr
+        .syntax()
+        .text()
+        .to_string()
         .trim()
         .rsplit("::")
         .next()
@@ -278,11 +280,7 @@ fn extract_method_and_handler(expr_text: &str) -> Option<(String, String)> {
         .trim()
         .to_string();
 
-    if handler_name.is_empty() {
-        None
-    } else {
-        Some((method.to_string(), handler_name))
-    }
+    Some((method, handler_name))
 }
 
 fn parse_mcp_fn_route(func: &ast::Fn) -> Option<ParsedRoute> {
@@ -344,25 +342,6 @@ fn parse_mcp_register_call(call: &ast::MethodCallExpr) -> Option<ParsedRoute> {
         tool_name,
         None,
     ))
-}
-
-fn parse_doc_comments(func: &ast::Fn) -> Option<String> {
-    let mut docs = Vec::new();
-    for doc in func.doc_comments() {
-        let text = doc.text().trim_start_matches("///").trim().to_string();
-        if !text.is_empty() {
-            docs.push(text);
-        }
-    }
-
-    if docs.is_empty() {
-        None
-    } else {
-        Some(docs.join(
-            "
-",
-        ))
-    }
 }
 
 #[cfg(test)]

@@ -16,7 +16,7 @@ pub fn add_struct_field(
     struct_name: &str,
     field_node: &ast::RecordField,
 ) -> AppResult<String> {
-    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(source, Edition::Edition2021));
+    let parse = SourceFile::parse(source, Edition::Edition2021);
     let file = parse.tree();
 
     let struct_def = find_struct(&file, struct_name)?;
@@ -87,7 +87,7 @@ pub fn modify_struct_field_type(
     field_name: &str,
     new_type: &str,
 ) -> AppResult<String> {
-    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(source, Edition::Edition2021));
+    let parse = SourceFile::parse(source, Edition::Edition2021);
     let file = parse.tree();
 
     let struct_def = find_struct(&file, struct_name)?;
@@ -128,7 +128,7 @@ pub fn modify_struct_field_type(
 
 /// Adds a trait to the derive attribute of a struct.
 pub fn add_derive(source: &str, struct_name: &str, derive_trait: &str) -> AppResult<String> {
-    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(source, Edition::Edition2021));
+    let parse = SourceFile::parse(source, Edition::Edition2021);
     let file = parse.tree();
     let struct_def = find_struct(&file, struct_name)?;
 
@@ -188,7 +188,7 @@ pub fn add_derive(source: &str, struct_name: &str, derive_trait: &str) -> AppRes
 
 /// Adds an attribute line (e.g., `#[serde(...)]`) to a struct.
 pub fn add_struct_attribute(source: &str, struct_name: &str, attribute: &str) -> AppResult<String> {
-    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(source, Edition::Edition2021));
+    let parse = SourceFile::parse(source, Edition::Edition2021);
     let file = parse.tree();
     let struct_def = find_struct(&file, struct_name)?;
 

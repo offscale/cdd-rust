@@ -333,6 +333,11 @@ pub trait BackendStrategy: CodegenStrategy {
         String::new()
     }
 
+    /// Generates the initial route registration file skeleton when creating a new file.
+    fn route_registration_skeleton(&self) -> String {
+        "use actix_web::web;\nuse crate::http::handlers;\n\npub fn config(cfg: &mut web::ServiceConfig) {\n}\n".to_string()
+    }
+
     /// Generates the route registration code statement (empty for client/CLI targets).
     fn route_registration_statement(
         &self,

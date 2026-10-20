@@ -386,7 +386,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn assert_valid_rust_syntax(code: &str) {
-        let parse = std::mem::ManuallyDrop::new(SourceFile::parse(code, Edition::Edition2021));
+        let parse = SourceFile::parse(code, Edition::Edition2021);
         assert!(
             parse.errors().is_empty(),
             "Generated invalid Rust AST: {:?}

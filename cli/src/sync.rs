@@ -101,10 +101,27 @@ pub fn run_sync(args: &SyncArgs, mapper: &impl ModelMapper) -> AppResult<()> {
             // 2. Models -> Schema (Injecting attributes & Enforcing Types)
             process_models_for_openapi(&args.output, &type_overrides)?;
         }
-        SyncTruth::Code | SyncTruth::Api => {
-            println!("Synchronization from {:?} truth is currently a stub for reverse propagation. Bi-directional sync requires extending AST parsing.", args.truth);
-            // This represents the stub for pushing Code/OpenAPI changes back to the DB schema
-            // which satisfies the `--truth` contract capability.
+        SyncTruth::Code => {
+            if args.output.exists() && !args.input.is_dir() {
+                let to_oa = crate::to_openapi::ToOpenApiArgs {
+                    input: args.output.clone(),
+                    output: args.input.clone(),
+                    title: None,
+                    version: None,
+                };
+                crate::to_openapi::run_to_openapi(&to_oa, &crate::TargetMode::ServerActix)?;
+            }
+        }
+        SyncTruth::Api => {
+            if args.input.is_file() {
+                let spec_content = fs::read_to_string(&args.input)?;
+                let models = cdd_core::openapi::parse::parse_openapi_spec(&spec_content)?;
+                fs::create_dir_all(&args.output)?;
+                let file_path = args.output.join("generated.rs");
+                let existing = fs::read_to_string(&file_path).unwrap_or_default();
+                let updated = cdd_core::classes::emit::update_model_file(&existing, &models)?;
+                fs::write(&file_path, updated)?;
+            }
         }
     }
 
@@ -151,19 +168,18 @@ fn process_models_for_openapi(
 fn process_file(path: &Path, type_overrides: &HashMap<String, String>) -> AppResult<()> {
     let content = fs::read_to_string(path)?;
 
-    let mut new_content = content.clone();
+    let mut new_content = cdd_core::classes::patcher::inject_openapi_attributes(&content)?;
+    new_content = cdd_core::classes::patcher::add_import(
+        &new_content,
+        "use serde::{Deserialize, Serialize};",
+    )?;
 
-    // 1. Extract struct names to act upon
-    // (dsync typically creates one struct per file named after the file/table)
     let struct_names = cdd_core::extract_struct_names(&new_content)?;
 
     for name in &struct_names {
-        // A. Add Derives
-        new_content = add_derive(&new_content, name, "ToSchema")?;
         new_content = add_derive(&new_content, name, "Serialize")?;
         new_content = add_derive(&new_content, name, "Deserialize")?;
 
-        // B. Enforce Types
         if !type_overrides.is_empty() {
             let fields = cdd_core::extract_struct_fields(&new_content, name)?;
             for (field, new_type) in type_overrides {
@@ -172,16 +188,6 @@ fn process_file(path: &Path, type_overrides: &HashMap<String, String>) -> AppRes
                 }
             }
         }
-    }
-
-    // 3. Add Imports if needed
-    if !new_content.contains("use utoipa::ToSchema;") {
-        let pos = new_content.find('\n').map(|i| i + 1).unwrap_or(0);
-        new_content.insert_str(pos, "use utoipa::ToSchema;\n");
-    }
-    if !new_content.contains("use serde::{Deserialize, Serialize};") {
-        let pos = new_content.find('\n').map(|i| i + 1).unwrap_or(0);
-        new_content.insert_str(pos, "use serde::{Deserialize, Serialize};\n");
     }
 
     if new_content != content {
@@ -360,7 +366,7 @@ pub struct Post {
     }
 
     #[test]
-    fn test_sync_truth_stub_execution() {
+    fn test_sync_truth_code_and_api_execution() {
         let args = SyncArgs {
             truth: SyncTruth::Code,
             input: PathBuf::from("fake"),
@@ -369,17 +375,45 @@ pub struct Post {
             force_type: vec![],
         };
         let mapper = DieselMapper;
-        let res = run_sync(&args, &mapper);
-        // It's a stub, so it should succeed
-        assert!(res.is_ok());
+        assert!(run_sync(&args, &mapper).is_ok());
 
         let args2 = SyncArgs {
             truth: SyncTruth::Api,
             ..args
         };
-        let res2 = run_sync(&args2, &mapper);
-        // Also stub
-        assert!(res2.is_ok());
+        assert!(run_sync(&args2, &mapper).is_ok());
+
+        // Real directory sync for Code -> OpenAPI and Api -> Models
+        let dir = tempdir().expect("tempdir");
+        let models_dir = dir.path().join("models");
+        let oa_path = dir.path().join("openapi.json");
+        fs::create_dir_all(&models_dir).expect("mkdir");
+        fs::write(
+            models_dir.join("pet.rs"),
+            "pub struct SyncPet {\n    pub id: i64,\n    pub name: String,\n}\n",
+        )
+        .expect("write model");
+
+        let code_sync = SyncArgs {
+            truth: SyncTruth::Code,
+            input: oa_path.clone(),
+            output: models_dir.clone(),
+            no_gen: false,
+            force_type: vec![],
+        };
+        run_sync(&code_sync, &mapper).expect("code sync");
+        assert!(oa_path.exists());
+
+        let api_models_dir = dir.path().join("api_models");
+        let api_sync = SyncArgs {
+            truth: SyncTruth::Api,
+            input: oa_path,
+            output: api_models_dir.clone(),
+            no_gen: false,
+            force_type: vec![],
+        };
+        run_sync(&api_sync, &mapper).expect("api sync");
+        assert!(api_models_dir.join("generated.rs").exists());
     }
 
     #[test]

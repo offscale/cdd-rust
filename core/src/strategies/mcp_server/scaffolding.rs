@@ -185,7 +185,7 @@ mod tests {
             handler_imports(),
             handler_signature(&route, &["name: String".to_string()])
         );
-        let parse = std::mem::ManuallyDrop::new(SourceFile::parse(&code, Edition::Edition2021));
+        let parse = SourceFile::parse(&code, Edition::Edition2021);
         assert!(
             parse.errors().is_empty(),
             "AST errors: {:?}",

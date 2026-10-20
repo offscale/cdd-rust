@@ -196,7 +196,7 @@ mod tests {
             test_api_call(),
             test_assertion()
         );
-        let parse = std::mem::ManuallyDrop::new(SourceFile::parse(&full, Edition::Edition2021));
+        let parse = SourceFile::parse(&full, Edition::Edition2021);
         assert!(
             parse.errors().is_empty(),
             "Generated invalid Rust AST: {:?}

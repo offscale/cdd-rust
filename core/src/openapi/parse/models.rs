@@ -33,6 +33,47 @@ pub struct ParsedServerVariable {
     pub description: Option<String>,
 }
 
+impl ParsedServerVariable {
+    /// Creates a new server variable with the required default value.
+    ///
+    /// # Arguments
+    /// * `default` - Default substitution value.
+    ///
+    /// # Returns
+    /// * Initialized [`ParsedServerVariable`].
+    pub fn new(default: impl Into<String>) -> Self {
+        Self {
+            enum_values: None,
+            default: default.into(),
+            description: None,
+        }
+    }
+
+    /// Sets enum values for the variable.
+    ///
+    /// # Arguments
+    /// * `values` - Allowed enumeration strings.
+    ///
+    /// # Returns
+    /// * Updated [`ParsedServerVariable`].
+    pub fn with_enum_values(mut self, values: Vec<String>) -> Self {
+        self.enum_values = Some(values);
+        self
+    }
+
+    /// Sets the variable description.
+    ///
+    /// # Arguments
+    /// * `description` - Human-readable description.
+    ///
+    /// # Returns
+    /// * Updated [`ParsedServerVariable`].
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+}
+
 /// A parsed OpenAPI Server Object.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedServer {
@@ -44,6 +85,77 @@ pub struct ParsedServer {
     pub name: Option<String>,
     /// Optional map of server variables.
     pub variables: BTreeMap<String, ParsedServerVariable>,
+}
+
+impl ParsedServer {
+    /// Creates a new server with the required URL.
+    ///
+    /// # Arguments
+    /// * `url` - Target server URL or template.
+    ///
+    /// # Returns
+    /// * Initialized [`ParsedServer`].
+    pub fn new(url: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            description: None,
+            name: None,
+            variables: BTreeMap::new(),
+        }
+    }
+
+    /// Sets the server description.
+    ///
+    /// # Arguments
+    /// * `description` - Server description text.
+    ///
+    /// # Returns
+    /// * Updated [`ParsedServer`].
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+
+    /// Sets the server name.
+    ///
+    /// # Arguments
+    /// * `name` - Unique server name.
+    ///
+    /// # Returns
+    /// * Updated [`ParsedServer`].
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    /// Adds a server variable definition.
+    ///
+    /// # Arguments
+    /// * `name` - Variable placeholder name.
+    /// * `variable` - Variable definition.
+    ///
+    /// # Returns
+    /// * Updated [`ParsedServer`].
+    pub fn with_variable(
+        mut self,
+        name: impl Into<String>,
+        variable: ParsedServerVariable,
+    ) -> Self {
+        self.variables.insert(name.into(), variable);
+        self
+    }
+
+    /// Replaces the server variables map.
+    ///
+    /// # Arguments
+    /// * `variables` - Map of variable definitions.
+    ///
+    /// # Returns
+    /// * Updated [`ParsedServer`].
+    pub fn with_variables(mut self, variables: BTreeMap<String, ParsedServerVariable>) -> Self {
+        self.variables = variables;
+        self
+    }
 }
 
 /// Represents a validated Runtime Expression or template (OAS 3.2 ABNF).

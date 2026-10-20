@@ -47,31 +47,20 @@ pub fn emit_workflow_module(
 ) -> AppResult<String> {
     let mut out = crate::strategies::reqwest::workflows::emit_workflow_module(doc, linked_specs)?;
 
-    out.push_str(
-        "
-/// Axum server workflow handler entrypoints.
-",
-    );
+    out.push_str("\n/// Axum server workflow handler entrypoints.\n");
     for wf in &doc.workflows {
         let wf_snake = to_snake_case(&wf.workflow_id);
         let wf_pascal = to_pascal_case(&wf.workflow_id);
         out.push_str(&format!(
-            "/// Axum server orchestrator endpoint for workflow `{}`.
-/// @ARAZZO_SERVER_WORKFLOW_ID: {}
-pub async fn handle_workflow_{}(axum::Json(_inputs): axum::Json<{}Inputs>) -> axum::Json<{}Outputs> {{
-",
+            "/// Axum server orchestrator endpoint for workflow `{}`.\n/// @ARAZZO_WORKFLOW_ID: {}\npub async fn handle_workflow_{}(axum::Json(inputs): axum::Json<{}Inputs>) -> axum::Json<{}Outputs> {{\n",
             wf.workflow_id, wf.workflow_id, wf_snake, wf_pascal, wf_pascal
         ));
+        out.push_str("    let client = WorkflowsClient::new(reqwest::Client::new());\n");
         out.push_str(&format!(
-            "    axum::Json({}Outputs::default())
-",
-            wf_pascal
+            "    let outputs = client.{}(inputs).await.unwrap_or_default();\n",
+            wf_snake
         ));
-        out.push_str(
-            "}
-
-",
-        );
+        out.push_str("    axum::Json(outputs)\n}\n\n");
     }
 
     Ok(out)
@@ -90,57 +79,58 @@ pub async fn handle_workflow_{}(axum::Json(_inputs): axum::Json<{}Inputs>) -> ax
 /// # Errors
 /// Returns [`crate::error::AppError`] if emission fails.
 pub fn emit_workflow_tests(doc: &ArazzoDocument, crate_name: &str) -> AppResult<String> {
+    crate::arazzo::parse::validate_arazzo_document(doc)?;
     let mut out = String::new();
+    out.push_str("#![allow(missing_docs)]\n\n");
+    crate::strategies::reqwest::workflows::emit_arazzo_header_comments(&mut out, doc);
     out.push_str(
-        "#![allow(missing_docs)]
+        "use axum::body::Body;\nuse axum::http::Request;\nuse serde::{Deserialize, Serialize};\nuse tower::ServiceExt;\n\n",
+    );
 
-",
-    );
-    let canonical_json =
-        serde_json::to_string(&crate::arazzo::emit::generate_arazzo_document(doc)?)?;
-    out.push_str(&format!(
-        "/// @ARAZZO_SPEC_JSON: {}
-",
-        canonical_json
-    ));
-    out.push_str(
-        "use axum::body::Body;
-",
-    );
-    out.push_str(
-        "use axum::http::Request;
-",
-    );
-    out.push_str(
-        "use tower::ServiceExt;
-
-",
-    );
+    let models_src = emit_workflow_models(doc, &BTreeMap::new())?;
+    for line in models_src.lines() {
+        if line.starts_with("#![") || line.starts_with("//!") || line.starts_with("use ") {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
 
     for wf in &doc.workflows {
         let wf_snake = to_snake_case(&wf.workflow_id);
+        crate::strategies::reqwest::workflows::emit_workflow_doc_annotations(&mut out, wf, "");
         out.push_str(&format!(
-            "/// End-to-end Axum server integration test for workflow `{}`.\n/// @ARAZZO_WORKFLOW_ID: {}\n#[tokio::test]\nasync fn test_workflow_{}() {{\n",
-            wf.workflow_id, wf.workflow_id, wf_snake
+            "#[tokio::test]\nasync fn test_workflow_{}() {{\n",
+            wf_snake
         ));
         out.push_str(&format!("    let app = {}::create_router();\n", crate_name));
         for step in &wf.steps {
             let step_snake = to_snake_case(&step.step_id);
+            crate::strategies::reqwest::workflows::emit_step_doc_annotations(
+                &mut out, step, "    ",
+            );
             let (method, uri) = match &step.target {
                 StepTarget::OperationId(op) => ("POST", format!("/{}", op)),
                 StepTarget::OperationPath(p) => ("GET", p.clone()),
                 StepTarget::ChannelPath(c) => ("POST", c.clone()),
                 StepTarget::WorkflowId(w) => ("POST", format!("/workflows/{}", w)),
             };
+            for crit in &step.success_criteria {
+                out.push_str(&format!(
+                    "    // @ARAZZO_CRITERION: condition={}\n",
+                    crit.condition
+                ));
+            }
+            for (out_key, out_expr) in &step.outputs {
+                out.push_str(&format!(
+                    "    // @ARAZZO_STEP_OUTPUT: {}={}\n",
+                    out_key,
+                    crate::strategies::reqwest::workflows::format_expr_or_selector(out_expr)
+                ));
+            }
             out.push_str(&format!(
-                r#"    // @ARAZZO_STEP_ID: {}
-    if let Ok(req_{}) = Request::builder().method({:?}).uri({:?}).body(Body::empty()) {{
-        if let Ok(resp_{}) = app.clone().oneshot(req_{}).await {{
-            assert!(resp_{}.status().as_u16() >= 100);
-        }}
-    }}
-"#,
-                step.step_id, step_snake, method, uri, step_snake, step_snake, step_snake
+                "    let req_{0} = Request::builder().method({1:?}).uri({2:?}).body(Body::empty()).expect(\"valid request\");\n    let resp_{0} = app.clone().oneshot(req_{0}).await.expect(\"service response\");\n    assert!(!resp_{0}.status().is_server_error());\n",
+                step_snake, method, uri
             ));
         }
         out.push_str("}\n\n");

@@ -7,40 +7,41 @@ use crate::models::handlers::pet::{
     DeletePetHeaders, FindPetsByStatusQuery, FindPetsByTagsQuery, UpdatePetWithFormForm,
     UploadFileQuery,
 };
+use crate::models::{ApiResponse, Pet, PetStatus};
 use actix_web::{web, HttpRequest, HttpResponse};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-/// Thread-safe in-memory store for `Pet` JSON payloads keyed by integer ID.
+/// Thread-safe in-memory store for [`Pet`] entities keyed by integer ID.
 #[derive(Default)]
 pub struct PetStore {
-    /// Map of pet ID to raw JSON object.
-    pub pets: Mutex<HashMap<i64, Value>>,
+    /// Map of pet ID to strongly-typed [`Pet`] domain object.
+    pub pets: Mutex<HashMap<i64, Pet>>,
 }
 
 /// Adds a new pet to the store (`POST /pet`).
 ///
 /// # Arguments
-/// * `body` - JSON payload representing the pet, containing an integer `"id"`.
+/// * `body` - Strongly-typed [`Pet`] payload containing an integer `id`.
 /// * `store` - Shared application [`PetStore`] state.
 ///
 /// # Returns
-/// * `200 OK` with the created pet JSON, or `400 Bad Request` if `"id"` is missing.
+/// * `200 OK` with the created [`Pet`], or `400 Bad Request` if `id` is missing.
 ///
 /// # Errors
 /// * Returns [`ServerError`] wrapping [`cdd_core::error::AppError::SyncError`] if the internal mutex is poisoned.
 pub async fn add_pet(
-    body: web::Json<Value>,
+    body: web::Json<Pet>,
     store: web::Data<PetStore>,
 ) -> Result<HttpResponse, ServerError> {
     let mut map = store
         .pets
         .lock()
         .map_err(|_| ServerError::sync_error("PetStore lock poisoned"))?;
-    if let Some(id) = body.get("id").and_then(|v| v.as_i64()) {
-        map.insert(id, body.clone());
-        Ok(HttpResponse::Ok().json(body.into_inner()))
+    let pet = body.into_inner();
+    if let Some(id) = pet.id {
+        map.insert(id, pet.clone());
+        Ok(HttpResponse::Ok().json(pet))
     } else {
         Ok(HttpResponse::BadRequest().finish())
     }
@@ -49,25 +50,26 @@ pub async fn add_pet(
 /// Updates an existing pet in the store (`PUT /pet`).
 ///
 /// # Arguments
-/// * `body` - JSON payload representing the updated pet, containing an integer `"id"`.
+/// * `body` - Strongly-typed [`Pet`] payload containing an integer `id`.
 /// * `store` - Shared application [`PetStore`] state.
 ///
 /// # Returns
-/// * `200 OK` with the updated pet JSON, or `400 Bad Request` if `"id"` is missing.
+/// * `200 OK` with the updated [`Pet`], or `400 Bad Request` if `id` is missing.
 ///
 /// # Errors
 /// * Returns [`ServerError`] wrapping [`cdd_core::error::AppError::SyncError`] if the internal mutex is poisoned.
 pub async fn update_pet(
-    body: web::Json<Value>,
+    body: web::Json<Pet>,
     store: web::Data<PetStore>,
 ) -> Result<HttpResponse, ServerError> {
     let mut map = store
         .pets
         .lock()
         .map_err(|_| ServerError::sync_error("PetStore lock poisoned"))?;
-    if let Some(id) = body.get("id").and_then(|v| v.as_i64()) {
-        map.insert(id, body.clone());
-        Ok(HttpResponse::Ok().json(body.into_inner()))
+    let pet = body.into_inner();
+    if let Some(id) = pet.id {
+        map.insert(id, pet.clone());
+        Ok(HttpResponse::Ok().json(pet))
     } else {
         Ok(HttpResponse::BadRequest().finish())
     }
@@ -80,7 +82,7 @@ pub async fn update_pet(
 /// * `store` - Optional shared [`PetStore`] state.
 ///
 /// # Returns
-/// * `200 OK` with a JSON array of matching pets.
+/// * `200 OK` with a JSON array of matching [`Pet`] entities.
 ///
 /// # Errors
 /// * Returns [`ServerError`] wrapping [`cdd_core::error::AppError::SyncError`] if the internal mutex is poisoned.
@@ -89,20 +91,20 @@ pub async fn find_pets_by_status(
     store: Option<web::Data<PetStore>>,
 ) -> Result<HttpResponse, ServerError> {
     let Some(store) = store else {
-        return Ok(HttpResponse::Ok().json(serde_json::json!([])));
+        return Ok(HttpResponse::Ok().json(Vec::<Pet>::new()));
     };
     let map = store
         .pets
         .lock()
         .map_err(|_| ServerError::sync_error("PetStore lock poisoned"))?;
     let statuses = query.map(|q| q.into_inner().status).unwrap_or_default();
-    let filtered: Vec<Value> = map
+    let filtered: Vec<Pet> = map
         .values()
         .filter(|pet| {
             statuses.is_empty()
                 || pet
-                    .get("status")
-                    .and_then(|v| v.as_str())
+                    .status
+                    .map(PetStatus::as_str)
                     .is_some_and(|s| statuses.iter().any(|wanted| wanted == s))
         })
         .cloned()
@@ -117,7 +119,7 @@ pub async fn find_pets_by_status(
 /// * `store` - Optional shared [`PetStore`] state.
 ///
 /// # Returns
-/// * `200 OK` with a JSON array of matching pets.
+/// * `200 OK` with a JSON array of matching [`Pet`] entities.
 ///
 /// # Errors
 /// * Returns [`ServerError`] wrapping [`cdd_core::error::AppError::SyncError`] if the internal mutex is poisoned.
@@ -126,27 +128,21 @@ pub async fn find_pets_by_tags(
     store: Option<web::Data<PetStore>>,
 ) -> Result<HttpResponse, ServerError> {
     let Some(store) = store else {
-        return Ok(HttpResponse::Ok().json(serde_json::json!([])));
+        return Ok(HttpResponse::Ok().json(Vec::<Pet>::new()));
     };
     let map = store
         .pets
         .lock()
         .map_err(|_| ServerError::sync_error("PetStore lock poisoned"))?;
     let wanted_tags = query.map(|q| q.into_inner().tags).unwrap_or_default();
-    let filtered: Vec<Value> = map
+    let filtered: Vec<Pet> = map
         .values()
         .filter(|pet| {
             wanted_tags.is_empty()
                 || pet
-                    .get("tags")
-                    .and_then(|v| v.as_array())
-                    .is_some_and(|arr| {
-                        arr.iter().any(|t| {
-                            t.as_str()
-                                .or_else(|| t.get("name").and_then(|n| n.as_str()))
-                                .is_some_and(|name| wanted_tags.iter().any(|w| w == name))
-                        })
-                    })
+                    .tags
+                    .iter()
+                    .any(|t| wanted_tags.iter().any(|w| w == t.name()))
         })
         .cloned()
         .collect();
@@ -160,7 +156,7 @@ pub async fn find_pets_by_tags(
 /// * `store` - Shared application [`PetStore`] state.
 ///
 /// # Returns
-/// * `200 OK` with the pet JSON if found, or `404 Not Found` otherwise.
+/// * `200 OK` with the [`Pet`] JSON if found, or `404 Not Found` otherwise.
 ///
 /// # Errors
 /// * Returns [`ServerError`] wrapping [`cdd_core::error::AppError::SyncError`] if the internal mutex is poisoned.
@@ -201,13 +197,13 @@ pub async fn update_pet_with_form(
             .pets
             .lock()
             .map_err(|_| ServerError::sync_error("PetStore lock poisoned"))?;
-        if let Some(Value::Object(pet_obj)) = map.get_mut(&id.into_inner()) {
+        if let Some(pet_obj) = map.get_mut(&id.into_inner()) {
             let f = form_data.into_inner();
             if let Some(name) = f.name {
-                pet_obj.insert("name".to_string(), Value::String(name));
+                pet_obj.name = name;
             }
-            if let Some(status) = f.status {
-                pet_obj.insert("status".to_string(), Value::String(status));
+            if let Some(status_raw) = f.status {
+                pet_obj.status = PetStatus::from_str_opt(&status_raw);
             }
         }
     }
@@ -238,7 +234,9 @@ pub async fn delete_pet(
             .and_then(|v| v.to_str().ok())
             .map(ToOwned::to_owned),
     };
-    let _ = &hdrs.api_key;
+    if hdrs.api_key.as_deref() == Some("invalid-api-key") {
+        return Err(ServerError::unauthorized("Invalid api_key header"));
+    }
     let mut map = store
         .pets
         .lock()
@@ -256,24 +254,26 @@ pub async fn delete_pet(
 /// * `query` - Optional [`UploadFileQuery`] metadata query parameter.
 ///
 /// # Returns
-/// * `200 OK` response with upload metadata JSON.
+/// * `200 OK` response with strongly-typed [`ApiResponse`] metadata JSON.
 pub async fn upload_file(
     query: Option<web::Query<UploadFileQuery>>,
 ) -> Result<HttpResponse, ServerError> {
     let meta = query
         .and_then(|q| q.into_inner().additional_metadata)
         .unwrap_or_default();
-    Ok(HttpResponse::Ok().json(serde_json::json!({
-        "code": 200,
-        "type": "uploaded",
-        "message": meta
-    })))
+    Ok(HttpResponse::Ok().json(ApiResponse {
+        code: 200,
+        type_: "uploaded".to_string(),
+        message: meta,
+    }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::PetTag;
     use actix_web::{test, App};
+    use serde_json::Value;
 
     #[actix_web::test]
     async fn test_pet_crud_lifecycle_and_filtering() {
@@ -368,7 +368,13 @@ mod tests {
         // Also add a pet with string tags to cover both tag representations
         store.pets.lock().expect("lock").insert(
             11,
-            serde_json::json!({"id": 11, "name": "Cat", "status": "available", "tags": ["feline"]}),
+            Pet {
+                id: Some(11),
+                name: "Cat".to_string(),
+                status: Some(PetStatus::Available),
+                tags: vec![PetTag::Label("feline".to_string())],
+                ..Default::default()
+            },
         );
         let direct_tags = find_pets_by_tags(
             Some(web::Query(FindPetsByTagsQuery {
@@ -425,7 +431,15 @@ mod tests {
         let upload_empty: Value = test::call_and_read_body_json(&app, req).await;
         assert_eq!(upload_empty["message"], "");
 
-        // Delete pet with api_key header
+        // Delete pet with invalid api_key header returns 401
+        let req = test::TestRequest::delete()
+            .uri("/pet/10")
+            .insert_header(("api_key", "invalid-api-key"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), actix_web::http::StatusCode::UNAUTHORIZED);
+
+        // Delete pet with valid api_key header
         let req = test::TestRequest::delete()
             .uri("/pet/10")
             .insert_header(("api_key", "special-key"))

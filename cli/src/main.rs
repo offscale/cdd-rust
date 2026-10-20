@@ -149,8 +149,27 @@ mod tests {
         use clap::CommandFactory;
         Cli::command().debug_assert();
 
-        let sync_cli = Cli::parse_from(["cdd-rust", "sync", "--truth", "code"]);
+        let temp = tempfile::tempdir().expect("tempdir");
+        let sync_spec = temp.path().join("openapi.json");
+        let sync_models = temp.path().join("models");
+        std::fs::create_dir_all(&sync_models).expect("mkdir");
+        std::fs::write(
+            sync_models.join("user.rs"),
+            "pub struct User { pub id: i32 }\n",
+        )
+        .expect("write model");
+        let sync_cli = Cli::parse_from([
+            "cdd-rust",
+            "sync",
+            "--truth",
+            "code",
+            "-i",
+            sync_spec.to_str().expect("str"),
+            "-o",
+            sync_models.to_str().expect("str"),
+        ]);
         assert!(dispatch_cli(&sync_cli).is_ok());
+        assert!(sync_spec.exists());
 
         let to_openapi_err =
             Cli::parse_from(["cdd-rust", "to_openapi", "-i", "/nonexistent_input_path"]);
@@ -192,9 +211,35 @@ mod tests {
         ]);
         assert!(dispatch_cli(&rpc_err).is_err());
 
-        std::env::set_var("CDD_MCP_TEST_EOF", "1");
-        let rpc_ok = Cli::parse_from(["cdd-rust", "serve_json_rpc", "-l", "127.0.0.1", "-p", "0"]);
+        let probe = std::net::TcpListener::bind("127.0.0.1:0").expect("ephemeral port");
+        let port = probe.local_addr().expect("local addr").port();
+        drop(probe);
+        let killer = std::thread::spawn(move || {
+            use std::io::Write;
+            let body = r#"{"jsonrpc":"2.0","method":"shutdown","id":1}"#;
+            let req = format!(
+                "POST / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            for _ in 0..100 {
+                if let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", port)) {
+                    let _ = stream.write_all(req.as_bytes());
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        });
+        let port_str = port.to_string();
+        let rpc_ok = Cli::parse_from([
+            "cdd-rust",
+            "serve_json_rpc",
+            "-l",
+            "127.0.0.1",
+            "-p",
+            &port_str,
+        ]);
         assert!(dispatch_cli(&rpc_ok).is_ok());
+        killer.join().expect("killer thread");
 
         let mcp_cli = Cli::parse_from(["cdd-rust", "mcp"]);
         assert!(dispatch_cli(&mcp_cli).is_ok());

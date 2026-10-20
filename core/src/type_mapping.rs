@@ -13,6 +13,7 @@ use crate::error::{AppError, AppResult};
 use ra_ap_edition::Edition;
 use ra_ap_syntax::ast::{self, HasGenericArgs};
 use ra_ap_syntax::{AstNode, SourceFile};
+use serde_json::{json, Value};
 use std::fmt::Display;
 
 /// Represents the simplified JSON types.
@@ -28,6 +29,8 @@ pub enum JsonType {
     Boolean,
     /// An array containing items of a specific schema.
     Array(Box<JsonSchema>),
+    /// An object map with dynamic string keys and typed values (`additionalProperties`).
+    Map(Box<JsonSchema>),
     /// A reference to another named schema (e.g., a Struct).
     Ref(String),
 }
@@ -40,6 +43,7 @@ impl Display for JsonType {
             JsonType::Number => write!(f, "number"),
             JsonType::Boolean => write!(f, "boolean"),
             JsonType::Array(inner) => write!(f, "array<{}>", inner.type_),
+            JsonType::Map(inner) => write!(f, "map<{}>", inner.type_),
             JsonType::Ref(s) => write!(f, "$ref:{}", s),
         }
     }
@@ -124,12 +128,14 @@ fn map_ast_type(ty: &ast::Type) -> AppResult<JsonSchema> {
                 "Uuid" => Ok(formatted(JsonType::String, "uuid")),
                 "NaiveDateTime" | "DateTime" => Ok(formatted(JsonType::String, "date-time")),
                 "NaiveDate" => Ok(formatted(JsonType::String, "date")),
+                "Decimal" => Ok(formatted(JsonType::String, "decimal")),
 
                 // Binary types (explicit Bytes wrapper)
                 // Vec<u8> is handled via container generic check below, but bytes::Bytes is direct.
                 "Bytes" | "ByteBuf" => Ok(binary_schema()),
 
                 // Containers & Wrappers
+                "Box" => handle_generic_wrapper(segment, |inner| inner),
                 "Option" => handle_generic_wrapper(segment, |mut inner| {
                     inner.nullable = true;
                     inner
@@ -150,6 +156,7 @@ fn map_ast_type(ty: &ast::Type) -> AppResult<JsonSchema> {
                         content_encoding: None,
                     }
                 }),
+                "HashMap" | "BTreeMap" => handle_map_wrapper(segment),
                 // Secret<T> wrapper (Registry: format: password)
                 "Secret" => handle_generic_wrapper(segment, |mut inner| {
                     // Only apply password format if inner is a String
@@ -211,6 +218,259 @@ where
 
     let schema = map_ast_type(&inner_ty)?;
     Ok(wrap(schema))
+}
+
+/// Helper to handle key-value map types like `HashMap<K, V>` and `BTreeMap<K, V>`.
+fn handle_map_wrapper(segment: ast::PathSegment) -> AppResult<JsonSchema> {
+    let mut args = segment
+        .generic_arg_list()
+        .ok_or_else(|| AppError::General("Missing generic arguments for map type".into()))?
+        .generic_args();
+    let _key_arg = args
+        .next()
+        .ok_or_else(|| AppError::General("Missing map key generic argument".into()))?;
+    let val_arg = args
+        .next()
+        .ok_or_else(|| AppError::General("Missing map value generic argument".into()))?;
+
+    let val_ty = match val_arg {
+        ast::GenericArg::TypeArg(type_arg) => type_arg.ty(),
+        _ => None,
+    }
+    .ok_or_else(|| AppError::General("Unsupported map value generic argument".into()))?;
+
+    let inner = map_ast_type(&val_ty)?;
+    Ok(JsonSchema {
+        type_: JsonType::Map(Box::new(inner)),
+        format: None,
+        nullable: false,
+        content_media_type: None,
+        content_encoding: None,
+    })
+}
+
+/// Maps a Rust field type string into an OpenAPI 3.2 JSON Schema [`Value`] and an `is_optional` flag.
+///
+/// # Arguments
+/// * `ty` - The Rust type string (e.g., `"Option<Vec<Uuid>>"`, `"&[u8]"`).
+///
+/// # Returns
+/// * `(Value, bool)` containing the JSON Schema object and `true` if the outer type is `Option<T>`.
+pub fn map_rust_type_to_openapi_schema(ty: &str) -> (Value, bool) {
+    let (mut schema, is_optional) = map_rust_type_to_unwrapped_openapi_schema(ty);
+
+    if is_optional {
+        schema = make_nullable_schema(schema);
+    }
+
+    (schema, is_optional)
+}
+
+/// Maps a Rust type string into its inner (non-nullable) OpenAPI 3.2 JSON Schema [`Value`] and an `is_optional` flag.
+///
+/// # Arguments
+/// * `ty` - The Rust type string (e.g., `"Option<String>"`, `"Vec<u8>"`).
+///
+/// # Returns
+/// * `(Value, bool)` containing the unwrapped JSON Schema object and `true` if the outer type is `Option<T>`.
+pub fn map_rust_type_to_unwrapped_openapi_schema(ty: &str) -> (Value, bool) {
+    if is_binary_type(ty) {
+        (binary_schema_value(), is_optional_type(ty))
+    } else {
+        let parsed = parse_rust_type(ty);
+        let schema = shape_to_schema(&parsed.shape);
+        (schema, parsed.is_optional)
+    }
+}
+
+/// Maps a base (unwrapped) Rust type name to an OpenAPI 3.2 JSON Schema [`Value`].
+///
+/// # Arguments
+/// * `ty` - Base Rust type identifier (e.g., `"i32"`, `"Uuid"`, `"Pet"`).
+///
+/// # Returns
+/// * JSON Schema [`Value`] representing the type or a `$ref` to `#/components/schemas/{ty}`.
+pub fn map_base_type_to_openapi_schema(ty: &str) -> Value {
+    match ty {
+        "i8" | "i16" | "i32" | "u8" | "u16" | "u32" | "isize" | "usize" => {
+            json!({ "type": "integer", "format": "int32" })
+        }
+        "i64" | "u64" => json!({ "type": "integer", "format": "int64" }),
+        "f32" | "f64" => json!({ "type": "number" }),
+        "bool" => json!({ "type": "boolean" }),
+        "String" | "&str" | "char" => json!({ "type": "string" }),
+        "Uuid" => json!({ "type": "string", "format": "uuid" }),
+        "NaiveDate" => json!({ "type": "string", "format": "date" }),
+        "NaiveDateTime" | "DateTime<Utc>" | "DateTime<Local>" => {
+            json!({ "type": "string", "format": "date-time" })
+        }
+        "Decimal" => json!({ "type": "string", "format": "decimal" }),
+        other => json!({ "$ref": format!("#/components/schemas/{}", other) }),
+    }
+}
+
+fn binary_schema_value() -> Value {
+    json!({
+        "type": "string",
+        "contentEncoding": "base64",
+        "contentMediaType": "application/octet-stream"
+    })
+}
+
+fn make_nullable_schema(schema: Value) -> Value {
+    let obj = schema.as_object().expect("schema object");
+    if let Some(Value::String(s)) = obj.get("type") {
+        let mut new_obj = obj.clone();
+        new_obj.insert("type".to_string(), json!([s, "null"]));
+        return Value::Object(new_obj);
+    }
+
+    json!({ "anyOf": [schema, { "type": "null" }] })
+}
+
+fn is_optional_type(ty: &str) -> bool {
+    let ty = ty.trim();
+    ty.starts_with("Option<") && ty.ends_with('>')
+}
+
+fn is_binary_type(ty: &str) -> bool {
+    let ty = ty.trim();
+    if is_optional_type(ty) {
+        let inner = &ty[7..ty.len() - 1];
+        return is_binary_type(inner);
+    }
+
+    if let Some(inner) = strip_generic(ty, "Vec") {
+        return inner.trim() == "u8";
+    }
+
+    matches!(ty, "&[u8]" | "[u8]" | "Bytes" | "ByteBuf")
+        || ["::Bytes", "::ByteBuf"].iter().any(|s| ty.ends_with(s))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TypeShape {
+    Base(String),
+    Vec(Box<TypeShape>),
+    Map(Box<TypeShape>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedType {
+    shape: TypeShape,
+    is_optional: bool,
+}
+
+fn parse_rust_type(ty: &str) -> ParsedType {
+    parse_rust_type_inner(ty.trim(), true)
+}
+
+fn parse_rust_type_inner(ty: &str, allow_optional: bool) -> ParsedType {
+    if allow_optional {
+        if let Some(inner) = strip_generic(ty, "Option") {
+            let parsed = parse_rust_type_inner(inner, false);
+            return ParsedType {
+                shape: parsed.shape,
+                is_optional: true,
+            };
+        }
+    }
+
+    if let Some(inner) = strip_generic(ty, "Vec") {
+        let parsed = parse_rust_type_inner(inner, false);
+        return ParsedType {
+            shape: TypeShape::Vec(Box::new(parsed.shape)),
+            is_optional: false,
+        };
+    }
+
+    if let Some(map_inner) = strip_map_generic(ty) {
+        let parsed = parse_rust_type_inner(map_inner.as_str(), false);
+        return ParsedType {
+            shape: TypeShape::Map(Box::new(parsed.shape)),
+            is_optional: false,
+        };
+    }
+
+    ParsedType {
+        shape: TypeShape::Base(ty.to_string()),
+        is_optional: false,
+    }
+}
+
+fn strip_generic<'a>(ty: &'a str, target: &str) -> Option<&'a str> {
+    let (base, inner) = split_generic(ty)?;
+    if base == target {
+        Some(inner)
+    } else {
+        None
+    }
+}
+
+fn strip_map_generic(ty: &str) -> Option<String> {
+    let (base, inner) = split_generic(ty)?;
+    if matches!(base, "HashMap" | "BTreeMap") {
+        let args = split_generic_args(inner);
+        if args.len() == 2 {
+            return Some(args[1].trim().to_string());
+        }
+    }
+    None
+}
+
+fn split_generic(ty: &str) -> Option<(&str, &str)> {
+    let start = ty.find('<')?;
+    if !ty.ends_with('>') {
+        return None;
+    }
+    let base = ty[..start].trim();
+    let base = base.split("::").last().unwrap_or(base);
+    let inner = &ty[start + 1..ty.len() - 1];
+    Some((base, inner))
+}
+
+fn split_generic_args(inner: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut depth = 0usize;
+    let mut current = String::new();
+
+    for ch in inner.chars() {
+        match ch {
+            '<' => {
+                depth += 1;
+                current.push(ch);
+            }
+            '>' => {
+                depth = depth.saturating_sub(1);
+                current.push(ch);
+            }
+            ',' if depth == 0 => {
+                args.push(current.trim().to_string());
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    if !current.trim().is_empty() {
+        args.push(current.trim().to_string());
+    }
+
+    args
+}
+
+fn shape_to_schema(shape: &TypeShape) -> Value {
+    match shape {
+        TypeShape::Base(ty) => map_base_type_to_openapi_schema(ty),
+        TypeShape::Vec(inner) => json!({
+            "type": "array",
+            "items": shape_to_schema(inner)
+        }),
+        TypeShape::Map(inner) => json!({
+            "type": "object",
+            "additionalProperties": shape_to_schema(inner)
+        }),
+    }
 }
 
 // Helpers for cleaner construction
@@ -387,11 +647,22 @@ mod tests {
         assert_eq!(res_date.format.as_deref(), Some("date"));
         let res_dt = mapper.map("NaiveDateTime").expect("NaiveDateTime");
         assert_eq!(res_dt.format.as_deref(), Some("date-time"));
+        let res_dec = mapper.map("Decimal").expect("Decimal");
+        assert_eq!(res_dec.format.as_deref(), Some("decimal"));
+        let res_box = mapper.map("Box<String>").expect("Box<String>");
+        assert_eq!(res_box.type_, JsonType::String);
+        let res_map = mapper.map("HashMap<String, i32>").expect("HashMap");
+        assert_eq!(format!("{}", res_map.type_), "map<integer>");
+        let res_bmap = mapper.map("BTreeMap<String, Uuid>").expect("BTreeMap");
+        assert_eq!(format!("{}", res_bmap.type_), "map<string>");
         let res_custom = mapper.map("MyCustomModel").expect("MyCustomModel");
         assert_eq!(format!("{}", res_custom.type_), "$ref:MyCustomModel");
         assert_eq!(format!("{}", JsonType::String), "string");
         assert_eq!(format!("{}", JsonType::Number), "number");
         assert_eq!(format!("{}", JsonType::Boolean), "boolean");
+        let (bin_schema, bin_opt) = map_rust_type_to_unwrapped_openapi_schema("Option<Vec<u8>>");
+        assert!(bin_opt);
+        assert_eq!(bin_schema["contentEncoding"], "base64");
 
         assert!(mapper.map("").is_err());
         assert!(mapper.map(";").is_err());
@@ -406,6 +677,11 @@ mod tests {
         assert!(mapper.map("Vec").is_err());
         assert!(mapper.map("Vec<'a>").is_err());
         assert!(mapper.map("Vec<(i32, i32)>").is_err());
+        assert!(mapper.map("HashMap").is_err());
+        assert!(mapper.map("HashMap<>").is_err());
+        assert!(mapper.map("HashMap<String>").is_err());
+        assert!(mapper.map("HashMap<String, 'a>").is_err());
+        assert!(mapper.map("HashMap<String, (i32, i32)>").is_err());
         assert!(mapper.map("Secret").is_err());
         assert!(mapper.map("Secret<'a>").is_err());
         assert!(mapper.map("Secret<(i32, i32)>").is_err());

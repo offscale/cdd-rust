@@ -105,4 +105,76 @@ World"
         );
         assert_eq!(parse_raw_doc_lines("// Regular comment only"), None);
     }
+
+    #[test]
+    fn test_docstring_roundtrip_across_models() {
+        use crate::classes::emit::generate_dtos;
+        use crate::classes::parse::{
+            extract_model, ParsedEnum, ParsedField, ParsedModel, ParsedStruct, ParsedVariant,
+        };
+
+        let models = vec![
+            ParsedModel::Struct(ParsedStruct {
+                name: "UserDoc".to_string(),
+                description: Some("User summary\nDetailed bio".to_string()),
+                rename: None,
+                rename_all: None,
+                fields: vec![ParsedField {
+                    name: "email".to_string(),
+                    ty: "String".to_string(),
+                    description: Some("Primary email address".to_string()),
+                    rename: None,
+                    is_skipped: false,
+                    is_read_only: false,
+                    is_write_only: false,
+                    is_deprecated: false,
+                    external_docs: None,
+                }],
+                is_deprecated: false,
+                deny_unknown_fields: false,
+                external_docs: None,
+            }),
+            ParsedModel::Enum(ParsedEnum {
+                name: "RoleDoc".to_string(),
+                description: Some("Account role".to_string()),
+                rename: None,
+                rename_all: None,
+                tag: None,
+                untagged: false,
+                variants: vec![ParsedVariant {
+                    name: "Admin".to_string(),
+                    ty: None,
+                    description: Some("Full administrator".to_string()),
+                    rename: None,
+                    aliases: None,
+                    is_deprecated: false,
+                }],
+                is_deprecated: false,
+                external_docs: None,
+                discriminator_mapping: None,
+                discriminator_default_mapping: None,
+            }),
+        ];
+
+        let emitted = generate_dtos(&models);
+        let s =
+            crate::classes::parse::extract_struct(&emitted, "UserDoc").expect("extract UserDoc");
+        assert_eq!(s.description.as_deref(), Some("User summary\nDetailed bio"));
+        assert_eq!(
+            s.fields[0].description.as_deref(),
+            Some("Primary email address")
+        );
+
+        let parsed_enum = extract_model(&emitted, "RoleDoc").expect("extract RoleDoc");
+        let parsed_struct = extract_model(&emitted, "UserDoc").expect("extract UserDoc");
+        for item in [parsed_enum, parsed_struct] {
+            if let ParsedModel::Enum(e) = item {
+                assert_eq!(e.description.as_deref(), Some("Account role"));
+                assert_eq!(
+                    e.variants[0].description.as_deref(),
+                    Some("Full administrator")
+                );
+            }
+        }
+    }
 }

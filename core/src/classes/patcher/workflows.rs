@@ -16,8 +16,7 @@ pub fn inject_openapi_attributes(source: &str) -> AppResult<String> {
 
     // 2. Scan to find targets (names only)
     let struct_names = {
-        let parse =
-            std::mem::ManuallyDrop::new(SourceFile::parse(&current_source, Edition::Edition2021));
+        let parse = SourceFile::parse(&current_source, Edition::Edition2021);
         let names: Vec<String> = parse
             .tree()
             .syntax()

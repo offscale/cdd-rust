@@ -24,12 +24,10 @@ pub fn register_routes(
     let is_new_file = source.trim().is_empty();
 
     if is_new_file {
-        new_source.push_str("use actix_web::web;\n");
-        new_source.push_str("use crate::http::handlers;\n\n");
-        new_source.push_str("pub fn config(cfg: &mut web::ServiceConfig) {\n}\n");
+        new_source.push_str(&strategy.route_registration_skeleton());
     }
 
-    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(&new_source, Edition::Edition2021));
+    let parse = SourceFile::parse(&new_source, Edition::Edition2021);
     let file = parse.tree();
 
     let config_fn = file
@@ -70,7 +68,11 @@ pub fn register_routes(
 
             if !existing_paths.contains(&full_handler_path) {
                 let registration = strategy.route_registration_statement(route, &full_handler_path);
-                injection.push_str(&registration);
+                if registration.trim_start().starts_with(".route(") {
+                    injection.push_str(&format!("        {}\n", registration.trim()));
+                } else {
+                    injection.push_str(&registration);
+                }
             }
         }
 
@@ -101,6 +103,59 @@ mod tests {
         let code =
             register_routes("", "users", &routes, &strategy).expect("Failed to register routes");
         assert!(code.contains("pub fn config(cfg: &mut web::ServiceConfig)"));
+    }
+
+    #[test]
+    fn test_register_axum_routes_valid_ast() {
+        let route = ParsedRoute {
+            path: "/users/{id}".into(),
+            summary: None,
+            description: None,
+            path_summary: None,
+            path_description: None,
+            path_extensions: BTreeMap::new(),
+            operation_summary: None,
+            operation_description: None,
+            base_path: None,
+            path_servers: None,
+            servers_override: None,
+            method: "GET".into(),
+            handler_name: "get_user".into(),
+            operation_id: None,
+            params: vec![],
+            path_params: vec![],
+            request_body: None,
+            security: vec![],
+            security_defined: false,
+            response_type: None,
+            response_status: None,
+            response_summary: None,
+            response_description: None,
+            response_media_type: None,
+            response_example: None,
+            response_headers: vec![],
+            response_links: None,
+            kind: RouteKind::Path,
+            callbacks: vec![],
+            deprecated: false,
+            external_docs: None,
+            raw_request_body: None,
+            raw_responses: None,
+            tags: vec![],
+            extensions: BTreeMap::new(),
+        };
+        let code = register_routes("", "users", &[route], &crate::strategies::AxumStrategy)
+            .expect("Axum route registration");
+        assert!(code.contains("pub fn config() -> Router"));
+        assert!(
+            code.contains(".route(\"/users/:id\", axum::routing::get(handlers::users::get_user))")
+        );
+        let parsed = SourceFile::parse(&code, Edition::Edition2021);
+        assert!(
+            parsed.errors().is_empty(),
+            "Invalid Axum router AST: {:?}",
+            parsed.errors()
+        );
     }
 
     #[test]

@@ -57,6 +57,42 @@ def main():
     with open(os.path.join(server_dir, "Cargo.toml"), "a") as f:
         f.write("\n[workspace]\n")
 
+    crate_name = "generated_package"
+    with open(os.path.join(server_dir, "Cargo.toml"), "r") as f:
+        for line in f:
+            if line.startswith("name ="):
+                crate_name = line.split('"')[1]
+                break
+
+    main_rs_content = f"""use actix_web::{{App, HttpServer, dev::Service, HttpMessage}};
+use {crate_name}::security::{{ApiKey, OAuth2, Oidc, PetstoreAuth}};
+use {crate_name}::security::scopes::{{WritePets, ReadPets}};
+use std::marker::PhantomData;
+
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {{
+    let bind = std::env::var("CDD_WEB_BIND").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
+    HttpServer::new(|| {{
+        App::new()
+            .wrap_fn(|req, srv| {{
+                req.extensions_mut().insert(ApiKey);
+                req.extensions_mut().insert(Oidc);
+                req.extensions_mut().insert(PetstoreAuth::<()>(PhantomData));
+                req.extensions_mut().insert(OAuth2::<(WritePets, ReadPets)>(PhantomData));
+                req.extensions_mut().insert(PetstoreAuth::<(WritePets, ReadPets)>(PhantomData));
+                srv.call(req)
+            }})
+            .configure({crate_name}::config)
+    }})
+    .bind(bind)?
+    .run()
+    .await
+}}
+"""
+    os.makedirs(os.path.join(server_dir, "src"), exist_ok=True)
+    with open(os.path.join(server_dir, "src", "main.rs"), "w") as f:
+        f.write(main_rs_content)
+
     subprocess.run(
         ["cargo", "build"],
         cwd=server_dir,
@@ -70,7 +106,7 @@ def main():
 
     global server_process
     server_process = subprocess.Popen(
-        ["cargo", "run", "--", "--ephemeral"],
+        ["cargo", "run"],
         cwd=server_dir,
         env=env,
         stdout=subprocess.DEVNULL,
@@ -96,8 +132,6 @@ def main():
             spec_file,
             "-o",
             client_dir,
-            "--target",
-            "client-reqwest",
             "--tests",
         ],
         stdout=subprocess.DEVNULL,

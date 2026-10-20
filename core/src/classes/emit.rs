@@ -30,7 +30,7 @@ pub fn make_record_field(
     let raw_field = format!("{}{}{}: {}", indent, vis, name, ty);
     let code = format!("struct Wrapper {{\n{},\n}}", raw_field);
 
-    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(&code, Edition::Edition2021));
+    let parse = SourceFile::parse(&code, Edition::Edition2021);
     if !parse.errors().is_empty() {
         let errs: Vec<String> = parse.errors().iter().map(|e| e.to_string()).collect();
         return Err(AppError::General(format!(
@@ -92,25 +92,102 @@ pub fn generate_dto(dto: &ParsedStruct) -> String {
     generate_dtos(&[ParsedModel::Struct(dto.clone())])
 }
 
+/// Surgically updates an existing Rust model file with the provided `models`, using
+/// [`crate::classes::diff::calculate_diff`] and [`crate::classes::patcher`] to patch
+/// existing structs in-place and appending any newly introduced models.
+///
+/// # Arguments
+/// * `existing_source` - Current content of the Rust models file (may be empty).
+/// * `models` - Slice of target [`ParsedModel`] definitions.
+///
+/// # Returns
+/// * `AppResult<String>` containing the updated, compilable Rust source code.
+pub fn update_model_file(existing_source: &str, models: &[ParsedModel]) -> AppResult<String> {
+    if existing_source.trim().is_empty() {
+        return Ok(generate_dtos(models));
+    }
+
+    let mut current = existing_source.to_string();
+    let mut imports = BTreeSet::new();
+    imports.insert("use serde::{Deserialize, Serialize};".to_string());
+    imports.insert("use utoipa::ToSchema;".to_string());
+    for model in models {
+        collect_imports(model, &mut imports);
+    }
+    for imp in imports {
+        current = crate::classes::patcher::add_import(&current, &imp)?;
+    }
+
+    let existing_names = crate::classes::parse::extract_struct_names(&current)?;
+
+    for model in models {
+        match model {
+            ParsedModel::Struct(s) if existing_names.contains(&s.name) => {
+                current = crate::classes::patcher::add_derive(&current, &s.name, "Serialize")?;
+                current = crate::classes::patcher::add_derive(&current, &s.name, "Deserialize")?;
+                current = crate::classes::patcher::add_derive(&current, &s.name, "ToSchema")?;
+                if let Some(rename) = &s.rename {
+                    let attr = format!("#[serde(rename = \"{}\")]", rename);
+                    current =
+                        crate::classes::patcher::add_struct_attribute(&current, &s.name, &attr)?;
+                }
+
+                let diffs = crate::classes::diff::calculate_diff(&current, &s.name, s)?;
+                for diff in diffs {
+                    match diff {
+                        crate::classes::diff::Diff::MissingField { name, ty } => {
+                            let field_node = make_record_field(&name, &ty, true, 4)?;
+                            current = crate::classes::patcher::add_struct_field(
+                                &current,
+                                &s.name,
+                                &field_node,
+                            )?;
+                        }
+                        crate::classes::diff::Diff::TypeMismatch {
+                            field, expected, ..
+                        } => {
+                            current = crate::classes::patcher::modify_struct_field_type(
+                                &current, &s.name, &field, &expected,
+                            )?;
+                        }
+                        crate::classes::diff::Diff::Renamed { .. } => {}
+                    }
+                }
+            }
+            ParsedModel::Struct(s) => {
+                current.push_str("\n\n");
+                current.push_str(&generate_dto_body(s));
+            }
+            ParsedModel::Enum(e) if !existing_names.contains(&e.name) => {
+                current.push_str("\n\n");
+                current.push_str(&generate_enum_body(e));
+            }
+            ParsedModel::Enum(_) => {}
+        }
+    }
+
+    Ok(current)
+}
+
 /// Helper to generate documentation string with optional external docs link.
 fn generate_doc_comment(
     description: Option<&String>,
     external: Option<&ParsedExternalDocs>,
     indent: &str,
 ) -> String {
-    let mut code = String::new();
-    if let Some(desc) = description {
-        for line in desc.lines() {
-            code.push_str(&format!("{}/// {}\n", indent, line));
-        }
-    }
+    let mut code = description
+        .map(|desc| crate::docstrings::emit::format_outer_doc(desc, indent))
+        .unwrap_or_default();
 
     if let Some(ext) = external {
         if !code.is_empty() {
             code.push_str(&format!("{}///\n", indent));
         }
         let desc = ext.description.as_deref().unwrap_or("See also");
-        code.push_str(&format!("{}/// {}: <{}>\n", indent, desc, ext.url));
+        code.push_str(&crate::docstrings::emit::format_outer_doc(
+            &format!("{}: <{}>", desc, ext.url),
+            indent,
+        ));
     }
     code
 }
@@ -245,9 +322,7 @@ fn generate_enum_body(en: &ParsedEnum) -> String {
 
     for variant in &en.variants {
         if let Some(desc) = &variant.description {
-            for line in desc.lines() {
-                code.push_str(&format!("    /// {}\n", line));
-            }
+            code.push_str(&crate::docstrings::emit::format_outer_doc(desc, "    "));
         }
 
         if variant.is_deprecated {
@@ -691,5 +766,93 @@ mod tests {
         assert!(multi_code.contains("UnitVar,"));
 
         assert!(make_record_field("//", "", false, 0).is_err());
+    }
+
+    #[test]
+    fn test_update_model_file_diffs_and_patches_existing_and_appends_new() {
+        let target_user = ParsedStruct {
+            name: "User".into(),
+            description: Some("Updated user".into()),
+            rename: Some("UserDto".into()),
+            rename_all: None,
+            is_deprecated: false,
+            deny_unknown_fields: false,
+            external_docs: None,
+            fields: vec![
+                field("id", "i64"),
+                field("email", "String"),
+                ParsedField {
+                    name: "user_name".into(),
+                    ty: "String".into(),
+                    description: None,
+                    rename: Some("userName".into()),
+                    is_skipped: false,
+                    is_read_only: false,
+                    is_write_only: false,
+                    is_deprecated: false,
+                    external_docs: None,
+                },
+            ],
+        };
+        let new_tag = ParsedStruct {
+            name: "Tag".into(),
+            description: None,
+            rename: None,
+            rename_all: None,
+            is_deprecated: false,
+            deny_unknown_fields: false,
+            external_docs: None,
+            fields: vec![field("label", "String")],
+        };
+        let status_enum = ParsedEnum {
+            name: "Status".into(),
+            description: None,
+            rename: None,
+            rename_all: None,
+            tag: None,
+            untagged: false,
+            is_deprecated: false,
+            external_docs: None,
+            variants: vec![ParsedVariant {
+                name: "Active".into(),
+                ty: None,
+                description: None,
+                rename: None,
+                aliases: None,
+                is_deprecated: false,
+            }],
+            discriminator_mapping: None,
+            discriminator_default_mapping: None,
+        };
+
+        // 1. Empty source delegates to generate_dtos
+        let from_empty =
+            update_model_file("", &[ParsedModel::Struct(target_user.clone())]).expect("from empty");
+        assert!(from_empty.contains("pub struct User"));
+
+        // 2. Existing source with missing field (`email`), type mismatch (`id: i32` -> `i64`),
+        // renamed field (`userName` -> `user_name`), existing enum, and new struct + enum
+        let existing = "pub struct User {\n    pub id: i32,\n    pub userName: String,\n}\npub enum ExistingEnum {\n    A,\n}";
+        let patched = update_model_file(
+            existing,
+            &[
+                ParsedModel::Struct(target_user),
+                ParsedModel::Struct(new_tag),
+                ParsedModel::Enum(status_enum.clone()),
+                ParsedModel::Enum(ParsedEnum {
+                    name: "ExistingEnum".into(),
+                    ..status_enum
+                }),
+            ],
+        )
+        .expect("patch existing");
+
+        assert!(patched.contains("use serde::{Deserialize, Serialize};"));
+        assert!(patched.contains("use utoipa::ToSchema;"));
+        assert!(patched.contains("#[serde(rename = \"UserDto\")]"));
+        assert!(patched.contains("pub id: i64"));
+        assert!(patched.contains("pub email: String"));
+        assert!(patched.contains("pub struct Tag"));
+        assert!(patched.contains("pub enum Status"));
     }
 }

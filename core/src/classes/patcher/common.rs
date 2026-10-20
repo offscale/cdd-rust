@@ -55,7 +55,7 @@ mod tests {
     use ra_ap_syntax::{ast, AstNode, SourceFile};
 
     fn parse_record_list(code: &str) -> ast::RecordFieldList {
-        let parse = std::mem::ManuallyDrop::new(SourceFile::parse(code, Edition::Edition2021));
+        let parse = SourceFile::parse(code, Edition::Edition2021);
         let file = parse.tree();
         file.syntax()
             .descendants()
@@ -66,7 +66,7 @@ mod tests {
     #[test]
     fn test_find_struct_success_and_error() {
         let code = "struct User { id: i32 }";
-        let parse = std::mem::ManuallyDrop::new(SourceFile::parse(code, Edition::Edition2021));
+        let parse = SourceFile::parse(code, Edition::Edition2021);
         let file = parse.tree();
         let found = find_struct(&file, "User").expect("Failed to find struct");
         assert_eq!(found.name().expect("Failed to name").text(), "User");
@@ -108,5 +108,17 @@ mod tests {
         let root = list.syntax().ancestors().last().expect("root");
         let first_tok = root.first_token().expect("first token");
         assert!(!check_needs_comma(&first_tok));
+    }
+
+    #[test]
+    fn test_repeated_cst_parse_drops_cleanly() {
+        for idx in 0..64 {
+            let code = format!("struct Item{idx} {{\n    pub id: u64,\n}}");
+            let parse = SourceFile::parse(&code, Edition::Edition2021);
+            let file = parse.tree();
+            let target = format!("Item{idx}");
+            let found = find_struct(&file, &target).expect("struct must exist");
+            assert_eq!(found.name().expect("struct name").text(), target);
+        }
     }
 }

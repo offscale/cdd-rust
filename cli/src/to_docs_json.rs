@@ -8,7 +8,7 @@
 
 use crate::from_openapi::read_spec_source;
 use cdd_core::error::{AppError, AppResult};
-use cdd_core::functions::emit::update_handler_module;
+use cdd_core::functions::emit::{generate_function, generate_query_struct};
 use cdd_core::openapi::parse::document::parse_openapi_document;
 use cdd_core::openapi::parse::models::{ParsedRoute, RouteKind};
 use cdd_core::strategies::{ActixStrategy, AxumStrategy, BackendStrategy, ReqwestStrategy};
@@ -98,8 +98,8 @@ pub fn run_to_docs_json(args: &ToDocsJsonArgs) -> AppResult<()> {
     Ok(())
 }
 
-/// Splits a generated handler module produced by `update_handler_module` into
-/// `(imports, wrapper_start, body_code, wrapper_end)` while honoring `no_imports` and `no_wrapping`.
+/// Builds structured [`CodeComponents`] (`imports`, `wrapper_start`, `code`, `wrapper_end`)
+/// for a route using `generate_query_struct` and `generate_function`.
 fn build_strategy_snippet(
     route: &ParsedRoute,
     strategy: &impl BackendStrategy,
@@ -108,22 +108,13 @@ fn build_strategy_snippet(
     no_wrapping: bool,
 ) -> AppResult<CodeComponents> {
     let raw_imports = strategy.handler_imports().trim().to_string();
-    let full_module = update_handler_module("", std::slice::from_ref(route), strategy)?;
+    let mut handler_parts = Vec::new();
+    if let Some(q) = generate_query_struct(route) {
+        handler_parts.push(q.code.trim().to_string());
+    }
+    handler_parts.push(generate_function(route, strategy)?.trim().to_string());
+    let handler_part = handler_parts.join("\n\n");
 
-    // Strip the test module if one was appended by `update_handler_module`
-    let without_tests = full_module
-        .split("#[cfg(test)]")
-        .next()
-        .unwrap_or(&full_module)
-        .trim();
-
-    // Strip imports prefix
-    let handler_part = without_tests
-        .strip_prefix(&raw_imports)
-        .unwrap_or(without_tests)
-        .trim();
-
-    // Split function signature line (`pub async fn ... {`) from inner body and closing `}`
     let open_brace = handler_part.find('{').unwrap_or(0);
     let sig_wrapper = handler_part[..=open_brace].trim().to_string();
     let after_brace = &handler_part[open_brace + 1..];

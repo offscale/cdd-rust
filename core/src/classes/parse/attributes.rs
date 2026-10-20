@@ -111,10 +111,7 @@ fn extract_assigned_string_literal(tokens: &[SyntaxToken], key_idx: usize) -> Op
     let eq_tok = tokens.get(key_idx + 1)?;
     let val_tok = tokens.get(key_idx + 2)?;
     if eq_tok.kind() == SyntaxKind::EQ && val_tok.kind() == SyntaxKind::STRING {
-        let raw = val_tok.text();
-        if raw.len() >= 2 && raw.starts_with('"') && raw.ends_with('"') {
-            return Some(raw[1..raw.len() - 1].to_string());
-        }
+        return Some(val_tok.text().trim_matches('"').to_string());
     }
     None
 }
@@ -126,7 +123,7 @@ mod tests {
     use ra_ap_syntax::{ast, AstNode, SourceFile};
 
     fn parse_first_struct(code: &str) -> ast::Struct {
-        let parse = std::mem::ManuallyDrop::new(SourceFile::parse(code, Edition::Edition2021));
+        let parse = SourceFile::parse(code, Edition::Edition2021);
         let file = parse.tree();
         file.syntax()
             .descendants()
@@ -135,7 +132,7 @@ mod tests {
     }
 
     fn parse_first_enum(code: &str) -> ast::Enum {
-        let parse = std::mem::ManuallyDrop::new(SourceFile::parse(code, Edition::Edition2021));
+        let parse = SourceFile::parse(code, Edition::Edition2021);
         let file = parse.tree();
         file.syntax()
             .descendants()

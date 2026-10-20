@@ -27,7 +27,7 @@ use std::collections::BTreeMap;
 /// # Errors
 /// Returns [`crate::error::AppError`] if AST parsing fails critically.
 pub fn extract_routes_from_reqwest_functions(code: &str) -> AppResult<Vec<ParsedRoute>> {
-    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(code, Edition::Edition2021));
+    let parse = SourceFile::parse(code, Edition::Edition2021);
     let mut routes = Vec::new();
 
     for node in parse.tree().syntax().descendants() {

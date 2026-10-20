@@ -4,16 +4,16 @@
 
 use crate::error::ServerError;
 use crate::models::handlers::store::OrderIdParam;
+use crate::models::{Order, OrderStatus};
 use actix_web::{web, HttpResponse};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-/// Thread-safe in-memory store for orders and status inventory counts.
+/// Thread-safe in-memory store for [`Order`] entities and status inventory counts.
 #[derive(Default)]
 pub struct OrderStore {
-    /// Mutex-protected map from order ID to JSON representation.
-    pub orders: Mutex<HashMap<i64, Value>>,
+    /// Mutex-protected map from order ID to strongly-typed [`Order`].
+    pub orders: Mutex<HashMap<i64, Order>>,
 }
 
 /// Returns pet inventories aggregated by status (`GET /store/inventory`).
@@ -37,11 +37,11 @@ pub async fn get_inventory(
             .map_err(|_| ServerError::sync_error("OrderStore lock poisoned"))?;
         for order in orders.values() {
             let status = order
-                .get("status")
-                .and_then(|v| v.as_str())
-                .unwrap_or("placed")
+                .status
+                .unwrap_or(OrderStatus::Placed)
+                .as_str()
                 .to_string();
-            let qty = order.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1);
+            let qty = i64::from(order.quantity.unwrap_or(1));
             *counts.entry(status).or_insert(0) += qty;
         }
     }
@@ -51,22 +51,26 @@ pub async fn get_inventory(
 /// Places a new pet order (`POST /store/order`).
 ///
 /// # Arguments
-/// * `body` - Optional JSON order payload.
+/// * `body` - Optional strongly-typed [`Order`] JSON payload.
 /// * `store` - Optional shared [`OrderStore`] state.
 ///
 /// # Returns
-/// * `200 OK` with the stored order JSON.
+/// * `200 OK` with the stored [`Order`] JSON.
 ///
 /// # Errors
 /// * Returns [`ServerError`] wrapping [`cdd_core::error::AppError::SyncError`] if the internal mutex is poisoned.
 pub async fn place_order(
-    body: Option<web::Json<Value>>,
+    body: Option<web::Json<Order>>,
     store: Option<web::Data<OrderStore>>,
 ) -> Result<HttpResponse, ServerError> {
-    let payload = body
-        .map(|b| b.into_inner())
-        .unwrap_or_else(|| serde_json::json!({"id": 1, "status": "placed", "quantity": 1}));
-    let id = payload.get("id").and_then(|v| v.as_i64()).unwrap_or(1);
+    let mut payload = body.map(|b| b.into_inner()).unwrap_or_else(|| Order {
+        id: Some(1),
+        status: Some(OrderStatus::Placed),
+        quantity: Some(1),
+        ..Default::default()
+    });
+    let id = payload.id.unwrap_or(1);
+    payload.id = Some(id);
 
     if let Some(store) = store {
         let mut orders = store
@@ -82,22 +86,19 @@ pub async fn place_order(
 /// Retrieves a purchase order by its ID (`GET /store/order/{orderId}`).
 ///
 /// # Arguments
-/// * `order_id` - Path parameter specifying the order's numeric ID.
+/// * `order_id` - Typed [`OrderIdParam`] path parameter specifying the order's numeric ID.
 /// * `store` - Optional shared [`OrderStore`] state.
 ///
 /// # Returns
-/// * `200 OK` with the order JSON if found, or `404 Not Found` if missing in a configured store.
+/// * `200 OK` with the [`Order`] JSON if found, or `404 Not Found` if missing in a configured store.
 ///
 /// # Errors
 /// * Returns [`ServerError`] wrapping [`cdd_core::error::AppError::SyncError`] if the internal mutex is poisoned.
 pub async fn get_order_by_id(
-    order_id: web::Path<i64>,
+    order_id: web::Path<OrderIdParam>,
     store: Option<web::Data<OrderStore>>,
 ) -> Result<HttpResponse, ServerError> {
-    let id = OrderIdParam {
-        order_id: order_id.into_inner(),
-    }
-    .order_id;
+    let id = order_id.into_inner().order_id;
     if let Some(store) = store {
         let orders = store
             .orders
@@ -108,13 +109,17 @@ pub async fn get_order_by_id(
         }
         return Ok(HttpResponse::NotFound().finish());
     }
-    Ok(HttpResponse::Ok().json(serde_json::json!({"id": id, "status": "placed"})))
+    Ok(HttpResponse::Ok().json(Order {
+        id: Some(id),
+        status: Some(OrderStatus::Placed),
+        ..Default::default()
+    }))
 }
 
 /// Deletes a purchase order by its ID (`DELETE /store/order/{orderId}`).
 ///
 /// # Arguments
-/// * `order_id` - Path parameter specifying the order's numeric ID.
+/// * `order_id` - Typed [`OrderIdParam`] path parameter specifying the order's numeric ID.
 /// * `store` - Optional shared [`OrderStore`] state.
 ///
 /// # Returns
@@ -123,13 +128,10 @@ pub async fn get_order_by_id(
 /// # Errors
 /// * Returns [`ServerError`] wrapping [`cdd_core::error::AppError::SyncError`] if the internal mutex is poisoned.
 pub async fn delete_order(
-    order_id: web::Path<i64>,
+    order_id: web::Path<OrderIdParam>,
     store: Option<web::Data<OrderStore>>,
 ) -> Result<HttpResponse, ServerError> {
-    let id = OrderIdParam {
-        order_id: order_id.into_inner(),
-    }
-    .order_id;
+    let id = order_id.into_inner().order_id;
     if let Some(store) = store {
         let mut orders = store
             .orders
@@ -147,6 +149,7 @@ pub async fn delete_order(
 mod tests {
     use super::*;
     use actix_web::{test, App};
+    use serde_json::Value;
 
     #[actix_web::test]
     async fn test_store_handlers_stateful_and_stateless() {

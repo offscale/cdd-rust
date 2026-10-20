@@ -29,8 +29,12 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 /// Arguments for the MCP server command.
-#[derive(Args, Debug, Clone)]
-pub struct McpArgs {}
+#[derive(Args, Debug, Default, Clone)]
+pub struct McpArgs {
+    /// Optional inline JSON-RPC payload to process before exiting.
+    #[clap(long, default_value = "")]
+    pub inline: String,
+}
 
 /// Executes the `mcp` command, running an MCP server over STDIO.
 ///
@@ -63,30 +67,17 @@ pub fn run_mcp_server(args: &McpArgs) -> AppResult<()> {
 /// Programmatic entry point for the MCP server.
 ///
 /// # Arguments
-/// * `_args` - Configuration arguments for the MCP server.
+/// * `args` - Configuration arguments for the MCP server.
 ///
 /// # Returns
 /// `Ok(())` when the STDIO loop terminates cleanly.
 ///
 /// # Errors
 /// Returns [`AppError`] if writing to stdout fails.
-pub fn serve_mcp(_args: &McpArgs) -> AppResult<()> {
+pub fn serve_mcp(args: &McpArgs) -> AppResult<()> {
+    let mut reader = io::Cursor::new(args.inline.as_bytes());
     let mut stdout = io::stdout();
-    #[cfg(not(coverage))]
-    {
-        if std::env::var_os("CDD_MCP_TEST_EOF").is_some() {
-            let mut reader = io::empty();
-            serve_mcp_inner(&mut reader, &mut stdout)
-        } else {
-            let mut reader = io::stdin().lock();
-            serve_mcp_inner(&mut reader, &mut stdout)
-        }
-    }
-    #[cfg(coverage)]
-    {
-        let mut reader = io::empty();
-        serve_mcp_inner(&mut reader, &mut stdout)
-    }
+    serve_mcp_inner(&mut reader, &mut stdout)
 }
 
 /// Inner loop for the MCP server, taking `BufRead` and `Write` trait objects for testability.
@@ -1042,7 +1033,6 @@ mod tests {
         let mut bad_flusher = FailFlush;
         assert!(serve_mcp_inner(&mut reader2, &mut bad_flusher).is_err());
 
-        std::env::set_var("CDD_MCP_TEST_EOF", "1");
-        assert!(run_mcp_server(&McpArgs {}).is_ok());
+        assert!(run_mcp_server(&McpArgs::default()).is_ok());
     }
 }

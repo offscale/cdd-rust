@@ -114,7 +114,7 @@ pub fn run_scaffold(args: &ScaffoldArgs, strategy: &impl BackendStrategy) -> App
             module_routes.len()
         );
 
-        let existing_content = if file_path.exists() {
+        let existing_content = if !args.force && file_path.exists() {
             fs::read_to_string(&file_path)?
         } else {
             String::new()
@@ -138,7 +138,7 @@ pub fn run_scaffold(args: &ScaffoldArgs, strategy: &impl BackendStrategy) -> App
             }
         }
 
-        let mut config_source = if config_path.exists() {
+        let mut config_source = if !args.force && config_path.exists() {
             fs::read_to_string(config_path)?
         } else {
             String::new()
@@ -277,6 +277,15 @@ paths:
         // Count occurrences of registration
         let count = config_code_2.matches("handlers::users::get_user").count();
         assert_eq!(count, 1, "Route registration should be idempotent");
+
+        // 6. Force overwrite check (`force: true` replaces custom comments/code)
+        fs::write(&users_file, "// stale custom marker\n").expect("write stale");
+        let mut force_args = args.clone();
+        force_args.force = true;
+        run_scaffold(&force_args, &strategy).expect("Failed to force scaffold");
+        let forced_users = fs::read_to_string(&users_file).expect("read forced");
+        assert!(!forced_users.contains("stale custom marker"));
+        assert!(forced_users.contains("pub async fn get_user("));
     }
 
     #[test]

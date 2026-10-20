@@ -17,7 +17,7 @@ use std::collections::HashSet;
 
 /// Represents a generated query parameter struct definition.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct GeneratedQueryStruct {
+pub struct GeneratedQueryStruct {
     /// The Rust type name of the query struct.
     pub name: String,
     /// The Rust source code defining the struct.
@@ -25,7 +25,13 @@ pub(crate) struct GeneratedQueryStruct {
 }
 
 /// Generates a query parameter struct definition for a route when query params are present.
-pub(crate) fn generate_query_struct(route: &ParsedRoute) -> Option<GeneratedQueryStruct> {
+///
+/// # Arguments
+/// * `route` - The parsed OpenAPI route definition.
+///
+/// # Returns
+/// * `Some(GeneratedQueryStruct)` when query parameters exist, or `None` otherwise.
+pub fn generate_query_struct(route: &ParsedRoute) -> Option<GeneratedQueryStruct> {
     let mut params: Vec<_> = route
         .params
         .iter()
@@ -54,19 +60,15 @@ pub(crate) fn generate_query_struct(route: &ParsedRoute) -> Option<GeneratedQuer
         let field_name = dedupe_field_name(base_name, &mut used_names);
         let needs_rename = field_name != param.name.as_str();
 
-        if let Some(desc) = param.description.as_deref() {
-            for line in desc.lines() {
-                if line.trim().is_empty() {
-                    continue;
-                }
-                code.push_str(&format!("    /// {}\n", line));
-            }
-        } else {
-            code.push_str(&format!(
-                "    /// Query parameter `{}`.\n",
-                param.name.as_str()
-            ));
-        }
+        let doc_text = param
+            .description
+            .as_deref()
+            .filter(|d| !d.trim().is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| format!("Query parameter `{}`.", param.name.as_str()));
+        code.push_str(&crate::docstrings::emit::format_outer_doc(
+            &doc_text, "    ",
+        ));
         if needs_rename {
             code.push_str(&format!(
                 "    #[serde(rename = \"{}\")]\n",
@@ -148,36 +150,44 @@ fn build_handler_docs(route: &ParsedRoute) -> String {
     let mut docs = String::new();
 
     if let Some(summary) = &route.summary {
-        docs.push_str(&format!("/// {}\n", summary));
+        docs.push_str(&crate::docstrings::emit::format_outer_doc(summary, ""));
     }
     if let Some(description) = &route.description {
         if !docs.is_empty() {
             docs.push_str("///\n");
         }
-        for line in description.lines() {
-            docs.push_str(&format!("/// {}\n", line));
-        }
+        docs.push_str(&crate::docstrings::emit::format_outer_doc(description, ""));
     }
     if let Some(ext) = &route.external_docs {
         if !docs.is_empty() {
             docs.push_str("///\n");
         }
         let label = ext.description.as_deref().unwrap_or("See also");
-        docs.push_str(&format!("/// {}: <{}>\n", label, ext.url));
+        docs.push_str(&crate::docstrings::emit::format_outer_doc(
+            &format!("{}: <{}>", label, ext.url),
+            "",
+        ));
     }
 
     if docs.is_empty() {
-        docs.push_str(&format!("/// Handler for `{}`.\n", route.handler_name));
+        docs.push_str(&crate::docstrings::emit::format_outer_doc(
+            &format!("Handler for `{}`.", route.handler_name),
+            "",
+        ));
     }
 
     docs
 }
 
 /// Generates a single async handler function string.
-pub(crate) fn generate_function(
-    route: &ParsedRoute,
-    strategy: &dyn BackendStrategy,
-) -> AppResult<String> {
+///
+/// # Arguments
+/// * `route` - The parsed OpenAPI route definition.
+/// * `strategy` - Backend code generation strategy.
+///
+/// # Returns
+/// * `AppResult<String>` containing the generated handler function.
+pub fn generate_function(route: &ParsedRoute, strategy: &dyn BackendStrategy) -> AppResult<String> {
     let mut args = Vec::new();
 
     // 1. Path Parameters
@@ -1431,7 +1441,7 @@ mod tests {
             update_handler_module("", std::slice::from_ref(&route), &McpServerStrategy)
                 .expect("McpServerStrategy module"),
         ] {
-            let parse = std::mem::ManuallyDrop::new(SourceFile::parse(&code, Edition::Edition2021));
+            let parse = SourceFile::parse(&code, Edition::Edition2021);
             assert!(
                 parse.errors().is_empty(),
                 "Generated invalid Rust AST:\n{}\nErrors: {:?}",

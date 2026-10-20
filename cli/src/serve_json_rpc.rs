@@ -8,9 +8,7 @@
 
 use crate::from_openapi::FromOpenApiSubcommand;
 use crate::mcp::dispatch_tool_command;
-use actix_web::{web, HttpResponse, Responder};
-#[cfg(not(coverage))]
-use actix_web::{App, HttpServer};
+use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use cdd_core::error::{AppError, AppResult};
 use clap::Args;
 use serde::{Deserialize, Serialize};
@@ -55,7 +53,10 @@ struct JsonRpcError {
     message: String,
 }
 
-async fn handle_rpc(body: String) -> impl Responder {
+async fn handle_rpc(
+    body: String,
+    shutdown_notify: Option<web::Data<std::sync::Arc<tokio::sync::Notify>>>,
+) -> impl Responder {
     let req: JsonRpcRequest = match serde_json::from_str(&body) {
         Ok(r) => r,
         Err(e) => {
@@ -94,6 +95,17 @@ async fn handle_rpc(body: String) -> impl Responder {
             error: None,
             id,
         },
+        "shutdown" => {
+            shutdown_notify
+                .iter()
+                .for_each(|notify| notify.notify_one());
+            JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                result: Some(json!({ "status": "shutting_down" })),
+                error: None,
+                id,
+            }
+        }
         "to_openapi" => match dispatch_tool_command("to_openapi", &params, None) {
             Ok(_) => JsonRpcResponse {
                 jsonrpc: "2.0".to_string(),
@@ -272,18 +284,25 @@ pub fn serve_json_rpc(config: &ServeJsonRpcConfig) -> AppResult<()> {
     println!("Starting JSON-RPC server on http://{}", bind_addr);
 
     let listener = std::net::TcpListener::bind(&bind_addr)?;
-    #[cfg(not(coverage))]
-    if std::env::var_os("CDD_MCP_TEST_EOF").is_none() {
-        let sys = actix_web::rt::System::new();
-        sys.block_on(async move {
-            HttpServer::new(|| App::new().configure(configure_rpc_app))
-                .listen(listener)?
-                .run()
-                .await
-        })?;
-    }
-    #[cfg(coverage)]
-    let _ = listener;
+    let sys = actix_web::rt::System::new();
+    sys.block_on(async move {
+        let notify = std::sync::Arc::new(tokio::sync::Notify::new());
+        let notify_data = web::Data::new(notify.clone());
+        let server = HttpServer::new(move || {
+            App::new()
+                .app_data(notify_data.clone())
+                .configure(configure_rpc_app)
+        })
+        .workers(1)
+        .listen(listener)?
+        .run();
+        let handle = server.handle();
+        actix_web::rt::spawn(async move {
+            notify.notified().await;
+            std::mem::drop(handle.stop(false));
+        });
+        server.await
+    })?;
 
     Ok(())
 }
@@ -539,11 +558,30 @@ mod tests {
         };
         assert!(run_serve_json_rpc(&args).is_err());
 
-        std::env::set_var("CDD_MCP_TEST_EOF", "1");
+        let probe = std::net::TcpListener::bind("127.0.0.1:0").expect("ephemeral port");
+        let port = probe.local_addr().expect("local addr").port();
+        drop(probe);
+
+        let client_thread = std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            let body = r#"{"jsonrpc":"2.0","method":"shutdown","id":1}"#;
+            let req = format!(
+                "POST / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).expect("connect");
+            stream.write_all(req.as_bytes()).expect("write request");
+            let mut resp = String::new();
+            let _ = stream.read_to_string(&mut resp);
+            assert!(resp.contains("shutting_down"));
+        });
+
         let ok_args = ServeJsonRpcArgs {
-            port: 0,
+            port,
             listen: "127.0.0.1".to_string(),
         };
         assert!(run_serve_json_rpc(&ok_args).is_ok());
+        client_thread.join().expect("client thread");
     }
 }

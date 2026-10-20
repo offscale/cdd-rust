@@ -61,17 +61,16 @@ pub(crate) fn parse_openapi_routes_from_value(
     // Version Validation
     if let Some(version) = &openapi.openapi {
         if !(version as &String).starts_with("3.") {
-            return Err(AppError::General(format!(
-                "Unsupported OpenAPI version: {}. Only 3.x is supported by this parser.",
-                version
-            )));
+            return Err(AppError::UnsupportedSpecVersion {
+                version: version.clone(),
+            });
         }
     } else if let Some(version) = &openapi.swagger {
         if !version.starts_with("2.") {
-            return Err(AppError::General(format!(
-                "Unsupported Swagger version: {}. Only 2.0 is supported for legacy compatibility.",
-                version
-            )));
+            return Err(AppError::InvalidSpecVersion {
+                spec: "Swagger",
+                version: version.clone(),
+            });
         }
     } else {
         return Err(AppError::General(

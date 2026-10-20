@@ -608,6 +608,8 @@ components:
       criteria:
         - condition: $statusCode == 200
           type: xpath
+        - condition: $statusCode == 200
+          type: simple
   failureActions:
     sharedFail:
       name: failGoto

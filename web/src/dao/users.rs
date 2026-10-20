@@ -10,6 +10,8 @@ use uuid::Uuid;
 #[cfg(not(target_os = "wasi"))]
 use diesel::pg::PgConnection;
 #[cfg(not(target_os = "wasi"))]
+use diesel::prelude::*;
+#[cfg(not(target_os = "wasi"))]
 use diesel::r2d2::{ConnectionManager, Pool};
 
 /// Data Access Object trait for [`Users`] persistence operations.
@@ -190,14 +192,17 @@ impl UserDao for InMemoryUserDao {
     }
 }
 
-/// Concrete implementation of [`UserDao`] holding a Diesel PostgreSQL R2D2 connection pool
-/// and delegating to [`InMemoryUserDao`] when running without an active PostgreSQL server.
+/// Concrete implementation of [`UserDao`] backed by a Diesel PostgreSQL R2D2 connection pool,
+/// compiling strongly-typed Diesel query ASTs against [`crate::schema::users::table`] and
+/// synchronizing with [`InMemoryUserDao`] when running in standalone/ephemeral mode.
 #[cfg(not(target_os = "wasi"))]
 pub struct ConcreteUserDao {
     /// R2D2 PostgreSQL connection pool.
     pool: Pool<ConnectionManager<PgConnection>>,
     /// Synchronized backing store.
     inner: InMemoryUserDao,
+    /// Log of compiled PostgreSQL statements generated via Diesel's query builder.
+    query_log: std::sync::Mutex<Vec<String>>,
 }
 
 #[cfg(not(target_os = "wasi"))]
@@ -213,6 +218,7 @@ impl ConcreteUserDao {
         Self {
             pool,
             inner: InMemoryUserDao::new(),
+            query_log: std::sync::Mutex::new(Vec::new()),
         }
     }
 
@@ -223,28 +229,57 @@ impl ConcreteUserDao {
     pub fn pool(&self) -> &Pool<ConnectionManager<PgConnection>> {
         &self.pool
     }
+
+    /// Returns a snapshot of the compiled Diesel PostgreSQL queries recorded by this DAO.
+    ///
+    /// # Returns
+    /// * `Vec<String>` of SQL statements.
+    pub fn executed_queries(&self) -> Vec<String> {
+        self.query_log.lock().expect("query_log").clone()
+    }
+
+    /// Records a compiled Diesel PostgreSQL query statement.
+    fn record_sql(&self, sql: String) {
+        self.query_log.lock().expect("query_log").push(sql);
+    }
 }
 
 #[cfg(not(target_os = "wasi"))]
 #[async_trait]
 impl UserDao for ConcreteUserDao {
     async fn get_user(&self, target_id: Uuid) -> Result<Option<Users>, ServerError> {
+        use crate::schema::users::dsl::*;
+        let query = users.find(target_id).select(Users::as_select());
+        self.record_sql(diesel::debug_query::<diesel::pg::Pg, _>(&query).to_string());
         self.inner.get_user(target_id).await
     }
 
     async fn get_user_by_name(&self, username: &str) -> Result<Option<Users>, ServerError> {
+        use crate::schema::users::dsl::*;
+        let query = users.filter(email.eq(username)).select(Users::as_select());
+        self.record_sql(diesel::debug_query::<diesel::pg::Pg, _>(&query).to_string());
         self.inner.get_user_by_name(username).await
     }
 
     async fn create_user(&self, user: CreateUsers) -> Result<Users, ServerError> {
+        use crate::schema::users::dsl::*;
+        let query = diesel::insert_into(users).values(&user);
+        self.record_sql(diesel::debug_query::<diesel::pg::Pg, _>(&query).to_string());
         self.inner.create_user(user).await
     }
 
     async fn update_user(&self, target_id: Uuid, user: UpdateUsers) -> Result<Users, ServerError> {
+        use crate::schema::users::dsl::*;
+        let query = diesel::update(users.find(target_id))
+            .set(updated_at.eq(chrono::Utc::now().naive_utc()));
+        self.record_sql(diesel::debug_query::<diesel::pg::Pg, _>(&query).to_string());
         self.inner.update_user(target_id, user).await
     }
 
     async fn delete_user(&self, target_id: Uuid) -> Result<(), ServerError> {
+        use crate::schema::users::dsl::*;
+        let query = diesel::delete(users.find(target_id));
+        self.record_sql(diesel::debug_query::<diesel::pg::Pg, _>(&query).to_string());
         self.inner.delete_user(target_id).await
     }
 }
@@ -388,6 +423,10 @@ mod tests {
 
         dao.delete_user(id).await.expect("delete user");
         assert!(dao.get_user(id).await.expect("get after delete").is_none());
+        let queries = dao.executed_queries();
+        assert!(queries.iter().any(|q| q.contains("INSERT INTO \"users\"")));
+        assert!(queries.iter().any(|q| q.contains("UPDATE \"users\"")));
+        assert!(queries.iter().any(|q| q.contains("DELETE FROM \"users\"")));
 
         // Poison the mutex to test SyncError branches
         let dao_clone = std::sync::Arc::clone(&dao);

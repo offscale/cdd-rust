@@ -13,7 +13,7 @@ use std::collections::HashSet;
 
 /// Parses the source using rust-analyzer syntax tree to find all function names.
 pub(crate) fn extract_fn_names(source: &str) -> HashSet<String> {
-    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(source, Edition::Edition2021));
+    let parse = SourceFile::parse(source, Edition::Edition2021);
     parse
         .tree()
         .syntax()
@@ -25,7 +25,7 @@ pub(crate) fn extract_fn_names(source: &str) -> HashSet<String> {
 
 /// Parses the source using rust-analyzer syntax tree to find all struct names.
 pub(crate) fn extract_struct_names(source: &str) -> HashSet<String> {
-    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(source, Edition::Edition2021));
+    let parse = SourceFile::parse(source, Edition::Edition2021);
     parse
         .tree()
         .syntax()

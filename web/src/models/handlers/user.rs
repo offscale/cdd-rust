@@ -16,15 +16,28 @@ pub struct LoginUserQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use actix_web::{test, web, App, HttpResponse};
 
-    #[test]
-    fn test_login_user_query() {
-        let q = LoginUserQuery {
-            username: "alice".to_string(),
-            password: "secret".to_string(),
-        };
-        let s = serde_json::to_string(&q).expect("must serialize");
-        let d: LoginUserQuery = serde_json::from_str(&s).expect("must deserialize");
-        assert_eq!(d, q);
+    #[actix_web::test]
+    async fn test_login_user_query_extractor() {
+        let app = test::init_service(App::new().route(
+            "/user/login",
+            web::get().to(|q: web::Query<LoginUserQuery>| async move {
+                HttpResponse::Ok().json(q.into_inner())
+            }),
+        ))
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/user/login?username=alice&password=secret")
+            .to_request();
+        let extracted: LoginUserQuery = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(
+            extracted,
+            LoginUserQuery {
+                username: "alice".to_string(),
+                password: "secret".to_string(),
+            }
+        );
     }
 }

@@ -185,6 +185,11 @@ impl BackendStrategy for AxumStrategy {
         self.server_security_extractor(requirements)
     }
 
+    fn route_registration_skeleton(&self) -> String {
+        "use axum::Router;\nuse crate::http::handlers;\n\npub fn config() -> Router {\n    Router::new()\n}\n"
+            .to_string()
+    }
+
     fn route_registration_statement(&self, route: &ParsedRoute, handler_full_path: &str) -> String {
         self.server_route_registration(route, handler_full_path)
     }

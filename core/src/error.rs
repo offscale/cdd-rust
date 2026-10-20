@@ -69,18 +69,18 @@ pub enum AppError {
     },
 
     /// Cyclic reference detected in schemas, parameters, headers, links, or path items.
-    #[display("Cycle Detected in {kind}: {target}")]
+    #[display("{kind} contains a cycle at '{target}'")]
     #[from(ignore)]
     #[error(ignore)]
     CycleDetected {
-        /// The category of OpenAPI object (e.g. "schema", "parameter", "pathItem").
+        /// The category of OpenAPI object (e.g. "Tag hierarchy", "schema").
         kind: String,
         /// The identifier or reference involved in the cycle.
         target: String,
     },
 
-    /// Unsupported OpenAPI or Swagger specification version.
-    #[display("Unsupported Specification Version: {version}")]
+    /// Unsupported OpenAPI specification version.
+    #[display("Unsupported OpenAPI version: {version}. Only 3.x is supported by this parser.")]
     #[from(ignore)]
     #[error(ignore)]
     UnsupportedSpecVersion {
@@ -173,29 +173,31 @@ pub enum AppError {
     },
 
     /// Invalid or unsupported specification version for a known standard.
-    #[display("Invalid {spec} Specification Version: {version}")]
+    #[display(
+        "Unsupported {spec} version: {version}. Only 2.0 is supported for legacy compatibility."
+    )]
     #[from(ignore)]
     #[error(ignore)]
     InvalidSpecVersion {
-        /// The specification standard name (e.g., `"OpenAPI"`, `"Arazzo"`).
+        /// The specification standard name (e.g., `"Swagger"`).
         spec: &'static str,
         /// The invalid version string encountered.
         version: String,
     },
 
     /// Duplicate identifier encountered where uniqueness is required.
-    #[display("Duplicate {kind} identifier: '{id}'")]
+    #[display("Duplicate {kind} '{id}' detected")]
     #[from(ignore)]
     #[error(ignore)]
     DuplicateIdentifier {
-        /// The kind of identifier (e.g., `"operationId"`, `"workflowId"`, `"stepId"`).
+        /// The kind of identifier (e.g., `"tag name"`, `"operationId"`).
         kind: &'static str,
         /// The duplicated identifier value.
         id: String,
     },
 
     /// Unresolved reference within a specific document or component scope.
-    #[display("Unresolved Reference '{reference}' in {context}")]
+    #[display("{context} references missing parent tag '{reference}'")]
     #[from(ignore)]
     #[error(ignore)]
     UnresolvedReference {
@@ -330,27 +332,32 @@ mod tests {
             "Reference Resolution Error for '#/components/schemas/Missing': not found"
         );
 
-        let cycle_err = AppError::CycleDetected {
-            kind: "schema".to_string(),
-            target: "Node".to_string(),
-        };
-        assert_eq!(format!("{cycle_err}"), "Cycle Detected in schema: Node");
-
-        let ver_err = AppError::UnsupportedSpecVersion {
-            version: "1.0.0".to_string(),
-        };
+        let cycle_err = crate::openapi::parse::parse_openapi_routes(
+            "openapi: 3.1.0\ninfo:\n  title: T\n  version: '1.0'\ntags:\n  - name: a\n    parent: b\n  - name: b\n    parent: a\npaths: {}\n",
+        )
+        .expect_err("tag cycle must fail");
+        assert!(matches!(cycle_err, AppError::CycleDetected { .. }));
         assert_eq!(
-            format!("{ver_err}"),
-            "Unsupported Specification Version: 1.0.0"
+            format!("{cycle_err}"),
+            "Tag hierarchy contains a cycle at 'a'"
         );
 
-        let missing_err = AppError::MissingRequiredField {
-            container: "Info".to_string(),
-            field: "title".to_string(),
-        };
+        let ver_err = crate::openapi::parse::parse_openapi_routes(
+            "openapi: 1.0.0\ninfo:\n  title: T\n  version: '1.0'\npaths: {}\n",
+        )
+        .expect_err("unsupported openapi version must fail");
+        assert!(matches!(ver_err, AppError::UnsupportedSpecVersion { .. }));
+        assert_eq!(
+            format!("{ver_err}"),
+            "Unsupported OpenAPI version: 1.0.0. Only 3.x is supported by this parser."
+        );
+
+        let missing_err = crate::arazzo::parse::parse_arazzo_document("arazzo: 1.1.0\n")
+            .expect_err("missing info must fail");
+        assert!(matches!(missing_err, AppError::MissingRequiredField { .. }));
         assert_eq!(
             format!("{missing_err}"),
-            "Missing Required Field 'title' in Info"
+            "Missing Required Field 'info' in ArazzoDocument"
         );
 
         let arazzo_val_err = AppError::ArazzoValidation {
@@ -362,9 +369,10 @@ mod tests {
             "Arazzo Validation Error at /workflows/0: empty steps"
         );
 
-        let arazzo_ver_err = AppError::UnsupportedArazzoVersion {
-            version: "2.0.0".to_string(),
-        };
+        let arazzo_ver_err = crate::arazzo::parse::parse_arazzo_document(
+            "arazzo: 2.0.0\ninfo:\n  title: T\n  version: '1.0'\nsourceDescriptions:\n  - name: s\n    url: ./a.yaml\nworkflows: []\n",
+        )
+        .expect_err("unsupported arazzo version");
         assert_eq!(
             format!("{arazzo_ver_err}"),
             "Unsupported Arazzo Specification Version: 2.0.0"
@@ -409,32 +417,39 @@ mod tests {
         };
         assert_eq!(format!("{tool_err}"), "Tool not found: unknown_tool");
 
-        let inv_spec = AppError::InvalidSpecVersion {
-            spec: "OpenAPI",
-            version: "2.9.0".to_string(),
-        };
+        let inv_spec = crate::openapi::parse::parse_openapi_routes(
+            "swagger: '1.2'\ninfo:\n  title: T\n  version: '1.0'\npaths: {}\n",
+        )
+        .expect_err("unsupported swagger version");
+        assert!(matches!(inv_spec, AppError::InvalidSpecVersion { .. }));
         assert_eq!(
             format!("{inv_spec}"),
-            "Invalid OpenAPI Specification Version: 2.9.0"
+            "Unsupported Swagger version: 1.2. Only 2.0 is supported for legacy compatibility."
         );
 
-        let dup_id = AppError::DuplicateIdentifier {
-            kind: "operationId",
-            id: "getPets".to_string(),
-        };
-        assert_eq!(
-            format!("{dup_id}"),
-            "Duplicate operationId identifier: 'getPets'"
-        );
+        let dup_id = crate::openapi::parse::parse_openapi_routes(
+            "openapi: 3.1.0\ninfo:\n  title: T\n  version: '1.0'\ntags:\n  - name: pets\n  - name: pets\npaths: {}\n",
+        )
+        .expect_err("duplicate tag must fail");
+        assert!(matches!(dup_id, AppError::DuplicateIdentifier { .. }));
+        assert_eq!(format!("{dup_id}"), "Duplicate tag name 'pets' detected");
 
-        let unres_ref = AppError::UnresolvedReference {
-            reference: "#/components/schemas/Pet".to_string(),
-            context: "paths./pets.get".to_string(),
-        };
+        let unres_ref = crate::openapi::parse::parse_openapi_routes(
+            "openapi: 3.1.0\ninfo:\n  title: T\n  version: '1.0'\ntags:\n  - name: child\n    parent: missing_parent\npaths: {}\n",
+        )
+        .expect_err("missing parent tag must fail");
+        assert!(matches!(unres_ref, AppError::UnresolvedReference { .. }));
         assert_eq!(
             format!("{unres_ref}"),
-            "Unresolved Reference '#/components/schemas/Pet' in paths./pets.get"
+            "Tag 'child' references missing parent tag 'missing_parent'"
         );
+
+        let schema_val = crate::openapi::parse::parse_openapi_routes(
+            "openapi: 3.1.0\ninfo:\n  title: T\n  version: '1.0'\n",
+        )
+        .expect_err("empty root content must fail");
+        assert!(matches!(schema_val, AppError::SchemaValidation { .. }));
+        assert!(format!("{schema_val}").contains("OpenAPI document must define at least one of"));
 
         let ast_mut = AppError::AstMutationError {
             target: "config".to_string(),

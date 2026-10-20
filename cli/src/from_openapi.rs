@@ -385,32 +385,18 @@ fn write_mod_rs(dir: &Path) -> AppResult<Vec<String>> {
     Ok(mod_names)
 }
 
-fn prepare_package_skeleton(
-    args: &GenerateArgs,
+/// Writes the `Cargo.toml` and `.github/workflows/ci.yml` skeleton files into `out_dir`.
+pub(crate) fn write_package_skeleton_files(
     out_dir: &Path,
-    extra_deps: &str,
+    no_installable_package: bool,
+    no_github_actions: bool,
+    dependencies: &str,
 ) -> AppResult<()> {
     fs::create_dir_all(out_dir)?;
 
-    if !args.no_installable_package {
+    if !no_installable_package {
         let cargo_toml_path = out_dir.join("Cargo.toml");
         if !cargo_toml_path.exists() {
-            let mut dependencies = String::from(
-                r#"tokio = { version = "1", features = ["full"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-serde_qs = "1.0"
-reqwest = { version = "0.11", features = ["json", "multipart"] }
-actix-web = "4.0"
-clap = { version = "4.0", features = ["derive"] }
-chrono = { version = "0.4", features = ["serde"] }
-utoipa = "4.2"
-uuid = { version = "1.8", features = ["serde", "v4"] }
-"#,
-            );
-
-            dependencies.push_str(extra_deps);
-
             let pkg_name = out_dir
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
@@ -431,7 +417,7 @@ edition = "2021"
         }
     }
 
-    if !args.no_github_actions {
+    if !no_github_actions {
         let gh_workflows_dir = out_dir.join(".github").join("workflows");
         fs::create_dir_all(&gh_workflows_dir)?;
         let ci_yml_path = gh_workflows_dir.join("ci.yml");
@@ -460,12 +446,40 @@ jobs:
     Ok(())
 }
 
+fn prepare_package_skeleton(
+    args: &GenerateArgs,
+    out_dir: &Path,
+    extra_deps: &str,
+) -> AppResult<()> {
+    let mut dependencies = String::from(
+        r#"tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_qs = "1.0"
+reqwest = { version = "0.11", features = ["json", "multipart"] }
+actix-web = "4.0"
+clap = { version = "4.0", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+utoipa = "4.2"
+uuid = { version = "1.8", features = ["serde", "v4"] }
+"#,
+    );
+    dependencies.push_str(extra_deps);
+    write_package_skeleton_files(
+        out_dir,
+        args.no_installable_package,
+        args.no_github_actions,
+        &dependencies,
+    )
+}
+
 fn prepare_models_and_handlers_dir(
     out_dir: &Path,
     input: &Path,
     module_subdir: &str,
-    is_http_server: bool,
+    strategy: &impl BackendStrategy,
 ) -> AppResult<(PathBuf, PathBuf, PathBuf)> {
+    let is_http_server = strategy.kind() == StrategyKind::HttpServer;
     let yaml_content = read_spec_source(input)?;
 
     let src_dir = out_dir.join("src");
@@ -477,8 +491,9 @@ fn prepare_models_and_handlers_dir(
 
     let models = cdd_core::openapi::parse::parse_openapi_spec(&yaml_content)?;
     if !models.is_empty() {
-        let rust_code = cdd_core::classes::emit::generate_dtos(&models);
         let file_path = models_dir.join("generated.rs");
+        let existing_models = fs::read_to_string(&file_path).unwrap_or_default();
+        let rust_code = cdd_core::classes::emit::update_model_file(&existing_models, &models)?;
         fs::write(&file_path, rust_code)?;
         let mod_rs = "pub mod generated;\npub use generated::*;\n";
         fs::write(models_dir.join("mod.rs"), mod_rs)?;
@@ -496,8 +511,11 @@ fn prepare_models_and_handlers_dir(
             if !updated.contains("pub mod security;") {
                 updated.push_str("pub mod security;\n\n");
             }
-            updated.push_str("use actix_web::web;\n\n");
-            updated.push_str("pub fn config(cfg: &mut web::ServiceConfig) {\n}\n");
+            updated.push_str(
+                &strategy
+                    .route_registration_skeleton()
+                    .replace("use crate::http::handlers;\n", ""),
+            );
             fs::write(&lib_rs_path, updated)?;
         }
 
@@ -550,7 +568,7 @@ fn run_generation_with_subdir(
 
     for input in inputs {
         let (src_dir, lib_rs_path, handlers_dir) =
-            prepare_models_and_handlers_dir(&out_dir, &input, module_subdir, is_http_server)?;
+            prepare_models_and_handlers_dir(&out_dir, &input, module_subdir, strategy)?;
 
         let route_config_path = is_http_server.then_some(lib_rs_path);
 

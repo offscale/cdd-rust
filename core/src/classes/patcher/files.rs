@@ -5,41 +5,73 @@
 use crate::error::AppResult;
 use ra_ap_edition::Edition;
 use ra_ap_syntax::ast::HasModuleItem;
-use ra_ap_syntax::{ast, AstNode, SourceFile};
+use ra_ap_syntax::{ast, AstNode, SourceFile, SyntaxKind};
 
 /// Adds an import to the file if it does not already exist.
+///
+/// Inspects the `ra_ap_syntax` CST for existing `use` items so comments or string literals
+/// containing the import text do not falsely suppress insertion. When no `use` items exist,
+/// inserts the new `use` item after any leading inner attributes (`#![...]`) and module-level
+/// doc comments (`//!`).
+///
+/// # Arguments
+/// * `source` - Existing Rust source code.
+/// * `import_statement` - The `use ...;` statement to inject.
+///
+/// # Returns
+/// * `AppResult<String>` containing the updated source code.
 pub fn add_import(source: &str, import_statement: &str) -> AppResult<String> {
     let clean_stmt = import_statement.trim();
-    let check_stmt = clean_stmt.trim_end_matches(';');
+    let check_stmt = clean_stmt.trim_end_matches(';').trim();
 
-    if source.contains(check_stmt) {
-        return Ok(source.into());
-    }
-
-    let parse = std::mem::ManuallyDrop::new(SourceFile::parse(source, Edition::Edition2021));
+    let parse = SourceFile::parse(source, Edition::Edition2021);
     let file = parse.tree();
 
     let mut last_use_node: Option<ra_ap_syntax::SyntaxNode> = None;
     for item in file.items() {
         if let ast::Item::Use(u) = item {
+            let existing = u.syntax().text().to_string();
+            if existing.trim().trim_end_matches(';').trim() == check_stmt {
+                return Ok(source.into());
+            }
             last_use_node = Some(u.syntax().clone());
         }
     }
 
-    let insert_pos;
-    let patch;
-
-    if let Some(node) = last_use_node {
-        insert_pos = usize::from(node.text_range().end());
-        patch = format!("\n{}", clean_stmt);
+    let (insert_pos, patch) = if let Some(node) = last_use_node {
+        (
+            usize::from(node.text_range().end()),
+            format!("\n{}", clean_stmt),
+        )
+    } else if let Some(header_end) = find_module_header_end(&file) {
+        (header_end, format!("\n{}\n", clean_stmt))
     } else {
-        insert_pos = 0;
-        patch = format!("{}\n", clean_stmt);
-    }
+        (0, format!("{}\n", clean_stmt))
+    };
 
     let mut new_source = source.to_string();
     new_source.insert_str(insert_pos, &patch);
     Ok(new_source)
+}
+
+/// Finds the byte offset after any leading inner attributes (`#![...]`) and module doc comments (`//!`).
+fn find_module_header_end(file: &SourceFile) -> Option<usize> {
+    let mut end_pos: Option<usize> = None;
+
+    for elem in file.syntax().children_with_tokens() {
+        match elem.kind() {
+            SyntaxKind::ATTR => {
+                end_pos = Some(usize::from(elem.text_range().end()));
+            }
+            SyntaxKind::COMMENT if elem.to_string().starts_with("//!") => {
+                end_pos = Some(usize::from(elem.text_range().end()));
+            }
+            SyntaxKind::WHITESPACE => {}
+            _ => break,
+        }
+    }
+
+    end_pos
 }
 
 #[cfg(test)]
@@ -62,5 +94,21 @@ mod tests {
 
         let duplicate = add_import(&res, "use foo::Bar;").expect("duplicate import");
         assert_eq!(duplicate, res);
+    }
+
+    #[test]
+    fn test_add_import_after_inner_attrs_and_module_docs_and_ignores_comments() {
+        let code = "#![deny(missing_docs)]\n//! Module docs mentioning use foo::Bar;\n// Regular comment use foo::Bar;\npub struct A;\n";
+        let res = add_import(code, "use foo::Bar;").expect("must insert after inner header");
+        let parsed = SourceFile::parse(&res, Edition::Edition2021);
+        assert!(
+            parsed.errors().is_empty(),
+            "Expected valid syntax after import insertion, got errors: {:?}\nCode:\n{}",
+            parsed.errors(),
+            res
+        );
+        assert!(res.starts_with(
+            "#![deny(missing_docs)]\n//! Module docs mentioning use foo::Bar;\nuse foo::Bar;\n"
+        ));
     }
 }

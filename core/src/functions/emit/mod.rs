@@ -12,3 +12,4 @@ mod extractors;
 mod parsing;
 
 pub use builder::update_handler_module;
+pub use extractors::{generate_function, generate_query_struct, GeneratedQueryStruct};

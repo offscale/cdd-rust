@@ -89,7 +89,7 @@ mod tests {
 }}",
             stmt
         );
-        let parse = std::mem::ManuallyDrop::new(SourceFile::parse(&wrapped, Edition::Edition2021));
+        let parse = SourceFile::parse(&wrapped, Edition::Edition2021);
         assert!(
             parse.errors().is_empty(),
             "AST errors: {:?}",

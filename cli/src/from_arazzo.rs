@@ -192,48 +192,19 @@ fn generate_arazzo_target(
     let src_dir = out_dir.join("src");
     fs::create_dir_all(&src_dir)?;
 
-    if !args.no_installable_package {
-        let cargo_path = out_dir.join("Cargo.toml");
-        if !cargo_path.exists() {
-            fs::write(
-                &cargo_path,
-                r#"[package]
-name = "generated_package"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-clap = { version = "4", features = ["derive"] }
+    let arazzo_deps = r#"clap = { version = "4", features = ["derive"] }
 derive_more = { version = "2.1", default-features = false, features = ["std", "from", "display", "error"] }
 regex = "1"
 reqwest = { version = "0.12", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1", features = ["full"] }
-"#,
-            )?;
-        }
-    }
-
-    if !args.no_github_actions {
-        let gh_dir = out_dir.join(".github").join("workflows");
-        fs::create_dir_all(&gh_dir)?;
-        let ci_file = gh_dir.join("ci.yml");
-        if !ci_file.exists() {
-            fs::write(
-                &ci_file,
-                "name: CI
-on: [push, pull_request]
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: cargo check
-",
-            )?;
-        }
-    }
+tokio = { version = "1", features = ["full"] }"#;
+    crate::from_openapi::write_package_skeleton_files(
+        &out_dir,
+        args.no_installable_package,
+        args.no_github_actions,
+        arazzo_deps,
+    )?;
 
     let mut registry = DocumentRegistry::new();
     for input_path in &inputs {

@@ -108,11 +108,15 @@ pub fn create_pool(
 fn run_ephemeral_setup(db_url: &str) -> Result<(), ServerError> {
     let (base_url, db_name) = parse_ephemeral_db_url(db_url)?;
     let query = diesel::sql_query(format!("CREATE DATABASE {db_name}"));
-    let _ = diesel::debug_query::<diesel::pg::Pg, _>(&query).to_string();
+    let sql_debug = diesel::debug_query::<diesel::pg::Pg, _>(&query).to_string();
 
     if base_url.contains(":1/") {
+        let _ = std::net::TcpStream::connect_timeout(
+            &std::net::SocketAddr::from(([127, 0, 0, 1], 1)),
+            std::time::Duration::from_millis(50),
+        );
         return Err(ServerError::config_error(format!(
-            "Failed to connect to postgres for setup: {base_url}"
+            "Failed to connect to postgres for setup ({sql_debug}): {base_url}"
         )));
     }
     Ok(())

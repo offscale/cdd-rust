@@ -70,10 +70,12 @@ pub(crate) fn validate_openapi_root(openapi: &ShimOpenApi) -> AppResult<()> {
     .into_iter()
     .any(|b| b);
     if openapi.openapi.is_some() && !has_top_level_content {
-        return Err(AppError::General(
-            "OpenAPI document must define at least one of 'components', 'paths', or 'webhooks'"
-                .into(),
-        ));
+        return Err(AppError::SchemaValidation {
+            path: "/".to_string(),
+            reason:
+                "OpenAPI document must define at least one of 'components', 'paths', or 'webhooks'"
+                    .to_string(),
+        });
     }
 
     validate_info_fields(openapi)?;
@@ -395,10 +397,10 @@ pub(crate) fn validate_tags_unique(openapi: &ShimOpenApi) -> AppResult<()> {
     let mut seen = HashSet::new();
     for tag in tags {
         if !seen.insert(tag.name.clone()) {
-            return Err(AppError::General(format!(
-                "Duplicate tag name '{}' detected",
-                tag.name
-            )));
+            return Err(AppError::DuplicateIdentifier {
+                kind: "tag name",
+                id: tag.name.clone(),
+            });
         }
     }
 
@@ -419,10 +421,10 @@ pub(crate) fn validate_tag_hierarchy(openapi: &ShimOpenApi) -> AppResult<()> {
     for tag in tags {
         if let Some(parent) = &tag.parent {
             if !parents.contains_key(parent) {
-                return Err(AppError::General(format!(
-                    "Tag '{}' references missing parent tag '{}'",
-                    tag.name, parent
-                )));
+                return Err(AppError::UnresolvedReference {
+                    reference: parent.clone(),
+                    context: format!("Tag '{}'", tag.name),
+                });
             }
         }
     }
@@ -446,10 +448,10 @@ fn validate_tag_chain(
         return Ok(());
     }
     if !visiting.insert(tag.to_string()) {
-        return Err(AppError::General(format!(
-            "Tag hierarchy contains a cycle at '{}'",
-            tag
-        )));
+        return Err(AppError::CycleDetected {
+            kind: "Tag hierarchy".to_string(),
+            target: tag.to_string(),
+        });
     }
 
     if let Some(Some(parent)) = parents.get(tag) {

@@ -8,11 +8,12 @@
 
 use crate::arazzo::models::{
     ActionOrReusable, ActionTarget, ArazzoDocument, ArazzoInfo, ArazzoParamLocation,
-    ArazzoParameter, ArazzoVersion, Criterion, CriterionType, FailureAction, FailureActionType,
-    ParameterOrReusable, ParameterValue, ParsedSchema, SourceDescription, SourceDescriptionType,
-    StepTarget, SuccessAction, SuccessActionType, Workflow, WorkflowStep,
+    ArazzoParameter, ArazzoVersion, Criterion, FailureAction, FailureActionType,
+    ParameterOrReusable, ParameterValue, ParsedSchema, RuntimeExpressionOrSelector,
+    SourceDescription, SourceDescriptionType, StepTarget, SuccessAction, SuccessActionType,
+    Workflow, WorkflowStep,
 };
-use crate::arazzo::parse::document::{parse_arazzo_document, to_pascal_case};
+use crate::arazzo::parse::document::to_pascal_case;
 use crate::classes::parse::extract_struct;
 use crate::classes::parse::models::ParsedStruct;
 use crate::error::{AppError, AppResult};
@@ -54,24 +55,6 @@ pub fn extract_arazzo_document_from_rust(
         });
     }
 
-    for line in code.lines() {
-        let trimmed = line.trim();
-        let spec_json_opt = match trimmed.strip_prefix("/// @ARAZZO_SPEC_JSON:") {
-            Some(s) => Some(s),
-            None => trimmed.strip_prefix("// @ARAZZO_SPEC_JSON:"),
-        };
-        if let Some(json_str) = spec_json_opt {
-            let mut doc = parse_arazzo_document(json_str.trim())?;
-            if let Some(t) = default_title {
-                doc.info.title = t.to_string();
-            }
-            if let Some(v) = default_version {
-                doc.info.version = v.to_string();
-            }
-            return Ok(doc);
-        }
-    }
-
     let mut arazzo_version = ArazzoVersion::V1_1_0;
     let mut self_uri: Option<String> = None;
     let mut title = default_title
@@ -94,9 +77,13 @@ pub fn extract_arazzo_document_from_rust(
         } else if let Some(s) = trimmed.strip_prefix("@ARAZZO_SELF:") {
             self_uri = Some(s.trim().to_string());
         } else if let Some(t) = trimmed.strip_prefix("@ARAZZO_TITLE:") {
-            title = t.trim().to_string();
+            if default_title.is_none() {
+                title = t.trim().to_string();
+            }
         } else if let Some(iv) = trimmed.strip_prefix("@ARAZZO_INFO_VERSION:") {
-            info_version = iv.trim().to_string();
+            if default_version.is_none() {
+                info_version = iv.trim().to_string();
+            }
         } else if let Some(sum) = trimmed.strip_prefix("@ARAZZO_SUMMARY:") {
             summary = Some(sum.trim().to_string());
         } else if let Some(desc) = trimmed.strip_prefix("@ARAZZO_DESCRIPTION:") {
@@ -179,7 +166,15 @@ pub fn extract_workflows_from_rust(code: &str) -> AppResult<Vec<Workflow>> {
     for node in tree.syntax().descendants() {
         if let Some(st) = ast::Struct::cast(node) {
             let s_name = st.name().map(|n| n.text().to_string()).unwrap_or_default();
-            let parsed_st = extract_struct(code, &s_name)?;
+            let mut parsed_st = extract_struct(code, &s_name)?;
+            if parsed_st.description.as_deref() == Some("Workflow input struct.") {
+                parsed_st.description = None;
+            }
+            for f in &mut parsed_st.fields {
+                if f.description.as_deref() == Some("Input field.") {
+                    f.description = None;
+                }
+            }
             let raw_schema = struct_to_json_schema(&parsed_st);
             struct_schemas.insert(s_name, ParsedSchema::new(raw_schema, parsed_st));
         }
@@ -214,14 +209,6 @@ fn extract_workflow_from_fn(
     }
 
     let fn_text = func.syntax().to_string();
-    for line in fn_text.lines() {
-        let trimmed = line.trim().trim_start_matches("///").trim();
-        if let Some(wf_json) = trimmed.strip_prefix("@ARAZZO_WORKFLOW_JSON:") {
-            if let Ok(wf) = serde_json::from_str::<Workflow>(wf_json.trim()) {
-                return Ok(Some(wf));
-            }
-        }
-    }
 
     let is_async = func.async_token().is_some();
     let has_wf_tag = fn_text.contains("@ARAZZO_WORKFLOW_ID:")
@@ -244,6 +231,7 @@ fn extract_workflow_from_fn(
 
     let mut summary: Option<String> = None;
     let mut depends_on = Vec::new();
+    let mut outputs = IndexMap::new();
     for line in fn_text.lines() {
         if line.contains("fn ") {
             break;
@@ -253,9 +241,19 @@ fn extract_workflow_from_fn(
             workflow_id = id.trim().to_string();
         } else if let Some(deps) = trimmed.strip_prefix("@ARAZZO_DEPENDS_ON:") {
             depends_on = split_csv_non_empty(deps);
+        } else if let Some((k, re)) = trimmed
+            .strip_prefix("@ARAZZO_WORKFLOW_OUTPUT:")
+            .and_then(|s| s.split_once('='))
+            .and_then(|(k, v)| RuntimeExpression::parse(v.trim()).ok().map(|re| (k, re)))
+        {
+            outputs.insert(
+                k.trim().to_string(),
+                RuntimeExpressionOrSelector::Expression(re),
+            );
         } else if !trimmed.starts_with('@')
             && !trimmed.starts_with('#')
             && !trimmed.is_empty()
+            && !trimmed.starts_with("Executes workflow `")
             && summary.is_none()
         {
             summary = Some(trimmed.to_string());
@@ -263,7 +261,10 @@ fn extract_workflow_from_fn(
     }
 
     let input_struct_name = format!("{}Inputs", to_pascal_case(&workflow_id));
-    let inputs = struct_schemas.get(&input_struct_name).cloned();
+    let inputs = struct_schemas
+        .get(&input_struct_name)
+        .filter(|s| !s.input_struct.fields.is_empty())
+        .cloned();
 
     let steps = extract_steps_from_fn_body(&fn_text, &workflow_id)?;
     if steps.is_empty() {
@@ -279,7 +280,7 @@ fn extract_workflow_from_fn(
         steps,
         success_actions: Vec::new(),
         failure_actions: Vec::new(),
-        outputs: IndexMap::new(),
+        outputs,
         parameters: Vec::new(),
         extensions: BTreeMap::new(),
     }))
@@ -294,6 +295,7 @@ fn extract_steps_from_fn_body(fn_text: &str, workflow_id: &str) -> AppResult<Vec
     let mut current_on_failure: Vec<ActionOrReusable<FailureAction>> = Vec::new();
     let mut current_timeout: Option<u64> = None;
     let mut current_params: Vec<ParameterOrReusable> = Vec::new();
+    let mut current_outputs: IndexMap<String, RuntimeExpressionOrSelector> = IndexMap::new();
     let mut current_target: Option<StepTarget> = None;
 
     let flush_step = |steps: &mut Vec<WorkflowStep>,
@@ -304,6 +306,7 @@ fn extract_steps_from_fn_body(fn_text: &str, workflow_id: &str) -> AppResult<Vec
                       criteria: Vec<Criterion>,
                       on_success: Vec<ActionOrReusable<SuccessAction>>,
                       on_failure: Vec<ActionOrReusable<FailureAction>>,
+                      outputs: IndexMap<String, RuntimeExpressionOrSelector>,
                       timeout: Option<u64>| {
         if let Some(id) = step_id {
             steps.push(WorkflowStep {
@@ -315,7 +318,7 @@ fn extract_steps_from_fn_body(fn_text: &str, workflow_id: &str) -> AppResult<Vec
                 success_criteria: criteria,
                 on_success,
                 on_failure,
-                outputs: IndexMap::new(),
+                outputs,
                 timeout,
                 correlation_id: None,
                 action: None,
@@ -337,9 +340,50 @@ fn extract_steps_from_fn_body(fn_text: &str, workflow_id: &str) -> AppResult<Vec
                 std::mem::take(&mut current_criteria),
                 std::mem::take(&mut current_on_success),
                 std::mem::take(&mut current_on_failure),
+                std::mem::take(&mut current_outputs),
                 current_timeout.take(),
             );
             current_step_id = Some(sid.trim().to_string());
+        } else if let Some(target_raw) = trimmed.strip_prefix("// @ARAZZO_STEP_TARGET:") {
+            let t = target_raw.trim();
+            if let Some(op) = t.strip_prefix("operationId=") {
+                current_target = Some(StepTarget::OperationId(op.trim().to_string()));
+            } else if let Some(p) = t.strip_prefix("operationPath=") {
+                current_target = Some(StepTarget::OperationPath(p.trim().to_string()));
+            } else if let Some(c) = t.strip_prefix("channelPath=") {
+                current_target = Some(StepTarget::ChannelPath(c.trim().to_string()));
+            } else if let Some(w) = t.strip_prefix("workflowId=") {
+                current_target = Some(StepTarget::WorkflowId(w.trim().to_string()));
+            }
+        } else if let Some(param_raw) = trimmed.strip_prefix("// @ARAZZO_STEP_PARAM:") {
+            let parts: Vec<&str> = param_raw.trim().splitn(3, '|').collect();
+            if parts.len() == 3 {
+                let loc = parts[1].trim().parse::<ArazzoParamLocation>().ok();
+                let val_str = parts[2].trim();
+                let val = if val_str.starts_with('$') {
+                    ParameterValue::Expression(RuntimeExpression::parse(val_str)?)
+                } else {
+                    ParameterValue::Literal(
+                        serde_json::from_str(val_str)
+                            .unwrap_or_else(|_| JsonValue::String(val_str.to_string())),
+                    )
+                };
+                current_params.push(ParameterOrReusable::Parameter(ArazzoParameter {
+                    name: parts[0].trim().to_string(),
+                    in_loc: loc,
+                    value: val,
+                    extensions: BTreeMap::new(),
+                }));
+            }
+        } else if let Some((k, re)) = trimmed
+            .strip_prefix("// @ARAZZO_STEP_OUTPUT:")
+            .and_then(|s| s.split_once('='))
+            .and_then(|(k, v)| RuntimeExpression::parse(v.trim()).ok().map(|re| (k, re)))
+        {
+            current_outputs.insert(
+                k.trim().to_string(),
+                RuntimeExpressionOrSelector::Expression(re),
+            );
         } else if let Some(deps) = trimmed.strip_prefix("// @ARAZZO_STEP_DEPENDS_ON:") {
             current_deps = split_csv_non_empty(deps);
         } else if let Some(crit_raw) = trimmed.strip_prefix("// @ARAZZO_CRITERION:") {
@@ -354,7 +398,7 @@ fn extract_steps_from_fn_body(fn_text: &str, workflow_id: &str) -> AppResult<Vec
             current_criteria.push(Criterion {
                 context: ctx_opt,
                 condition: cond,
-                criterion_type: Some(CriterionType::Simple),
+                criterion_type: None,
                 extensions: BTreeMap::new(),
             });
         } else if let Some(succ_raw) = trimmed.strip_prefix("// @ARAZZO_ON_SUCCESS:") {
@@ -446,6 +490,7 @@ fn extract_steps_from_fn_body(fn_text: &str, workflow_id: &str) -> AppResult<Vec
         current_criteria,
         current_on_success,
         current_on_failure,
+        current_outputs,
         current_timeout,
     );
 
@@ -552,8 +597,11 @@ fn struct_to_json_schema(s: &ParsedStruct) -> JsonValue {
         };
         let mut prop_obj = Map::new();
         prop_obj.insert("type".to_string(), JsonValue::String(json_ty.to_string()));
-        if let Some(desc) = &f.description {
-            prop_obj.insert("description".to_string(), JsonValue::String(desc.clone()));
+        if let Some(desc) = f.description.as_deref().filter(|d| *d != "Input field.") {
+            prop_obj.insert(
+                "description".to_string(),
+                JsonValue::String(desc.to_string()),
+            );
         }
         props.insert(prop_name, JsonValue::Object(prop_obj));
     }
@@ -739,15 +787,27 @@ pub struct CheckoutFlowInputs {
 /// # Heading ignored
 /// Checkout workflow orchestrator.
 /// Second summary line ignored.
-/// @ARAZZO_WORKFLOW_JSON: {invalid_json}
 /// @ARAZZO_WORKFLOW_ID: checkoutFlow
 /// @ARAZZO_DEPENDS_ON: fallback, , sync_tagged
+/// @ARAZZO_WORKFLOW_OUTPUT: orderId=$steps.chargeCard.outputs.txId
+/// @ARAZZO_WORKFLOW_OUTPUT: invalidOutput=bad_expr
 pub async fn workflow_checkout_flow(inputs: CheckoutFlowInputs) -> Result<(), String> {
     let step_fetch_cart = client::get_cart(&self.client, base_url, &client, inputs.user_id.clone(), &inputs..clone(), "active").await?;
     let step_no_parens = client_ping.await?;
     let step_anon = ().await;
     let step_not_awaited = 42;
     // @ARAZZO_STEP_ID: chargeCard
+    // @ARAZZO_STEP_TARGET: operationId=chargeCardOp
+    // @ARAZZO_STEP_TARGET: operationPath=/cards/charge
+    // @ARAZZO_STEP_TARGET: channelPath=/events/card
+    // @ARAZZO_STEP_TARGET: workflowId=subCharge
+    // @ARAZZO_STEP_TARGET: unknownTarget=ignored
+    // @ARAZZO_STEP_PARAM: amount|query|100
+    // @ARAZZO_STEP_PARAM: label|header|raw_string_val
+    // @ARAZZO_STEP_PARAM: userId|path|$inputs.user_id
+    // @ARAZZO_STEP_PARAM: malformed_param
+    // @ARAZZO_STEP_OUTPUT: txId=$response.body#/txId
+    // @ARAZZO_STEP_OUTPUT: badOut=invalid_expr
     // @ARAZZO_STEP_DEPENDS_ON: fetch_cart
     req_builder = req_builder.timeout(std::time::Duration::from_millis(2500));
     let max_attempts: u32 = 3;
@@ -829,13 +889,6 @@ pub mod nested_dup {
         assert!(
             extract_arazzo_document_from_rust("pub fn sync_helper() {}", None, None, None).is_err()
         );
-        assert!(extract_arazzo_document_from_rust(
-            "/// @ARAZZO_SPEC_JSON: {invalid}\npub fn x() {}",
-            None,
-            None,
-            None
-        )
-        .is_err());
         assert!(extract_arazzo_document_from_rust(
             "/// @ARAZZO_VERSION: 9.9.9\npub async fn workflow_x() { a().await; }",
             None,

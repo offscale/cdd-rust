@@ -47,39 +47,21 @@ pub fn emit_workflow_module(
 ) -> AppResult<String> {
     let mut out = crate::strategies::reqwest::workflows::emit_workflow_module(doc, linked_specs)?;
 
-    out.push_str(
-        "
-/// Actix-Web server workflow handler entrypoints.
-",
-    );
+    out.push_str("\n/// Actix-Web server workflow handler entrypoints.\n");
     for wf in &doc.workflows {
         let wf_snake = to_snake_case(&wf.workflow_id);
         let wf_pascal = to_pascal_case(&wf.workflow_id);
         out.push_str(&format!(
-            "/// Actix-Web server orchestrator endpoint for workflow `{}`.
-/// @ARAZZO_SERVER_WORKFLOW_ID: {}
-pub async fn handle_workflow_{}(body: actix_web::web::Json<{}Inputs>) -> actix_web::HttpResponse {{
-",
+            "/// Actix-Web server orchestrator endpoint for workflow `{}`.\n/// @ARAZZO_WORKFLOW_ID: {}\npub async fn handle_workflow_{}(body: actix_web::web::Json<{}Inputs>) -> actix_web::HttpResponse {{\n",
             wf.workflow_id, wf.workflow_id, wf_snake, wf_pascal
         ));
-        out.push_str(
-            "    let _inputs = body.into_inner();
-",
-        );
+        out.push_str("    let inputs = body.into_inner();\n");
+        out.push_str("    let client = WorkflowsClient::new(reqwest::Client::new());\n");
         out.push_str(&format!(
-            "    let outputs = {}Outputs::default();
-",
-            wf_pascal
+            "    let outputs = client.{}(inputs).await.unwrap_or_default();\n",
+            wf_snake
         ));
-        out.push_str(
-            "    actix_web::HttpResponse::Ok().json(outputs)
-",
-        );
-        out.push_str(
-            "}
-
-",
-        );
+        out.push_str("    actix_web::HttpResponse::Ok().json(outputs)\n}\n\n");
     }
 
     Ok(out)
@@ -98,30 +80,27 @@ pub async fn handle_workflow_{}(body: actix_web::web::Json<{}Inputs>) -> actix_w
 /// # Errors
 /// Returns [`crate::error::AppError`] if emission fails.
 pub fn emit_workflow_tests(doc: &ArazzoDocument, crate_name: &str) -> AppResult<String> {
+    crate::arazzo::parse::validate_arazzo_document(doc)?;
     let mut out = String::new();
-    out.push_str(
-        "#![allow(missing_docs)]
+    out.push_str("#![allow(missing_docs)]\n\n");
+    crate::strategies::reqwest::workflows::emit_arazzo_header_comments(&mut out, doc);
+    out.push_str("use actix_web::{test, App};\nuse serde::{Deserialize, Serialize};\n\n");
 
-",
-    );
-    let canonical_json =
-        serde_json::to_string(&crate::arazzo::emit::generate_arazzo_document(doc)?)?;
-    out.push_str(&format!(
-        "/// @ARAZZO_SPEC_JSON: {}
-",
-        canonical_json
-    ));
-    out.push_str(
-        "use actix_web::{test, App};
-
-",
-    );
+    let models_src = emit_workflow_models(doc, &BTreeMap::new())?;
+    for line in models_src.lines() {
+        if line.starts_with("#![") || line.starts_with("//!") || line.starts_with("use ") {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
 
     for wf in &doc.workflows {
         let wf_snake = to_snake_case(&wf.workflow_id);
+        crate::strategies::reqwest::workflows::emit_workflow_doc_annotations(&mut out, wf, "");
         out.push_str(&format!(
-            "/// End-to-end Actix-Web server integration test for workflow `{}`.\n/// @ARAZZO_WORKFLOW_ID: {}\n#[actix_rt::test]\nasync fn test_workflow_{}() {{\n",
-            wf.workflow_id, wf.workflow_id, wf_snake
+            "#[actix_rt::test]\nasync fn test_workflow_{}() {{\n",
+            wf_snake
         ));
         out.push_str(&format!(
             "    let app = test::init_service(App::new().configure({}::configure_routes)).await;\n",
@@ -129,21 +108,31 @@ pub fn emit_workflow_tests(doc: &ArazzoDocument, crate_name: &str) -> AppResult<
         ));
         for step in &wf.steps {
             let step_snake = to_snake_case(&step.step_id);
+            crate::strategies::reqwest::workflows::emit_step_doc_annotations(
+                &mut out, step, "    ",
+            );
             let (req_method, uri) = match &step.target {
                 StepTarget::OperationId(op) => ("post", format!("/{}", op)),
                 StepTarget::OperationPath(p) => ("get", p.clone()),
                 StepTarget::ChannelPath(c) => ("post", c.clone()),
                 StepTarget::WorkflowId(w) => ("post", format!("/workflows/{}", w)),
             };
+            for crit in &step.success_criteria {
+                out.push_str(&format!(
+                    "    // @ARAZZO_CRITERION: condition={}\n",
+                    crit.condition
+                ));
+            }
+            for (out_key, out_expr) in &step.outputs {
+                out.push_str(&format!(
+                    "    // @ARAZZO_STEP_OUTPUT: {}={}\n",
+                    out_key,
+                    crate::strategies::reqwest::workflows::format_expr_or_selector(out_expr)
+                ));
+            }
             out.push_str(&format!(
-                "    // @ARAZZO_STEP_ID: {}\n    let req_{} = test::TestRequest::{}().uri({:?}).to_request();\n    let resp_{} = test::call_service(&app, req_{}).await;\n    assert!(resp_{}.status().as_u16() >= 100);\n",
-                step.step_id,
-                step_snake,
-                req_method,
-                uri,
-                step_snake,
-                step_snake,
-                step_snake
+                "    let req_{0} = test::TestRequest::{1}().uri({2:?}).to_request();\n    let resp_{0} = test::call_service(&app, req_{0}).await;\n    assert!(!resp_{0}.status().is_server_error());\n",
+                step_snake, req_method, uri
             ));
         }
         out.push_str("}\n\n");

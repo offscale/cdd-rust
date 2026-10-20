@@ -98,8 +98,6 @@ def main():
             spec_file,
             "-o",
             output_dir,
-            "--target",
-            "client-reqwest",
             "--tests",
         ],
         stdout=subprocess.DEVNULL,

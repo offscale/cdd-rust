@@ -307,7 +307,7 @@ mod tests {
             test_api_call(),
             test_assertion()
         );
-        let parse = std::mem::ManuallyDrop::new(SourceFile::parse(&full, Edition::Edition2021));
+        let parse = SourceFile::parse(&full, Edition::Edition2021);
         assert!(
             parse.errors().is_empty(),
             "AST errors: {:?}",
@@ -384,8 +384,7 @@ mod tests {
         };
 
         let custom = generate_custom_test(&route, "pet_sdk");
-        let parse_custom =
-            std::mem::ManuallyDrop::new(SourceFile::parse(&custom, Edition::Edition2021));
+        let parse_custom = SourceFile::parse(&custom, Edition::Edition2021);
         assert!(
             parse_custom.errors().is_empty(),
             "AST errors: {:?}",
