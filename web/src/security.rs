@@ -302,28 +302,43 @@ pub struct HybridAuthMiddleware<S> {
     user_dao: Arc<dyn UserDao>,
 }
 
-/// Validates the extracted bearer token against mock or database credentials.
-async fn validate_request_token(
-    token_opt: Option<String>,
+/// Evaluates synchronous authentication rules before any asynchronous DAO lookup.
+fn evaluate_sync_auth(
+    enforce_auth: bool,
     is_mock_mode: bool,
-    user_dao: Arc<dyn UserDao>,
-) -> bool {
+    token_opt: Option<String>,
+) -> Result<bool, String> {
+    if !enforce_auth {
+        return Ok(true);
+    }
     let Some(token) = token_opt else {
-        return false;
+        return Ok(false);
     };
     if is_mock_mode {
-        return token == "mock-token-123" || verify_jwt(&token).is_ok();
+        return Ok(token == "mock-token-123" || verify_jwt(&token).is_ok());
     }
     let lookup_name = if let Ok(claims) = verify_jwt(&token) {
         claims.sub
     } else {
         token
     };
-    user_dao
-        .get_user_by_name(&lookup_name)
-        .await
-        .unwrap_or(None)
-        .is_some()
+    Err(lookup_name)
+}
+
+/// Validates the extracted bearer token against mock or database credentials.
+async fn validate_request_token(
+    enforce_auth: bool,
+    token_opt: Option<String>,
+    is_mock_mode: bool,
+    user_dao: Arc<dyn UserDao>,
+) -> bool {
+    match evaluate_sync_auth(enforce_auth, is_mock_mode, token_opt) {
+        Ok(decision) => decision,
+        Err(lookup_name) => {
+            let user_res = user_dao.get_user_by_name(&lookup_name).await;
+            user_res.unwrap_or(None).is_some()
+        }
+    }
 }
 
 /// Extracts the Bearer token from the `Authorization` HTTP header, if present.
@@ -368,26 +383,21 @@ where
     }
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
-        if !self.enforce_auth {
-            attach_auth_extensions(&req);
-            let fut = self.service.call(req);
-            return Box::pin(async move { Ok(fut.await?.map_into_boxed_body()) });
-        }
-
-        let service = self.service.clone();
-        let is_mock_mode = self.is_mock_mode;
-        let user_dao = self.user_dao.clone();
-        let token_opt = extract_bearer_token(&req);
+        let srv = self.service.clone();
+        let enforce = self.enforce_auth;
+        let mock = self.is_mock_mode;
+        let dao = self.user_dao.clone();
+        let token = extract_bearer_token(&req);
 
         Box::pin(async move {
-            let is_valid = validate_request_token(token_opt, is_mock_mode, user_dao).await;
+            let is_valid = validate_request_token(enforce, token, mock, dao).await;
             if !is_valid {
                 let unauthorized = unauthorized_response();
                 return Ok(req.into_response(unauthorized));
             }
             attach_auth_extensions(&req);
-            let res = service.call(req).await?.map_into_boxed_body();
-            Ok(res)
+            let res = srv.call(req).await?;
+            Ok(res.map_into_boxed_body())
         })
     }
 }
@@ -400,8 +410,7 @@ mod tests {
     use actix_web::{test, web, App};
     use uuid::Uuid;
 
-    #[actix_web::test]
-    async fn test_jwt_creation_and_verification() {
+    async fn check_jwt_creation_and_verification() {
         let token = create_jwt("john.doe@example.com").expect("must succeed with dots in sub");
         let claims = verify_jwt(&token).expect("must succeed");
         assert_eq!(claims.sub, "john.doe@example.com");
@@ -444,8 +453,7 @@ mod tests {
         assert!(!verify_password("hunter2", "short"));
     }
 
-    #[actix_web::test]
-    async fn test_auth_enforced_missing_and_valid_token() {
+    async fn check_auth_enforced_missing_and_valid_token() {
         let dao: Arc<dyn UserDao> = Arc::new(StubUserDao);
         let app = test::init_service(
             App::new()
@@ -524,8 +532,7 @@ mod tests {
         );
     }
 
-    #[actix_web::test]
-    async fn test_auth_bypassed_and_db_mode() {
+    async fn check_auth_bypassed_and_db_mode() {
         let dao: Arc<dyn UserDao> = Arc::new(StubUserDao);
         let app = test::init_service(
             App::new()
@@ -602,5 +609,12 @@ mod tests {
             .to_request();
         let resp = test::call_service(&db_app, req).await;
         assert_eq!(resp.status(), actix_web::http::StatusCode::UNAUTHORIZED);
+    }
+
+    #[actix_web::test]
+    async fn test_security_jwt_and_hybrid_auth_middleware() {
+        check_jwt_creation_and_verification().await;
+        check_auth_enforced_missing_and_valid_token().await;
+        check_auth_bypassed_and_db_mode().await;
     }
 }

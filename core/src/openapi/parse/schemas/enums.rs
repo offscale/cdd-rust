@@ -126,13 +126,21 @@ mod tests {
     #[test]
     fn test_parse_variants_inline_schema() {
         let schema = Schema::Object(ObjectBuilder::new().schema_type(Type::String).build());
-        let items = vec![RefOr::T(schema)];
+        let deprecated_schema = Schema::Object(
+            ObjectBuilder::new()
+                .schema_type(Type::Integer)
+                .deprecated(Some(Deprecated::True))
+                .build(),
+        );
+        let items = vec![RefOr::T(schema), RefOr::T(deprecated_schema)];
         let variants = parse_variants(&items, None);
-        assert_eq!(variants.len(), 1);
+        assert_eq!(variants.len(), 2);
         let v = &variants[0];
         assert_eq!(v.name, "String");
         assert_eq!(v.ty.as_deref(), Some("String"));
         assert!(v.rename.is_none());
+        assert!(!v.is_deprecated);
+        assert!(variants[1].is_deprecated);
     }
 
     #[test]
