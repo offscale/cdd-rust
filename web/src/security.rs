@@ -276,11 +276,12 @@ where
     type Future = Ready<Result<Self::Transform, Self::InitError>>;
 
     fn new_transform(&self, service: S) -> Self::Future {
+        let service = Rc::new(service);
         let enforce_auth = self.enforce_auth;
         let is_mock_mode = self.is_mock_mode;
         let user_dao = self.user_dao.clone();
         let mw = HybridAuthMiddleware {
-            service: Rc::new(service),
+            service,
             enforce_auth,
             is_mock_mode,
             user_dao,
@@ -313,7 +314,11 @@ async fn validate_request_token(
     if is_mock_mode {
         return token == "mock-token-123" || verify_jwt(&token).is_ok();
     }
-    let lookup_name = verify_jwt(&token).map(|c| c.sub).unwrap_or(token);
+    let lookup_name = if let Ok(claims) = verify_jwt(&token) {
+        claims.sub
+    } else {
+        token
+    };
     user_dao
         .get_user_by_name(&lookup_name)
         .await
@@ -337,6 +342,12 @@ fn attach_auth_extensions(req: &ServiceRequest) {
     ext.insert(PetstoreAuth::<(scopes::WritePets, scopes::ReadPets)>(
         PhantomData,
     ));
+}
+
+/// Constructs a 401 Unauthorized `HttpResponse` with a boxed body for rejected requests.
+fn unauthorized_response() -> HttpResponse<actix_web::body::BoxBody> {
+    let body = HttpResponse::Unauthorized().body("Unauthorized: Invalid token");
+    body.map_into_boxed_body()
 }
 
 impl<S, B> Service<ServiceRequest> for HybridAuthMiddleware<S>
@@ -371,9 +382,7 @@ where
         Box::pin(async move {
             let is_valid = validate_request_token(token_opt, is_mock_mode, user_dao).await;
             if !is_valid {
-                let unauthorized = HttpResponse::Unauthorized()
-                    .body("Unauthorized: Invalid token")
-                    .map_into_boxed_body();
+                let unauthorized = unauthorized_response();
                 return Ok(req.into_response(unauthorized));
             }
             attach_auth_extensions(&req);
@@ -423,6 +432,8 @@ mod tests {
             jwt_secret: String::new(),
         };
         assert!(create_jwt_with_config("user-123", &empty_cfg).is_err());
+        assert!(verify_jwt_with_config(&tok_alpha, &empty_cfg).is_err());
+        assert!(verify_jwt_with_config("cdd.short.{}", &cfg_alpha).is_err());
         assert!(verify_jwt("invalid.token.here").is_err());
         assert!(verify_jwt("cdd.no_dot_separator").is_err());
 
@@ -430,6 +441,7 @@ mod tests {
         let h = hash_password("hunter2");
         assert!(verify_password("hunter2", &h));
         assert!(!verify_password("wrong", &h));
+        assert!(!verify_password("hunter2", "short"));
     }
 
     #[actix_web::test]
@@ -572,6 +584,14 @@ mod tests {
         let req = test::TestRequest::get()
             .uri("/")
             .insert_header(("Authorization", "Bearer valid-db-token"))
+            .to_request();
+        let resp = test::call_service(&db_app, req).await;
+        assert!(resp.status().is_success());
+
+        let db_jwt = create_jwt("valid-db-token").expect("db jwt");
+        let req = test::TestRequest::get()
+            .uri("/")
+            .insert_header(("Authorization", format!("Bearer {db_jwt}")))
             .to_request();
         let resp = test::call_service(&db_app, req).await;
         assert!(resp.status().is_success());

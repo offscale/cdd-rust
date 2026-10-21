@@ -2220,6 +2220,12 @@ mod tests {
             RustType::parse("BTreeMap<String, serde_json::Value>"),
             RustType::BTreeMap(Box::new(RustType::String), Box::new(RustType::Value))
         );
+        assert!(RustType::parse("HashMap<String, i32>").is_primitive_or_known());
+        assert!(!RustType::parse("HashMap<String, CustomVal>").is_primitive_or_known());
+        assert!(!RustType::parse("HashMap<CustomKey, i32>").is_primitive_or_known());
+        assert!(RustType::parse("Option<Vec<Secret<Uuid>>>").is_primitive_or_known());
+        assert!(RustType::parse("(String, i32)").is_primitive_or_known());
+        assert!(!RustType::parse("(String, CustomItem)").is_primitive_or_known());
         assert_eq!(RustType::parse("()"), RustType::Tuple(vec![]));
         assert_eq!(
             RustType::parse("(i8, i16, i128, isize, u16, u64, u128, usize, f32, f64, DateTime, NaiveDate, NaiveDateTime, Bytes, User)"),

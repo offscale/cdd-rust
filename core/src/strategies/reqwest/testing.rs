@@ -121,7 +121,7 @@ pub fn generate_custom_test(
                 "    let {}: String = \"test_value\".to_string();\n",
                 var_name
             ));
-        } else if parsed_ty.is_integer() && !parsed_ty.is_option() {
+        } else if parsed_ty.is_integer() {
             code.push_str(&format!("    let {}: {} = 1;\n", var_name, param.ty));
         } else {
             code.push_str(&format!(

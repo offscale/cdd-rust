@@ -710,9 +710,8 @@ fn raw_media_for_first_entry(
     base_uri: Option<&Url>,
 ) -> Option<JsonValue> {
     let raw_map = raw_content.and_then(|v| v.as_object())?;
-    let key = content
-        .and_then(|map| map.keys().next())
-        .or_else(|| raw_map.keys().next())?;
+    let first_content_key = content.and_then(|map| map.keys().next());
+    let key = first_content_key.or_else(|| raw_map.keys().next())?;
     raw_media_for_type(Some(raw_map), key, components, registry, base_uri)
 }
 

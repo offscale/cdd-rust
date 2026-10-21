@@ -477,7 +477,7 @@ fn prepare_models_and_handlers_dir(
     out_dir: &Path,
     input: &Path,
     module_subdir: &str,
-    strategy: &impl BackendStrategy,
+    strategy: &dyn BackendStrategy,
 ) -> AppResult<(PathBuf, PathBuf, PathBuf)> {
     let is_http_server = strategy.kind() == StrategyKind::HttpServer;
     let yaml_content = read_spec_source(input)?;

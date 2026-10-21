@@ -18,7 +18,7 @@ pub fn register_routes(
     source: &str,
     module_name: &str,
     routes: &[ParsedRoute],
-    strategy: &impl BackendStrategy,
+    strategy: &dyn BackendStrategy,
 ) -> AppResult<String> {
     let mut new_source = source.to_string();
     let is_new_file = source.trim().is_empty();

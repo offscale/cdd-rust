@@ -825,6 +825,8 @@ pub async fn workflow_checkout_flow(inputs: CheckoutFlowInputs) -> Result<(), St
 }
 
 /// @ARAZZO_WORKFLOW_ID: sync_tagged
+/// @ARAZZO_CUSTOM_ANNOTATION: ignored
+/// Executes workflow `sync_tagged`.
 pub fn tagged_sync_workflow() {
     // @ARAZZO_STEP_ID: syncStep
 }

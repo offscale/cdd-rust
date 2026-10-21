@@ -285,7 +285,7 @@ pub fn serve_json_rpc(config: &ServeJsonRpcConfig) -> AppResult<()> {
 
     let listener = std::net::TcpListener::bind(&bind_addr)?;
     let sys = actix_web::rt::System::new();
-    sys.block_on(async move {
+    let run_res = sys.block_on(async move {
         let notify = std::sync::Arc::new(tokio::sync::Notify::new());
         let notify_data = web::Data::new(notify.clone());
         let server = HttpServer::new(move || {
@@ -302,9 +302,8 @@ pub fn serve_json_rpc(config: &ServeJsonRpcConfig) -> AppResult<()> {
             std::mem::drop(handle.stop(false));
         });
         server.await
-    })?;
-
-    Ok(())
+    });
+    run_res.map_err(Into::into)
 }
 
 #[cfg(test)]

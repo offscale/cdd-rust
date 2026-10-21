@@ -126,6 +126,12 @@ def main():
         total_docs = 0
         documented = 0
 
+        for stale_json in glob.glob("target/doc/*.json"):
+            try:
+                os.remove(stale_json)
+            except OSError:
+                pass
+
         for pkg, target_args in targets:
             res = subprocess.run(
                 [

@@ -832,11 +832,16 @@ mod tests {
 
         // 2. Existing source with missing field (`email`), type mismatch (`id: i32` -> `i64`),
         // renamed field (`userName` -> `user_name`), existing enum, and new struct + enum
-        let existing = "pub struct User {\n    pub id: i32,\n    pub userName: String,\n}\npub enum ExistingEnum {\n    A,\n}";
+        let existing = "pub struct User {\n    pub id: i32,\n    pub userName: String,\n}\npub struct UnrenamedExisting {\n    pub label: String,\n}\npub enum ExistingEnum {\n    A,\n}";
+        let unrenamed_existing = ParsedStruct {
+            name: "UnrenamedExisting".into(),
+            ..new_tag.clone()
+        };
         let patched = update_model_file(
             existing,
             &[
                 ParsedModel::Struct(target_user),
+                ParsedModel::Struct(unrenamed_existing),
                 ParsedModel::Struct(new_tag),
                 ParsedModel::Enum(status_enum.clone()),
                 ParsedModel::Enum(ParsedEnum {

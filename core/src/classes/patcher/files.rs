@@ -110,5 +110,9 @@ mod tests {
         assert!(res.starts_with(
             "#![deny(missing_docs)]\n//! Module docs mentioning use foo::Bar;\nuse foo::Bar;\n"
         ));
+
+        let comment_only = "// Leading regular comment in file without items\n";
+        let res_comment = add_import(comment_only, "use foo::Bar;").expect("comment only");
+        assert!(res_comment.starts_with("use foo::Bar;\n"));
     }
 }

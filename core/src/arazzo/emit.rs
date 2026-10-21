@@ -622,6 +622,7 @@ components:
       criteria:
         - condition: $statusCode == 500
           type: jsonpath
+        - condition: $statusCode == 503
 workflows:
   - workflowId: wf1
     summary: Wf summary
@@ -689,6 +690,15 @@ workflows:
         // Cover inline workflow inputs, OperationPath, ChannelPath, WorkflowId, step correlationId/action/dependsOn/Reusable, and empty components
         let yaml2 = "arazzo: 1.1.0\ninfo:\n  title: Minimal\n  version: 1.0.0\nsourceDescriptions:\n  - name: s1\n    url: ./s1.yaml\ncomponents: {}\nworkflows:\n  - workflowId: w0\n    steps:\n      - stepId: st0\n        operationId: op0\n  - workflowId: w1\n    dependsOn: [w0]\n    inputs:\n      type: object\n      properties:\n        a:\n          type: string\n    parameters:\n      - name: wfParam\n        in: header\n        value: 'v'\n    successActions:\n      - name: wfEnd\n        type: end\n    failureActions:\n      - name: wfFail\n        type: end\n    steps:\n      - stepId: st1\n        operationPath: '{$sourceDescriptions.s1.url}#/paths/~1p/get'\n        parameters:\n          - name: p1\n            value: 'v1'\n        requestBody:\n          replacements:\n            - target: /a\n              value: 'b'\n        outputs:\n          o1:\n            context: $response.body\n            selector: /a\n      - stepId: st2\n        dependsOn: [st1]\n        channelPath: /ch\n        action: receive\n        correlationId: $response.body#/id\n      - stepId: st3\n        dependsOn: [st2]\n        workflowId: w0\n";
         let mut doc2 = parse_arazzo_document(yaml2).expect("parse 2");
+        doc2.components = None;
+        doc2.workflows[0].steps[0].success_criteria.push(Criterion {
+            context: None,
+            condition: "$statusCode == 200".to_string(),
+            criterion_type: None,
+            extensions: BTreeMap::new(),
+        });
+        let json2_none = serialize_arazzo_document(&doc2, ArazzoFormat::Json).expect("emit 2 none");
+        assert!(parse_arazzo_document(&json2_none).is_ok());
         doc2.components = Some(ArazzoComponents::default());
         let json2_empty = serialize_arazzo_document(&doc2, ArazzoFormat::Json).expect("emit 2a");
         assert!(parse_arazzo_document(&json2_empty).is_ok());

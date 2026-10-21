@@ -98,7 +98,7 @@ fn extract_arazzo_from_directory(args: &ToArazzoArgs) -> AppResult<ArazzoDocumen
     let mut seen_ids = std::collections::HashSet::new();
     for file in rust_files {
         let code = fs::read_to_string(&file)?;
-        if code.contains("@ARAZZO_VERSION:") && code.contains("@ARAZZO_TITLE:") {
+        if code.contains("@ARAZZO_VERSION:") {
             return extract_arazzo_document_from_rust(
                 &code,
                 args.title.as_deref(),
