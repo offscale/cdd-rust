@@ -68,7 +68,7 @@ use std::marker::PhantomData;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let port: u16 = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string()).parse().unwrap();
+    let port: u16 = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string()).parse().unwrap_or(8080);
     println!("Starting generated mock server on port {}", port);
     
     HttpServer::new(|| {

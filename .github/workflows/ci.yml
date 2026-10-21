@@ -59,9 +59,30 @@ jobs:
 
       - name: Download Petstore Specs
         run: |
-          curl -sSL https://raw.githubusercontent.com/swagger-api/swagger-petstore/master/src/main/resources/openapi.yaml -o petstore_oas3.yaml
-          # Download a standard swagger 2.0 petstore
-          curl -sSL https://petstore.swagger.io/v2/swagger.json -o petstore.json
+          curl --retry 5 --retry-all-errors --retry-delay 2 -fsSL \
+            https://raw.githubusercontent.com/swagger-api/swagger-petstore/master/src/main/resources/openapi.yaml \
+            -o petstore_oas3.yaml || \
+          curl --retry 5 --retry-all-errors --retry-delay 2 -fsSL \
+            https://raw.githubusercontent.com/SamuelMarks/cdd-openapi-test-harness/master/petstore_oas3.json \
+            -o petstore_oas3.yaml
+          # Download a standard swagger 2.0 petstore (preferring local service container or canonical GitHub mirror over flaky petstore.swagger.io)
+          curl --retry 5 --retry-all-errors --retry-delay 2 -fsSL \
+            http://localhost:8080/v2/swagger.json \
+            -o petstore.json || \
+          curl --retry 5 --retry-all-errors --retry-delay 2 -fsSL \
+            https://raw.githubusercontent.com/SamuelMarks/cdd-openapi-test-harness/master/petstore.json \
+            -o petstore.json || \
+          curl --retry 5 --retry-all-errors --retry-delay 2 -fsSL \
+            https://petstore.swagger.io/v2/swagger.json \
+            -o petstore.json
+          python3 -c '
+          import json
+          with open("petstore.json", "r", encoding="utf-8") as f:
+              data = json.load(f)
+          assert isinstance(data, dict) and ("swagger" in data or "openapi" in data), "Invalid petstore.json"
+          ' || curl --retry 5 --retry-all-errors --retry-delay 2 -fsSL \
+            https://raw.githubusercontent.com/SamuelMarks/cdd-openapi-test-harness/master/petstore.json \
+            -o petstore.json
 
       - name: Test Swagger 2.0 Petstore SDK Generation
         run: cargo run -p cdd-cli -- from_openapi to_sdk -i ./petstore.json -o ./target/petstore2
