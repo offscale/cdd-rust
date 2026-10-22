@@ -1,2 +1,3 @@
 [tarpaulin]
 exclude-files = []
+args = ["--test-threads=1"]

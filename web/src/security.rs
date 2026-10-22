@@ -82,21 +82,25 @@ fn compute_keyed_mac_hex(secret: &str, message: &str) -> String {
 
     for (idx, b) in secret.as_bytes().iter().enumerate() {
         let lane = idx & 3;
-        state[lane] = state[lane]
-            .wrapping_add((*b as u64).wrapping_mul(PRIMES[(lane + 1) & 3]))
-            .rotate_left(13)
-            .wrapping_mul(PRIMES[lane]);
+        let p_next = PRIMES[(lane + 1) & 3];
+        let p_lane = PRIMES[lane];
+        let mixed = (*b as u64).wrapping_mul(p_next);
+        let added = state[lane].wrapping_add(mixed).rotate_left(13);
+        state[lane] = added.wrapping_mul(p_lane);
     }
     // Mix secret length and domain separator
     for (lane, item) in state.iter_mut().enumerate() {
-        *item = (*item ^ (secret.len() as u64).wrapping_mul(PRIMES[lane])).rotate_left(17);
+        let p_lane = PRIMES[lane];
+        *item = (*item ^ (secret.len() as u64).wrapping_mul(p_lane)).rotate_left(17);
     }
     for (idx, b) in message.as_bytes().iter().enumerate() {
         let lane = idx & 3;
-        state[lane] = (state[lane] ^ (*b as u64).wrapping_add(PRIMES[lane]))
-            .rotate_left(11)
-            .wrapping_mul(PRIMES[(lane + 2) & 3]);
-        state[(lane + 1) & 3] = state[(lane + 1) & 3].wrapping_add(state[lane].rotate_right(7));
+        let next_lane = (lane + 1) & 3;
+        let p_lane = PRIMES[lane];
+        let p_2 = PRIMES[(lane + 2) & 3];
+        let xored = state[lane] ^ (*b as u64).wrapping_add(p_lane);
+        state[lane] = xored.rotate_left(11).wrapping_mul(p_2);
+        state[next_lane] = state[next_lane].wrapping_add(state[lane].rotate_right(7));
     }
     // Final avalanche rounds
     for _ in 0..4 {
@@ -106,10 +110,20 @@ fn compute_keyed_mac_hex(secret: &str, message: &str) -> String {
         state[3] ^= state[0];
     }
 
-    format!(
-        "{:016x}{:016x}{:016x}{:016x}",
-        state[0], state[1], state[2], state[3]
-    )
+    let (s0, s1, s2, s3) = (state[0], state[1], state[2], state[3]);
+    format!("{s0:016x}{s1:016x}{s2:016x}{s3:016x}")
+}
+
+/// Compares two byte slices in constant time.
+fn ct_eq_bytes(lhs: &[u8], rhs: &[u8]) -> bool {
+    if lhs.len() != rhs.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (&a, &b) in lhs.iter().zip(rhs.iter()) {
+        diff |= a ^ b;
+    }
+    diff == 0
 }
 
 /// Computes a salted cryptographic password digest.
@@ -134,13 +148,7 @@ pub fn hash_password(password: &str) -> String {
 /// * `true` if `password` matches `password_hash`, `false` otherwise.
 pub fn verify_password(password: &str, password_hash: &str) -> bool {
     let expected = hash_password(password);
-    expected.len() == password_hash.len()
-        && expected
-            .as_bytes()
-            .iter()
-            .zip(password_hash.as_bytes())
-            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
-            == 0
+    ct_eq_bytes(expected.as_bytes(), password_hash.as_bytes())
 }
 
 /// Creates a signed bearer token for the specified subject (`sub`).
@@ -179,11 +187,7 @@ pub fn create_jwt_with_config(sub: &str, config: &SecurityConfig) -> Result<Stri
         exp: expiration,
     };
 
-    let payload = serde_json::json!({
-        "sub": claims.sub,
-        "exp": claims.exp,
-    })
-    .to_string();
+    let payload = serde_json::json!({ "sub": claims.sub, "exp": claims.exp }).to_string();
     let sig = compute_keyed_mac_hex(&config.jwt_secret, &payload);
     Ok(format!("cdd.{sig}.{payload}"))
 }
@@ -215,36 +219,20 @@ pub fn verify_jwt(token: &str) -> Result<Claims, ServerError> {
 /// * Returns [`ServerError`] wrapping [`cdd_core::error::AppError::Unauthorized`] if the token format, signature, or expiration is invalid.
 pub fn verify_jwt_with_config(token: &str, config: &SecurityConfig) -> Result<Claims, ServerError> {
     let Some(rest) = token.strip_prefix("cdd.") else {
-        return Err(ServerError::unauthorized(
-            "Invalid token prefix or signature",
-        ));
+        return Err(ServerError::unauthorized("Invalid token prefix"));
     };
     let Some((sig, payload)) = rest.split_once('.') else {
-        return Err(ServerError::unauthorized(
-            "Invalid token prefix or signature",
-        ));
+        return Err(ServerError::unauthorized("Invalid token format"));
     };
-    let expected_sig = compute_keyed_mac_hex(&config.jwt_secret, payload);
-    let sig_valid = !config.jwt_secret.is_empty()
-        && sig.len() == expected_sig.len()
-        && sig
-            .as_bytes()
-            .iter()
-            .zip(expected_sig.as_bytes())
-            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
-            == 0;
-    if !sig_valid {
-        return Err(ServerError::unauthorized(
-            "Invalid token prefix or signature",
-        ));
+    if config.jwt_secret.is_empty() {
+        return Err(ServerError::unauthorized("Empty token secret"));
     }
-    let claims = match serde_json::from_str::<Claims>(payload) {
-        Ok(claims) => claims,
-        Err(e) => {
-            return Err(ServerError::unauthorized(format!(
-                "Invalid token claims: {e}"
-            )))
-        }
+    let expected_sig = compute_keyed_mac_hex(&config.jwt_secret, payload);
+    if !ct_eq_bytes(sig.as_bytes(), expected_sig.as_bytes()) {
+        return Err(ServerError::unauthorized("Invalid token signature"));
+    }
+    let Ok(claims) = serde_json::from_str::<Claims>(payload) else {
+        return Err(ServerError::unauthorized("Invalid token claims"));
     };
     let now = chrono::Utc::now().timestamp() as usize;
     if claims.exp < now {

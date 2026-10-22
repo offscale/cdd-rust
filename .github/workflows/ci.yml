@@ -107,7 +107,7 @@ jobs:
       - name: Run Test Coverage
         env:
           RUSTFLAGS: "--cfg coverage"
-        run: cargo tarpaulin --workspace --out Xml --fail-under 100
+        run: cargo tarpaulin --workspace --out Xml --fail-under 100 -- --test-threads=1
 
   build-native:
     needs: build_and_test
