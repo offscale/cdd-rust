@@ -11,6 +11,9 @@ pub fn test_imports() -> String {
     let mut imports = String::new();
     imports.push_str("use reqwest::Client;\n");
     imports.push_str("use serde_json::json;\n");
+    imports.push_str(
+        "static TEST_MUTEX: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();\n",
+    );
     imports
 }
 
@@ -103,12 +106,16 @@ pub fn generate_custom_test(
 
     let mut code = String::new();
     code.push_str(&format!("#[tokio::test]\nasync fn {}() {{\n", fn_name));
+    code.push_str(
+        "    let _guard = TEST_MUTEX.get_or_init(|| tokio::sync::Mutex::new(())).lock().await;\n",
+    );
     code.push_str("    let client = reqwest::Client::new();\n");
     code.push_str("    let base_url = \"http://localhost:8080\";\n");
 
     let mut args_list = vec!["&client".to_string(), "base_url".to_string()];
 
     // 1. Path Params
+    let is_delete = route.http_method() == crate::openapi::parse::models::HttpMethod::Delete;
     for param in route
         .params
         .iter()
@@ -117,12 +124,17 @@ pub fn generate_custom_test(
         let var_name = to_snake_case(&param.name);
         let parsed_ty = param.rust_type();
         if parsed_ty == crate::openapi::parse::models::RustType::String {
+            let sample = if is_delete { "user2" } else { "user1" };
             code.push_str(&format!(
-                "    let {}: String = \"test_value\".to_string();\n",
-                var_name
+                "    let {}: String = \"{}\".to_string();\n",
+                var_name, sample
             ));
         } else if parsed_ty.is_integer() {
-            code.push_str(&format!("    let {}: {} = 1;\n", var_name, param.ty));
+            let sample = if is_delete { 2 } else { 1 };
+            code.push_str(&format!(
+                "    let {}: {} = {};\n",
+                var_name, param.ty, sample
+            ));
         } else {
             code.push_str(&format!(
                 "    let {}: {} = Default::default();\n",
@@ -234,7 +246,7 @@ pub fn generate_custom_test(
         if def.required {
             if full_body_type.contains("reqwest::multipart::Form") {
                 code.push_str(
-                    "    let body: reqwest::multipart::Form = reqwest::multipart::Form::new();\n",
+                    "    let body: reqwest::multipart::Form = reqwest::multipart::Form::new().part(\"file\", reqwest::multipart::Part::bytes(b\"test\".to_vec()).file_name(\"test.txt\"));\n",
                 );
             } else if full_body_type.contains("serde_json::Value") {
                 code.push_str("    let body: serde_json::Value = serde_json::json!({});\n");
@@ -246,10 +258,21 @@ pub fn generate_custom_test(
             }
             args_list.push("body".to_string());
         } else {
-            code.push_str(&format!(
-                "    let body: Option<{}> = None;\n",
-                full_body_type
-            ));
+            if full_body_type.contains("reqwest::multipart::Form") {
+                code.push_str(
+                    "    let body: Option<reqwest::multipart::Form> = Some(reqwest::multipart::Form::new().part(\"file\", reqwest::multipart::Part::bytes(b\"test\".to_vec()).file_name(\"test.txt\")));\n",
+                );
+            } else if full_body_type.contains("serde_json::Value") {
+                code.push_str(&format!(
+                    "    let body: Option<{}> = None;\n",
+                    full_body_type
+                ));
+            } else {
+                code.push_str(&format!(
+                    "    let body: Option<{}> = Some(Default::default());\n",
+                    full_body_type
+                ));
+            }
             args_list.push("body".to_string());
         }
     }
@@ -590,6 +613,20 @@ mod tests {
         let custom3_explicit = generate_custom_test(&r3, "");
         assert!(custom3_explicit.contains("reqwest::multipart::Form::new()"));
 
+        {
+            let rb = r3.request_body.as_mut().expect("request_body");
+            rb.ty = "Multipart".to_string();
+            rb.required = false;
+        }
+        let custom3_opt_mp = generate_custom_test(&r3, "");
+        assert!(custom3_opt_mp.contains("Some(reqwest::multipart::Form::new()"));
+
+        let mut r_del = r2.clone();
+        r_del.method = "DELETE".into();
+        let custom_del = generate_custom_test(&r_del, "sdk");
+        assert!(custom_del.contains("\"user2\""));
+        assert!(custom_del.contains("= 2;"));
+
         let mut r4 = route.clone();
         r4.handler_name = "other-op".to_string();
         {
@@ -603,12 +640,20 @@ mod tests {
 
         {
             let rb = r4.request_body.as_mut().expect("request_body");
+            rb.ty = "serde_json::Value".to_string();
+            rb.required = false;
+        }
+        let custom4_opt = generate_custom_test(&r4, "sdk");
+        assert!(custom4_opt.contains("let body: Option<serde_json::Value> = None;"));
+
+        {
+            let rb = r4.request_body.as_mut().expect("request_body");
             rb.ty = "Vec<u8>".to_string();
             rb.required = false;
         }
         r4.params.clear();
         let custom5 = generate_custom_test(&r4, "sdk");
-        assert!(custom5.contains("let body: Option<Vec<u8>> = None;"));
+        assert!(custom5.contains("let body: Option<Vec<u8>> = Some(Default::default());"));
 
         {
             let rb = r4.request_body.as_mut().expect("request_body");
@@ -616,7 +661,7 @@ mod tests {
             rb.required = false;
         }
         let custom6 = generate_custom_test(&r4, "sdk");
-        assert!(custom6.contains("let body: Option<String> = None;"));
+        assert!(custom6.contains("let body: Option<String> = Some(Default::default());"));
 
         {
             let rb = r4.request_body.as_mut().expect("request_body");
@@ -624,6 +669,6 @@ mod tests {
             rb.required = false;
         }
         let custom7 = generate_custom_test(&r4, "sdk");
-        assert!(custom7.contains("let body: Option<Vec<String>> = None;"));
+        assert!(custom7.contains("let body: Option<Vec<String>> = Some(Default::default());"));
     }
 }

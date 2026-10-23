@@ -162,23 +162,40 @@ pub fn handler_signature(route: &crate::openapi::parse::ParsedRoute, args: &[Str
             .as_ref()
             .map(|b| b.format == crate::openapi::parse::models::BodyFormat::Multipart)
             .unwrap_or(false);
+        let is_bytes = route
+            .request_body
+            .as_ref()
+            .map(|b| b.format == crate::openapi::parse::models::BodyFormat::Binary)
+            .unwrap_or(false);
 
-        let method = if is_multipart {
-            "multipart"
-        } else if is_form {
-            "form"
+        if is_bytes {
+            if body_arg.contains("Option<") {
+                body.push_str(
+                    "    if let Some(b) = body { req = req.multipart(reqwest::multipart::Form::new().part(\"file\", reqwest::multipart::Part::bytes(b).file_name(\"file.bin\"))); }\n",
+                );
+            } else {
+                body.push_str(
+                    "    req = req.multipart(reqwest::multipart::Form::new().part(\"file\", reqwest::multipart::Part::bytes(body).file_name(\"file.bin\")));\n",
+                );
+            }
         } else {
-            "json"
-        };
-        let prefix = if is_multipart { "" } else { "&" };
+            let method = if is_multipart {
+                "multipart"
+            } else if is_form {
+                "form"
+            } else {
+                "json"
+            };
+            let prefix = if is_multipart { "" } else { "&" };
 
-        if body_arg.contains("Option<") {
-            body.push_str(&format!(
-                "    if let Some(b) = body {{ req = req.{}({}b); }}\n",
-                method, prefix
-            ));
-        } else {
-            body.push_str(&format!("    req = req.{}({}body);\n", method, prefix));
+            if body_arg.contains("Option<") {
+                body.push_str(&format!(
+                    "    if let Some(b) = body {{ req = req.{}({}b); }}\n",
+                    method, prefix
+                ));
+            } else {
+                body.push_str(&format!("    req = req.{}({}body);\n", method, prefix));
+            }
         }
     }
 
@@ -375,6 +392,19 @@ mod tests {
         );
         assert!(sig_mp.contains("req.multipart(b)"));
         assert!(sig_mp.contains("Result<reqwest::Response, reqwest::Error>"));
+
+        // Bytes body (optional and required)
+        route.request_body.as_mut().expect("request_body").format = BodyFormat::Binary;
+        let sig_bytes_opt = handler_signature(
+            &route,
+            &["id: i64".to_string(), "body: Option<Vec<u8>>".to_string()],
+        );
+        assert!(sig_bytes_opt.contains("Part::bytes(b).file_name(\"file.bin\")"));
+        let sig_bytes_req = handler_signature(
+            &route,
+            &["id: i64".to_string(), "body: Vec<u8>".to_string()],
+        );
+        assert!(sig_bytes_req.contains("Part::bytes(body).file_name(\"file.bin\")"));
 
         // No response type and no response headers
         route.response_headers.clear();

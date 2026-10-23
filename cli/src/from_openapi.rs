@@ -966,11 +966,12 @@ components:
 
     #[test]
     fn test_run_generation_invalid_file() {
+        let dir = tempdir().expect("tempdir");
         let args = GenerateArgs {
             input: Some(PathBuf::from("/does/not/exist.yaml")),
             input_dir: None,
-            output_dir: None,
-            no_github_actions: false,
+            output_dir: Some(dir.path().join("..")),
+            no_github_actions: true,
             no_installable_package: false,
             tests: false,
             mcp: false,

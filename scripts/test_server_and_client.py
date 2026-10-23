@@ -164,42 +164,10 @@ async fn main() -> std::io::Result<()> {
     api_contracts_path = os.path.join(client_dir, "tests", "api_contracts.rs")
     if os.path.exists(api_contracts_path):
         with open(api_contracts_path, "r") as f:
-            lines = f.readlines()
-
-        # Replace port
-        for i in range(len(lines)):
-            lines[i] = lines[i].replace("localhost:8080", f"127.0.0.1:{port}")
-
-        # Remove failing tests
-        new_lines = []
-        skip = False
-        for i, line in enumerate(lines):
-            # Check if this line is #[tokio::test] and the next line is the one to skip
-            if (
-                "#[tokio::test]" in line
-                and i + 1 < len(lines)
-                and (
-                    "fn test_sdk_find_pets_by_tags" in lines[i + 1]
-                    or "fn test_sdk_find_pets_by_status" in lines[i + 1]
-                )
-            ):
-                continue  # Skip #[tokio::test]
-
-            if (
-                "fn test_sdk_find_pets_by_tags" in line
-                or "fn test_sdk_find_pets_by_status" in line
-            ):
-                skip = True
-
-            if skip:
-                if line.startswith("}"):
-                    skip = False
-                continue
-
-            new_lines.append(line)
-
+            content = f.read()
+        content = content.replace("localhost:8080", f"127.0.0.1:{port}")
         with open(api_contracts_path, "w") as f:
-            f.writelines(new_lines)
+            f.write(content)
 
     print(f"Running Client Tests for {spec_file}")
     try:

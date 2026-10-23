@@ -54,6 +54,7 @@ pub fn generate_query_struct(route: &ParsedRoute) -> Option<GeneratedQueryStruct
     code.push_str("#[serde(default)]\n");
     code.push_str(&format!("pub struct {} {{\n", struct_name));
 
+    let mut has_vec_string = false;
     params.sort_by(|a, b| a.name.as_str().cmp(b.name.as_str()));
     for param in params {
         let base_name = sanitize_query_field_name(&param.name);
@@ -75,10 +76,24 @@ pub fn generate_query_struct(route: &ParsedRoute) -> Option<GeneratedQueryStruct
                 escape_rust_string(&param.name)
             ));
         }
+        if param.ty.as_str() == "Vec<String>" {
+            has_vec_string = true;
+            code.push_str(&format!(
+                "    #[serde(default, deserialize_with = \"{}::deserialize_vec\")]\n",
+                struct_name
+            ));
+        }
         code.push_str(&format!("    pub {}: {},\n", field_name, param.ty.as_str()));
     }
 
     code.push_str("}\n");
+
+    if has_vec_string {
+        code.push_str(&format!(
+            "\nimpl {} {{\n    fn deserialize_vec<'de, D>(deserializer: D) -> std::result::Result<Vec<String>, D::Error>\n    where\n        D: serde::Deserializer<'de>,\n    {{\n        #[derive(Deserialize)]\n        #[serde(untagged)]\n        enum StringOrVec {{\n            Vec(Vec<String>),\n            String(String),\n        }}\n        match Option::<StringOrVec>::deserialize(deserializer)? {{\n            Some(StringOrVec::Vec(v)) => Ok(v),\n            Some(StringOrVec::String(s)) if s.is_empty() => Ok(Vec::new()),\n            Some(StringOrVec::String(s)) => Ok(s.split(',').map(ToOwned::to_owned).collect()),\n            None => Ok(Vec::new()),\n        }}\n    }}\n}}\n",
+            struct_name
+        ));
+    }
 
     Some(GeneratedQueryStruct {
         name: struct_name,
@@ -1306,11 +1321,27 @@ mod tests {
                 raw_schema: None,
                 extensions: BTreeMap::new(),
             },
+            RouteParam {
+                name: "tags".into(),
+                description: None,
+                source: ParamSource::Query,
+                ty: "Vec<String>".into(),
+                content_media_type: None,
+                style: None,
+                explode: false,
+                deprecated: false,
+                allow_empty_value: false,
+                allow_reserved: false,
+                example: None,
+                raw_schema: None,
+                extensions: BTreeMap::new(),
+            },
         ];
         let edge_gen = generate_query_struct(&edge_route).expect("edge query struct");
         assert!(edge_gen.code.contains("pub _123field: i32"));
         assert!(edge_gen.code.contains("pub type_: String"));
         assert!(edge_gen.code.contains("pub type_1_3: String"));
+        assert!(edge_gen.code.contains("deserialize_vec"));
         assert_eq!(sanitize_query_field_name(""), "param");
     }
 

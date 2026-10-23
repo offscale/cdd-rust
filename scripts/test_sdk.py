@@ -19,24 +19,33 @@ def cleanup():
     if container_id:
         print(f"Stopping docker container {container_id}...")
         subprocess.run(
-            ["docker", "stop", container_id],
+            ["docker", "rm", "-f", container_id],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        subprocess.run(
-            ["docker", "rm", container_id],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        container_id = None
 
 
 atexit.register(cleanup)
 
 
-def is_pingable(p):
+def detect_base_path(spec_file):
     try:
-        req = urllib.request.Request(f"http://127.0.0.1:{p}/", method="GET")
-        with urllib.request.urlopen(req, timeout=1) as response:
+        with open(spec_file, "r", encoding="utf-8") as f:
+            raw = f.read()
+        if "/api/v3" in raw:
+            return "/api/v3"
+    except Exception:
+        pass
+    return "/v2"
+
+
+def is_pingable(p, base_path="/v2"):
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{p}{base_path}/swagger.json", method="GET"
+        )
+        with urllib.request.urlopen(req, timeout=5) as response:
             return response.status == 200
     except Exception:
         return False
@@ -49,28 +58,56 @@ def main():
 
     spec_file = sys.argv[1]
     output_dir = sys.argv[2]
+    base_path = detect_base_path(spec_file)
 
     global port
     global container_id
 
-    if is_pingable(port):
-        print(f"Reusing active swaggerapi/petstore instance on port {port}")
+    if is_pingable(port, base_path):
+        print(
+            f"Reusing active swaggerapi/petstore instance on port {port} ({base_path})"
+        )
     else:
         port = random.randint(8000, 8999)
-        print(f"Starting swaggerapi/petstore on port {port}")
+        print(f"Starting swaggerapi/petstore on port {port} ({base_path})")
         # Start docker container
         try:
             res = subprocess.run(
-                ["docker", "run", "-d", "-p", f"{port}:8080", "swaggerapi/petstore"],
+                [
+                    "docker",
+                    "run",
+                    "-d",
+                    "-p",
+                    f"{port}:8080",
+                    "-e",
+                    f"SWAGGER_BASE_PATH={base_path}",
+                    "-e",
+                    "JAVA_TOOL_OPTIONS=-XX:TieredStopAtLevel=1 -XX:+UseSerialGC",
+                    "swaggerapi/petstore",
+                ],
                 capture_output=True,
                 text=True,
                 check=True,
             )
             container_id = res.stdout.strip()
 
-            # wait for it to be pingable
-            for _ in range(30):
-                if is_pingable(port):
+            # wait for Jetty inside the container to bind 0.0.0.0:8080 before hitting the port
+            for i in range(60):
+                logs = subprocess.run(
+                    ["docker", "logs", container_id],
+                    capture_output=True,
+                    text=True,
+                )
+                combined_logs = (logs.stdout or "") + (logs.stderr or "")
+                if i in (6, 12, 18) and "Logging initialized" not in combined_logs:
+                    subprocess.run(
+                        ["docker", "restart", container_id],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                if "Started ServerConnector" in combined_logs and is_pingable(
+                    port, base_path
+                ):
                     break
                 time.sleep(1)
             else:

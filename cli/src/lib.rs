@@ -48,10 +48,12 @@ pub use to_openapi::{to_openapi, ToOpenApiConfig};
 pub enum TargetMode {
     /// Actix Web Server.
     #[default]
+    #[value(alias = "server")]
     ServerActix,
     /// Axum Server.
     ServerAxum,
     /// Reqwest Client.
+    #[value(alias = "client")]
     ClientReqwest,
     /// Clap CLI / Internal Client.
     ClientInternal,
