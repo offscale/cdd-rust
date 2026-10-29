@@ -9,8 +9,8 @@ use crate::error::AppResult;
 use crate::openapi::parse::models::RouteKind;
 use crate::openapi::parse::ParsedRoute;
 use ra_ap_edition::Edition;
-use ra_ap_syntax::ast::{self, HasArgList, HasAttrs, HasDocComments, HasName};
-use ra_ap_syntax::{AstNode, AstToken, SourceFile};
+use ra_ap_syntax::ast::{self, HasArgList, HasAttrs, HasName};
+use ra_ap_syntax::{AstNode, SourceFile};
 use std::collections::BTreeMap;
 
 /// Extracts OpenAPI routes from a given string of Rust source code.
@@ -172,7 +172,7 @@ fn parse_actix_route(func: &ast::Fn) -> Option<ParsedRoute> {
             method_str.as_str(),
             "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS" | "TRACE"
         ) {
-            if let Some(tt) = meta.token_tree() {
+            if let Some((_, tt)) = meta.as_simple_call() {
                 let tokens = tt.to_string();
                 let route_path = tokens
                     .trim_matches(|c| c == '(' || c == ')' || c == ' ')

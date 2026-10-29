@@ -12,16 +12,16 @@ cdd-core = { path = "../core" }
 clap = { version = "4.6", default-features = false, features = ["std", "derive", "env", "help", "usage", "error-context"] }
 dsync = { version = "0.1", default-features = false }
 walkdir = { version = "2.5", default-features = false }
-serde_json = { version = "1.0", default-features = false, features = ["std", "preserve_order"] }
+serde_json = { version = "1.0", default-features = false, features = ["std"] }
 serde_yaml = { version = "0.9", default-features = false }
 serde = { version = "1.0", default-features = false, features = ["std", "derive"] }
 url = { version = "2.5", default-features = false, features = ["std"] }
 
 [target.'cfg(not(target_os = "wasi"))'.dependencies]
-ureq = { version = "3.4", optional = true, default-features = false, features = ["rustls"] }
-actix-web = { version = "4.17", optional = true, default-features = false }
+ureq = { version = "3.5", optional = true, default-features = false, features = ["rustls"] }
+actix-web = { version = "4.18", optional = true, default-features = false }
 actix-rt = { version = "2.15", optional = true, default-features = false, features = ["macros"] }
-tokio = { version = "1.53", optional = true, default-features = false }
+tokio = { version = "1.54", optional = true, default-features = false }
 
 [dev-dependencies]
 tempfile = { version = "3.27", default-features = false }

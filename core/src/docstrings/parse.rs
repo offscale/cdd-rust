@@ -4,16 +4,16 @@
 //!
 //! Extracts structured documentation text and tags from Rust AST nodes and comment strings.
 
-use ra_ap_syntax::{ast::HasDocComments, AstToken};
+use ra_ap_syntax::ast::HasAttrs;
 
 /// Extracts combined documentation (`///` and `#[doc = "..."]`) from an AST node that supports doc comments.
 ///
 /// # Arguments
-/// * `node` - The syntax node implementing `HasDocComments`.
+/// * `node` - The syntax node implementing `HasAttrs`.
 ///
 /// # Returns
 /// * `Option<String>` containing the joined, trimmed documentation lines, or `None` if no doc comments exist.
-pub fn extract_doc_comment<N: HasDocComments>(node: &N) -> Option<String> {
+pub fn extract_doc_comment<N: HasAttrs>(node: &N) -> Option<String> {
     let mut docs = Vec::new();
     for doc in node.doc_comments() {
         let raw_text = doc.text();

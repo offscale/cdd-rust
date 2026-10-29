@@ -8,11 +8,11 @@ edition = "2021"
 derive_more = { version = "2.1", default-features = false, features = ["std", "from", "display", "error"] }
 
 # AST Parsing
-ra_ap_syntax = { version = "0.0.308", default-features = false }
-ra_ap_edition = { version = "0.0.308", default-features = false }
+ra_ap_syntax = { version = "0.0", default-features = false }
+ra_ap_edition = { version = "0.0", default-features = false }
 
 # Regex for attributes and Arazzo criteria
-regex = { version = "1.13", default-features = false, features = ["std", "perf"] }
+regex = { version = "1.13", default-features = false, features = ["std"] }
 
 # JSON/YAML Output & Parsing
 serde = { version = "1.0", default-features = false, features = ["std", "derive"] }
@@ -20,7 +20,7 @@ serde_json = { version = "1.0", default-features = false, features = ["std", "pr
 serde_yaml = { version = "0.9", default-features = false }
 
 # OpenAPI definition types
-utoipa = { version = "5.5", default-features = false, features = ["macros", "preserve_order", "indexmap", "uuid"] }
+utoipa = { version = "6.0", default-features = false, features = ["macros", "preserve_order", "uuid"] }
 indexmap = { version = "2.14", default-features = false, features = ["std", "serde"] }
 
 # Strict RFC 3986 URI resolution

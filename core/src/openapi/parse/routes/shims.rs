@@ -672,14 +672,30 @@ fn normalize_encoding_headers(value: &mut Value) {
             map.remove("schema");
         }
     }
+    if let Some(item_schema_val) = map.get("itemSchema") {
+        if item_schema_val.is_boolean() {
+            map.remove("itemSchema");
+        }
+    }
+    if let Some(Value::Object(content_map)) = map.get_mut("content") {
+        for (_, media) in content_map.iter_mut() {
+            if let Value::Object(media_obj) = media {
+                media_obj.remove("$ref");
+            }
+        }
+    }
 
     if let Some(encoding_val) = map.get_mut("encoding") {
         normalize_encoding_map_headers(encoding_val);
     }
-    if let Some(prefix_val) = map.get_mut("prefixEncoding") {
+    if map.get("prefixEncoding").is_some_and(|v| !v.is_array()) {
+        map.remove("prefixEncoding");
+    } else if let Some(prefix_val) = map.get_mut("prefixEncoding") {
         normalize_encoding_array_headers(prefix_val);
     }
-    if let Some(item_val) = map.get_mut("itemEncoding") {
+    if map.get("itemEncoding").is_some_and(|v| !v.is_object()) {
+        map.remove("itemEncoding");
+    } else if let Some(item_val) = map.get_mut("itemEncoding") {
         normalize_encoding_object_headers(item_val);
     }
 
@@ -766,6 +782,20 @@ fn normalize_response_content(value: &mut Value) {
             if schema_val.is_boolean() {
                 obj.remove("schema");
             }
+        }
+        if let Some(item_schema_val) = obj.get("itemSchema") {
+            if item_schema_val.is_boolean() {
+                obj.remove("itemSchema");
+            }
+        }
+        if let Some(encoding_val) = obj.get_mut("encoding") {
+            normalize_encoding_map_headers(encoding_val);
+        }
+        if let Some(prefix_val) = obj.get_mut("prefixEncoding") {
+            normalize_encoding_array_headers(prefix_val);
+        }
+        if let Some(item_val) = obj.get_mut("itemEncoding") {
+            normalize_encoding_object_headers(item_val);
         }
     }
 }
@@ -1202,7 +1232,20 @@ webhooks:
                 "content": {
                     "application/json": {
                         "$ref": "#/components/mediaTypes/M",
-                        "schema": true
+                        "schema": true,
+                        "encoding": {
+                            "partA": {
+                                "headers": {
+                                    "X-Enc": { "description": "enc" }
+                                }
+                            }
+                        },
+                        "prefixEncoding": [
+                            { "contentType": "text/plain" }
+                        ],
+                        "itemEncoding": {
+                            "contentType": "application/octet-stream"
+                        }
                     },
                     "text/plain": "not_an_object"
                 },
@@ -1232,6 +1275,13 @@ webhooks:
         normalize_encoding_map_headers(&mut non_obj_resp);
         normalize_encoding_array_headers(&mut non_obj_resp);
         normalize_encoding_object_headers(&mut non_obj_resp);
+        let mut edge_enc_hdrs = serde_json::json!({
+            "content": {
+                "application/json": "not_an_object"
+            },
+            "itemEncoding": "not_an_object"
+        });
+        normalize_encoding_headers(&mut edge_enc_hdrs);
 
         let rich_rb_json = serde_json::json!({
             "description": "RB",

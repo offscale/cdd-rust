@@ -63,7 +63,7 @@ run: build
 build_wasm:
 	@echo "Building WASM target..."
 	rustup target add wasm32-wasip1
-	cargo build -p cdd-cli --release --target wasm32-wasip1 --no-default-features
+	RUSTFLAGS="--cfg no_salsa_async_drops" cargo build -p cdd-cli --release --target wasm32-wasip1 --no-default-features
 build_docker:
 	docker build -t cdd-rust:alpine -f alpine.Dockerfile .
 	docker build -t cdd-rust:debian -f debian.Dockerfile .

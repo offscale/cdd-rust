@@ -113,7 +113,7 @@ fn map_ast_type(ty: &ast::Type) -> AppResult<JsonSchema> {
                 .ok_or_else(|| AppError::General("Empty path segment".into()))?;
             let name = name_ref.text();
 
-            match name.as_str() {
+            match name {
                 // Primitives
                 "String" | "str" | "char" => Ok(simple(JsonType::String)),
                 "bool" => Ok(simple(JsonType::Boolean)),

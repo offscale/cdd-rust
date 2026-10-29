@@ -104,6 +104,8 @@ pub fn create_pool(
         .build_unchecked(manager))
 }
 
+/// Connects to the default `"postgres"` maintenance database and issues `CREATE DATABASE`
+/// for ephemeral test environments (ignoring `"already exists"` errors).
 #[cfg(not(target_os = "wasi"))]
 fn run_ephemeral_setup(db_url: &str) -> Result<(), ServerError> {
     let (base_url, db_name) = parse_ephemeral_db_url(db_url)?;

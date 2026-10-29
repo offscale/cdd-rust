@@ -63,7 +63,7 @@ fn find_module_header_end(file: &SourceFile) -> Option<usize> {
             SyntaxKind::ATTR => {
                 end_pos = Some(usize::from(elem.text_range().end()));
             }
-            SyntaxKind::COMMENT if elem.to_string().starts_with("//!") => {
+            SyntaxKind::DOC_COMMENT if elem.to_string().starts_with("//!") => {
                 end_pos = Some(usize::from(elem.text_range().end()));
             }
             SyntaxKind::WHITESPACE => {}
@@ -114,5 +114,9 @@ mod tests {
         let comment_only = "// Leading regular comment in file without items\n";
         let res_comment = add_import(comment_only, "use foo::Bar;").expect("comment only");
         assert!(res_comment.starts_with("use foo::Bar;\n"));
+
+        let outer_doc_only = "/// Leading outer doc comment without items\n";
+        let res_outer_doc = add_import(outer_doc_only, "use foo::Bar;").expect("outer doc only");
+        assert!(res_outer_doc.starts_with("use foo::Bar;\n"));
     }
 }

@@ -18,7 +18,7 @@ use crate::openapi::parse::schemas::refs::{
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use url::Url;
-use utoipa::openapi::{Components, OpenApi, RefOr, Schema};
+use utoipa::openapi::{Components, RefOr, Schema};
 
 const DUMMY_BASE: &str = "http://example.invalid/";
 
@@ -604,15 +604,21 @@ fn parse_components_model(raw: &JsonValue) -> AppResult<Option<Components>> {
     normalize_boolean_schemas(&mut normalized);
     normalize_const_schemas(&mut normalized);
 
-    if normalized.get("paths").is_none() {
-        normalized["paths"] = JsonValue::Object(serde_json::Map::new());
+    let Some(raw_comps) = normalized.get("components").and_then(|c| c.as_object()) else {
+        return Ok(None);
+    };
+
+    let mut parsed_components = Components::new();
+    if let Some(schema_map) = raw_comps.get("schemas").and_then(|s| s.as_object()) {
+        for (name, val) in schema_map {
+            let schema_ref: RefOr<Schema> = serde_json::from_value(val.clone()).map_err(|e| {
+                AppError::General(format!("Failed to parse OpenAPI components: {}", e))
+            })?;
+            parsed_components.schemas.insert(name.clone(), schema_ref);
+        }
     }
-    normalized["openapi"] = serde_json::json!("3.1.0");
 
-    let openapi: OpenApi = serde_json::from_value(normalized)
-        .map_err(|e| AppError::General(format!("Failed to parse OpenAPI components: {}", e)))?;
-
-    Ok(openapi.components)
+    Ok(Some(parsed_components))
 }
 
 #[cfg(test)]

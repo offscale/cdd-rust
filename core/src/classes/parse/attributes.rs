@@ -49,7 +49,7 @@ pub fn extract_attributes(node: &SyntaxNode) -> AttrInfo {
             .path()
             .is_some_and(|p| matches!(p.to_string().as_str(), "serde" | "oai"));
         if is_target {
-            if let Some(tt) = meta.token_tree() {
+            if let Some((_, tt)) = meta.as_simple_call() {
                 parse_attribute_token_tree(&tt, &mut info);
             }
         }

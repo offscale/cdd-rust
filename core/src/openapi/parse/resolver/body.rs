@@ -207,8 +207,14 @@ fn is_body_required(body: &ShimRequestBody) -> bool {
     matches!(body.inner.required, Some(Required::True))
 }
 
+fn empty_content() -> &'static utoipa::openapi::Content {
+    static EMPTY: std::sync::LazyLock<utoipa::openapi::Content> =
+        std::sync::LazyLock::new(utoipa::openapi::Content::default);
+    &EMPTY
+}
+
 fn select_request_media(
-    content: &BTreeMap<String, utoipa::openapi::Content>,
+    content: &BTreeMap<String, RefOr<utoipa::openapi::Content>>,
 ) -> Option<(BodyFormat, &str, &utoipa::openapi::Content)> {
     // 1. JSON (application/json or +json)
     if let Some((key, media)) =
@@ -259,14 +265,14 @@ fn select_request_media(
     }
 
     // 7. Fallback: take the first media type as binary.
-    content
-        .iter()
-        .next()
-        .map(|(k, v)| (BodyFormat::Binary, k.as_str(), v))
+    content.iter().next().map(|(k, v)| match v {
+        RefOr::T(media) => (BodyFormat::Binary, k.as_str(), media),
+        RefOr::Ref(_) => (BodyFormat::Binary, k.as_str(), empty_content()),
+    })
 }
 
 fn select_best_media<'a, F>(
-    content: &'a BTreeMap<String, utoipa::openapi::Content>,
+    content: &'a BTreeMap<String, RefOr<utoipa::openapi::Content>>,
     predicate: F,
     preferred: Option<&str>,
 ) -> Option<(&'a str, &'a utoipa::openapi::Content)>
@@ -275,7 +281,11 @@ where
 {
     let filtered = content.iter().filter(|(k, _)| predicate(k));
     let (k, v) = filtered.max_by_key(|(k, _)| media_specificity_score(k, preferred))?;
-    Some((k.as_str(), v))
+    let media = match v {
+        RefOr::T(m) => m,
+        RefOr::Ref(_) => empty_content(),
+    };
+    Some((k.as_str(), media))
 }
 
 fn media_specificity_score(media_type: &str, preferred: Option<&str>) -> (i32, i32, usize) {
@@ -730,6 +740,9 @@ fn parse_encoding_value(
             "headers".to_string(),
             serde_json::Value::Object(serde_json::Map::new()),
         );
+        obj.remove("encoding");
+        obj.remove("prefixEncoding");
+        obj.remove("itemEncoding");
     }
     let enc = serde_json::from_value::<Encoding>(normalized).map_err(|e| {
         AppError::General(format!(
@@ -967,8 +980,13 @@ fn encoding_to_info(enc: &Encoding) -> AppResult<EncodingInfo> {
         if h_name.eq_ignore_ascii_case("content-type") {
             continue;
         }
-        let ty = map_schema_to_rust_type(&h_ref.schema, true)?;
-        headers.insert(h_name.clone(), ty);
+        if let RefOr::T(header_obj) = h_ref {
+            let ty = match &header_obj.schema {
+                Some(schema) => map_schema_to_rust_type(schema, true)?,
+                None => "String".to_string(),
+            };
+            headers.insert(h_name.clone(), ty);
+        }
     }
 
     Ok(EncodingInfo {
@@ -988,6 +1006,7 @@ fn map_param_style(style: Option<&ParameterStyle>) -> Option<ParamStyle> {
         Some(ParameterStyle::Matrix) => Some(ParamStyle::Matrix),
         Some(ParameterStyle::Label) => Some(ParamStyle::Label),
         Some(ParameterStyle::Form) => Some(ParamStyle::Form),
+        Some(ParameterStyle::Cookie) => Some(ParamStyle::Cookie),
         Some(ParameterStyle::Simple) => Some(ParamStyle::Simple),
         Some(ParameterStyle::SpaceDelimited) => Some(ParamStyle::SpaceDelimited),
         Some(ParameterStyle::PipeDelimited) => Some(ParamStyle::PipeDelimited),
@@ -1453,9 +1472,9 @@ mod tests {
             .header(
                 "X-Image-Id",
                 HeaderBuilder::new()
-                    .schema(RefOr::Ref(utoipa::openapi::Ref::new(
+                    .schema(Some(RefOr::Ref(utoipa::openapi::Ref::new(
                         "#/components/schemas/Uuid",
-                    )))
+                    ))))
                     .build(),
             )
             .build();
@@ -1514,17 +1533,17 @@ mod tests {
             .header(
                 "Content-Type",
                 HeaderBuilder::new()
-                    .schema(RefOr::Ref(utoipa::openapi::Ref::new(
+                    .schema(Some(RefOr::Ref(utoipa::openapi::Ref::new(
                         "#/components/schemas/String",
-                    )))
+                    ))))
                     .build(),
             )
             .header(
                 "X-Trace-Id",
                 HeaderBuilder::new()
-                    .schema(RefOr::Ref(utoipa::openapi::Ref::new(
+                    .schema(Some(RefOr::Ref(utoipa::openapi::Ref::new(
                         "#/components/schemas/Uuid",
-                    )))
+                    ))))
                     .build(),
             )
             .build();
@@ -2581,13 +2600,13 @@ components:
                 .header(
                     "Content-Type",
                     HeaderBuilder::new()
-                        .schema(RefOr::Ref(Ref::new("#/components/schemas/String")))
+                        .schema(Some(RefOr::Ref(Ref::new("#/components/schemas/String"))))
                         .build(),
                 )
                 .header(
                     "X-Custom",
                     HeaderBuilder::new()
-                        .schema(RefOr::Ref(Ref::new("#/components/schemas/Uuid")))
+                        .schema(Some(RefOr::Ref(Ref::new("#/components/schemas/Uuid"))))
                         .build(),
                 )
                 .build(),
@@ -2616,6 +2635,7 @@ components:
             Some(ParameterStyle::Matrix),
             Some(ParameterStyle::Label),
             Some(ParameterStyle::Form),
+            Some(ParameterStyle::Cookie),
             Some(ParameterStyle::Simple),
             Some(ParameterStyle::SpaceDelimited),
             Some(ParameterStyle::PipeDelimited),
@@ -2624,6 +2644,45 @@ components:
         ] {
             let _ = map_param_style(style.as_ref());
         }
+
+        // Cover RefOr::Ref arms in select_request_media, select_best_media, and encoding_to_info,
+        // as well as Header { schema: None } in encoding_to_info
+        let mut ref_media_map = BTreeMap::new();
+        ref_media_map.insert(
+            "application/json".to_string(),
+            RefOr::Ref(Ref::new("#/components/mediaTypes/JsonRef")),
+        );
+        let (fmt_json, key_json, _) =
+            select_request_media(&ref_media_map).expect("select ref json");
+        assert_eq!(fmt_json, BodyFormat::Json);
+        assert_eq!(key_json, "application/json");
+
+        let mut fallback_ref_media_map = BTreeMap::new();
+        fallback_ref_media_map.insert(
+            "application/x-custom-unknown".to_string(),
+            RefOr::Ref(Ref::new("#/components/mediaTypes/CustomRef")),
+        );
+        let (fmt_custom, key_custom, _) =
+            select_request_media(&fallback_ref_media_map).expect("select ref fallback");
+        assert_eq!(fmt_custom, BodyFormat::Binary);
+        assert_eq!(key_custom, "application/x-custom-unknown");
+
+        let mut enc_with_no_schema_and_ref = utoipa::openapi::encoding::Encoding::default();
+        let mut no_schema_hdr = HeaderBuilder::new().build();
+        no_schema_hdr.schema = None;
+        enc_with_no_schema_and_ref
+            .headers
+            .insert("X-No-Schema".to_string(), RefOr::T(no_schema_hdr));
+        enc_with_no_schema_and_ref.headers.insert(
+            "X-Ref-Header".to_string(),
+            RefOr::Ref(Ref::new("#/components/headers/RefHdr")),
+        );
+        let enc_info = encoding_to_info(&enc_with_no_schema_and_ref).expect("encoding_to_info");
+        assert_eq!(
+            enc_info.headers.get("X-No-Schema").map(String::as_str),
+            Some("String")
+        );
+        assert!(!enc_info.headers.contains_key("X-Ref-Header"));
 
         // Cover closure false/None return paths for tarpaulin DWARF line tables
         let mut extra_comps = ShimComponents::default();

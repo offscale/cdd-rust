@@ -8,7 +8,7 @@
 use crate::error::AppResult;
 use crate::openapi::parse::ParsedRoute;
 use ra_ap_edition::Edition;
-use ra_ap_syntax::ast::{self, HasArgList, HasDocComments, HasName};
+use ra_ap_syntax::ast::{self, HasArgList, HasAttrs, HasName};
 use ra_ap_syntax::{AstNode, AstToken, SourceFile};
 use std::collections::BTreeMap;
 

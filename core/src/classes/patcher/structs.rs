@@ -144,8 +144,8 @@ pub fn add_derive(source: &str, struct_name: &str, derive_trait: &str) -> AppRes
         }
 
         let r_paren = attr
-            .token_tree()
-            .and_then(|tt| tt.r_paren_token())
+            .as_simple_call()
+            .and_then(|(_, tt)| tt.r_paren_token())
             .ok_or_else(|| AppError::General("Derive attribute has no closing delimiter".into()))?;
 
         let insert_pos: usize = r_paren.text_range().start().into();

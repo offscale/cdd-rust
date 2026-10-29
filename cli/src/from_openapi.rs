@@ -405,13 +405,15 @@ pub(crate) fn write_package_skeleton_files(
             let cargo_toml = format!(
                 r#"[package]
 name = "{}"
-version = "0.0.1"
+version = "{}"
 edition = "2021"
 
 [dependencies]
 {}
 "#,
-                pkg_name, dependencies
+                pkg_name,
+                env!("CARGO_PKG_VERSION"),
+                dependencies
             );
             fs::write(cargo_toml_path, cargo_toml)?;
         }

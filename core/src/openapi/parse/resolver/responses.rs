@@ -354,23 +354,28 @@ fn extract_response_headers(
 
     // Fallback to typed headers when raw headers are not available.
     let mut headers = Vec::new();
-    for (name, header_obj) in &response.headers {
+    for (name, header_ref) in &response.headers {
         if name.eq_ignore_ascii_case("content-type") {
             continue;
         }
-        let ty = map_schema_to_rust_type(&header_obj.schema, true)?;
-        headers.push(ResponseHeader {
-            name: name.clone(),
-            description: header_obj.description.clone(),
-            required: false,
-            deprecated: false,
-            style: None,
-            explode: None,
-            ty,
-            content_media_type: None,
-            example: None,
-            extensions: BTreeMap::new(),
-        });
+        if let RefOr::T(header_obj) = header_ref {
+            let ty = match &header_obj.schema {
+                Some(schema) => map_schema_to_rust_type(schema, true)?,
+                None => "String".to_string(),
+            };
+            headers.push(ResponseHeader {
+                name: name.clone(),
+                description: header_obj.description.clone(),
+                required: false,
+                deprecated: false,
+                style: None,
+                explode: None,
+                ty,
+                content_media_type: None,
+                example: None,
+                extensions: BTreeMap::new(),
+            });
+        }
     }
     Ok(headers)
 }
@@ -737,8 +742,13 @@ fn resolve_media_type_ref(
 /// 2. Any `+json` media type (e.g. `application/vnd.api+json`)
 /// 3. `application/*`
 /// 4. `*/*`
+fn empty_content() -> &'static Content {
+    static EMPTY: std::sync::LazyLock<Content> = std::sync::LazyLock::new(Content::default);
+    &EMPTY
+}
+
 /// 5. First available entry
-fn select_response_media(content: &IndexMap<String, Content>) -> Option<(&str, &Content)> {
+fn select_response_media(content: &IndexMap<String, RefOr<Content>>) -> Option<(&str, &Content)> {
     if let Some((key, media)) =
         select_best_media(content, is_json_media_type, Some("application/json"))
     {
@@ -757,11 +767,14 @@ fn select_response_media(content: &IndexMap<String, Content>) -> Option<(&str, &
         return Some((key, media));
     }
 
-    content.iter().next().map(|(k, media)| (k.as_str(), media))
+    content.iter().next().map(|(k, v)| match v {
+        RefOr::T(media) => (k.as_str(), media),
+        RefOr::Ref(_) => (k.as_str(), empty_content()),
+    })
 }
 
 fn select_best_media<'a, F>(
-    content: &'a IndexMap<String, Content>,
+    content: &'a IndexMap<String, RefOr<Content>>,
     predicate: F,
     preferred: Option<&str>,
 ) -> Option<(&'a str, &'a Content)>
@@ -770,7 +783,11 @@ where
 {
     let filtered = content.iter().filter(|(k, _)| predicate(k));
     let (k, v) = filtered.max_by_key(|(k, _)| media_specificity_score(k, preferred))?;
-    Some((k.as_str(), v))
+    let media = match v {
+        RefOr::T(m) => m,
+        RefOr::Ref(_) => empty_content(),
+    };
+    Some((k.as_str(), media))
 }
 
 fn media_specificity_score(media_type: &str, preferred: Option<&str>) -> (i32, i32, usize) {
@@ -1951,17 +1968,17 @@ mod tests {
             .header(
                 "Content-Type",
                 HeaderBuilder::new()
-                    .schema(RefOr::Ref(utoipa::openapi::Ref::new(
+                    .schema(Some(RefOr::Ref(utoipa::openapi::Ref::new(
                         "#/components/schemas/Ignored",
-                    )))
+                    ))))
                     .build(),
             )
             .header(
                 "X-Rate-Limit",
                 HeaderBuilder::new()
-                    .schema(RefOr::Ref(utoipa::openapi::Ref::new(
+                    .schema(Some(RefOr::Ref(utoipa::openapi::Ref::new(
                         "#/components/schemas/Limit",
-                    )))
+                    ))))
                     .build(),
             )
             .build();
@@ -2361,17 +2378,17 @@ mod tests {
             .header(
                 "Content-Type",
                 HeaderBuilder::new()
-                    .schema(RefOr::Ref(utoipa::openapi::Ref::new(
+                    .schema(Some(RefOr::Ref(utoipa::openapi::Ref::new(
                         "#/components/schemas/S",
-                    )))
+                    ))))
                     .build(),
             )
             .header(
                 "X-Typed",
                 HeaderBuilder::new()
-                    .schema(RefOr::Ref(utoipa::openapi::Ref::new(
+                    .schema(Some(RefOr::Ref(utoipa::openapi::Ref::new(
                         "#/components/schemas/S",
-                    )))
+                    ))))
                     .build(),
             )
             .build();
@@ -2775,8 +2792,7 @@ info:
 paths: {}
 components:
   responses:
-    BadExtResp:
-      $ref: '#/components/responses/Other'
+    BadExtResp: "not_a_response"
 "#,
             )
             .expect("register extra");
@@ -2833,5 +2849,35 @@ components:
             None,
         )
         .is_some());
+
+        // Cover Header { schema: None } and RefOr::Ref in extract_response_headers,
+        // and fallback RefOr::Ref in select_response_media
+        let mut resp_edge = utoipa::openapi::ResponseBuilder::new()
+            .description("edge")
+            .build();
+        let mut hdr_no_schema = utoipa::openapi::header::HeaderBuilder::new().build();
+        hdr_no_schema.schema = None;
+        resp_edge
+            .headers
+            .insert("X-No-Schema".to_string(), RefOr::T(hdr_no_schema));
+        resp_edge.headers.insert(
+            "X-Ref-Hdr".to_string(),
+            RefOr::Ref(utoipa::openapi::Ref::new("#/components/headers/RefHdr")),
+        );
+        let edge_hdrs =
+            extract_response_headers(&resp_edge, None, None, None, None).expect("edge hdrs");
+        assert_eq!(edge_hdrs.len(), 1);
+        assert_eq!(edge_hdrs[0].name, "X-No-Schema");
+        assert_eq!(edge_hdrs[0].ty, "String");
+
+        let mut fallback_content = IndexMap::new();
+        fallback_content.insert(
+            "application/x-custom-unknown".to_string(),
+            RefOr::Ref(utoipa::openapi::Ref::new(
+                "#/components/mediaTypes/CustomRef",
+            )),
+        );
+        let (sel_key, _) = select_response_media(&fallback_content).expect("fallback ref media");
+        assert_eq!(sel_key, "application/x-custom-unknown");
     }
 }
