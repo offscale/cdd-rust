@@ -76,11 +76,64 @@ pub struct CodeComponents {
     /// Wrapping boilerplate (`None` when `--no-wrapping` is set).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wrapper_start: Option<String>,
-    /// Core logic / invocation snippet.
-    pub code: String,
+    /// Core logic / invocation snippet (indented when wrapped, dedented when `no_wrapping` is set).
+    pub snippet: String,
     /// Closing boilerplate (`None` when `--no-wrapping` is set).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wrapper_end: Option<String>,
+    /// Complete assembled code block combining the active sections.
+    pub code: String,
+}
+
+/// Assembles a complete [`CodeComponents`] struct from its optional imports,
+/// optional wrapper lines, and unindented body lines.
+fn assemble_code_components(
+    raw_imports: String,
+    wrapper_start_str: String,
+    unindented_lines: &[String],
+    wrapper_end_str: String,
+    no_imports: bool,
+    no_wrapping: bool,
+) -> CodeComponents {
+    let indent = if no_wrapping { "" } else { "    " };
+    let snippet = unindented_lines
+        .iter()
+        .map(|line| format!("{}{}", indent, line))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let imports = if no_imports { None } else { Some(raw_imports) };
+    let wrapper_start = if no_wrapping {
+        None
+    } else {
+        Some(wrapper_start_str)
+    };
+    let wrapper_end = if no_wrapping {
+        None
+    } else {
+        Some(wrapper_end_str)
+    };
+
+    let mut full_parts = Vec::new();
+    if let Some(ref imp) = imports {
+        full_parts.push(imp.clone());
+        full_parts.push(String::new());
+    }
+    if let Some(ref ws) = wrapper_start {
+        full_parts.push(ws.clone());
+    }
+    full_parts.push(snippet.clone());
+    if let Some(ref we) = wrapper_end {
+        full_parts.push(we.clone());
+    }
+
+    CodeComponents {
+        imports,
+        wrapper_start,
+        snippet,
+        wrapper_end,
+        code: full_parts.join("\n"),
+    }
 }
 
 /// Run the `to_docs_json` command and output the JSON representation.
@@ -135,7 +188,7 @@ fn build_sdk_client_snippet(
     let handler_name = &route.handler_name;
 
     let mut lines = Vec::new();
-    lines.push(format!("    let base_url = {:?};", base_url));
+    lines.push(format!("let base_url = {:?};", base_url));
     let mut call_args = vec!["&client".to_string(), "base_url".to_string()];
 
     // 1. Path parameters
@@ -148,14 +201,14 @@ fn build_sdk_client_snippet(
         let parsed_ty = param.rust_type();
         if parsed_ty == RustType::String {
             lines.push(format!(
-                "    let {}: String = {:?}.to_string();",
+                "let {}: String = {:?}.to_string();",
                 var_name, param.name
             ));
         } else if parsed_ty.is_integer() {
-            lines.push(format!("    let {}: {} = 1;", var_name, param.ty));
+            lines.push(format!("let {}: {} = 1;", var_name, param.ty));
         } else {
             lines.push(format!(
-                "    let {}: {} = Default::default();",
+                "let {}: {} = Default::default();",
                 var_name, param.ty
             ));
         }
@@ -170,14 +223,14 @@ fn build_sdk_client_snippet(
     {
         let var_name = to_snake_case(&qs_param.name);
         lines.push(format!(
-            "    let {}: {} = Default::default();",
+            "let {}: {} = Default::default();",
             var_name, qs_param.ty
         ));
         call_args.push(var_name);
     } else if route.params.iter().any(|p| p.source == ParamSource::Query) {
         let struct_name = format!("{}Query", to_pascal_case(handler_name));
         lines.push(format!(
-            "    let query = api_client::handlers::{}::{}::default();",
+            "let query = api_client::handlers::{}::{}::default();",
             module_name, struct_name
         ));
         call_args.push("query".to_string());
@@ -190,7 +243,7 @@ fn build_sdk_client_snippet(
         .filter(|p| p.source == ParamSource::Header)
     {
         let var_name = to_snake_case(&param.name);
-        lines.push(format!("    let {} = Default::default();", var_name));
+        lines.push(format!("let {} = Default::default();", var_name));
         call_args.push(var_name);
     }
 
@@ -201,51 +254,45 @@ fn build_sdk_client_snippet(
         .filter(|p| p.source == ParamSource::Cookie)
     {
         let var_name = to_snake_case(&param.name);
-        lines.push(format!("    let {} = Default::default();", var_name));
+        lines.push(format!("let {} = Default::default();", var_name));
         call_args.push(var_name);
     }
 
     // 5. Security
     if route.security.iter().any(|g| !g.is_anonymous()) {
-        lines.push("    let auth_token = Some(\"YOUR_TOKEN\");".to_string());
+        lines.push("let auth_token = Some(\"YOUR_TOKEN\");".to_string());
         call_args.push("auth_token".to_string());
     }
 
     // 6. Request body
     if let Some(def) = &route.request_body {
         if def.required {
-            lines.push("    let body = Default::default();".to_string());
+            lines.push("let body = Default::default();".to_string());
         } else {
-            lines.push("    let body = None;".to_string());
+            lines.push("let body = None;".to_string());
         }
         call_args.push("body".to_string());
     }
 
     lines.push(format!(
-        "    let response = api_client::handlers::{}::{}({}).await?;",
+        "let response = api_client::handlers::{}::{}({}).await?;",
         module_name,
         handler_name,
         call_args.join(", ")
     ));
-    lines.push("    println!(\"{:?}\", response);".to_string());
+    lines.push("println!(\"{:?}\", response);".to_string());
 
-    CodeComponents {
-        imports: if no_imports { None } else { Some(raw_imports) },
-        wrapper_start: if no_wrapping {
-            None
-        } else {
-            Some(wrapper_start_str)
-        },
-        code: lines.join("\n"),
-        wrapper_end: if no_wrapping {
-            None
-        } else {
-            Some(wrapper_end_str)
-        },
-    }
+    assemble_code_components(
+        raw_imports,
+        wrapper_start_str,
+        &lines,
+        wrapper_end_str,
+        no_imports,
+        no_wrapping,
+    )
 }
 
-/// Builds structured [`CodeComponents`] (`imports`, `wrapper_start`, `code`, `wrapper_end`)
+/// Builds structured [`CodeComponents`] (`imports`, `wrapper_start`, `snippet`, `wrapper_end`, `code`)
 /// for a route using `generate_query_struct` and `generate_function`.
 fn build_strategy_snippet(
     route: &ParsedRoute,
@@ -269,8 +316,11 @@ fn build_strategy_snippet(
         .trim_end()
         .strip_suffix('}')
         .unwrap_or(after_brace)
-        .trim()
-        .to_string();
+        .trim();
+    let inner_lines: Vec<String> = inner_body
+        .lines()
+        .map(|l| l.strip_prefix("    ").unwrap_or(l).to_string())
+        .collect();
     let closing = "}".to_string();
 
     let wrapper_start_str = [default_wrapper_start, sig_wrapper.as_str()]
@@ -279,16 +329,14 @@ fn build_strategy_snippet(
         .collect::<Vec<_>>()
         .join("\n");
 
-    Ok(CodeComponents {
-        imports: if no_imports { None } else { Some(raw_imports) },
-        wrapper_start: if no_wrapping {
-            None
-        } else {
-            Some(wrapper_start_str)
-        },
-        code: inner_body,
-        wrapper_end: if no_wrapping { None } else { Some(closing) },
-    })
+    Ok(assemble_code_components(
+        raw_imports,
+        wrapper_start_str,
+        &inner_lines,
+        closing,
+        no_imports,
+        no_wrapping,
+    ))
 }
 
 /// Builds workflow code snippets (`default`, `actix`, `axum`) for a single Arazzo [`Workflow`].
@@ -300,89 +348,69 @@ fn build_workflow_snippets(
     let wf_snake = to_snake_case(&wf.workflow_id);
     let wf_pascal = to_pascal_case(&wf.workflow_id);
 
-    let default = CodeComponents {
-        imports: if no_imports {
-            None
-        } else {
-            Some(format!(
-                "use reqwest::Client;\nuse api_client::workflows::{{WorkflowsClient, {}Inputs}};",
-                wf_pascal
-            ))
-        },
-        wrapper_start: if no_wrapping {
-            None
-        } else {
-            Some(
-                "#[tokio::main]\nasync fn main() -> Result<(), Box<dyn std::error::Error>> {\n    let client = WorkflowsClient::new(Client::new());"
-                    .to_string(),
-            )
-        },
-        code: format!(
-            "    let inputs = {0}Inputs::default();\n    let outputs = client.{1}(inputs).await?;\n    println!(\"{{:?}}\", outputs);",
-            wf_pascal, wf_snake
+    let default_lines = vec![
+        format!("let inputs = {}Inputs::default();", wf_pascal),
+        format!("let outputs = client.{}(inputs).await?;", wf_snake),
+        "println!(\"{:?}\", outputs);".to_string(),
+    ];
+    let default = assemble_code_components(
+        format!(
+            "use reqwest::Client;\nuse api_client::workflows::{{WorkflowsClient, {}Inputs}};",
+            wf_pascal
         ),
-        wrapper_end: if no_wrapping {
-            None
-        } else {
-            Some("    Ok(())\n}".to_string())
-        },
-    };
+        "#[tokio::main]\nasync fn main() -> Result<(), Box<dyn std::error::Error>> {\n    let client = WorkflowsClient::new(Client::new());"
+            .to_string(),
+        &default_lines,
+        "    Ok(())\n}".to_string(),
+        no_imports,
+        no_wrapping,
+    );
 
-    let actix = CodeComponents {
-        imports: if no_imports {
-            None
-        } else {
-            Some(format!(
-                "use actix_web::{{web, HttpResponse}};\nuse crate::workflows::{{WorkflowsClient, {0}Inputs}};",
-                wf_pascal
-            ))
-        },
-        wrapper_start: if no_wrapping {
-            None
-        } else {
-            Some(format!(
-                "pub async fn handle_workflow_{}(body: web::Json<{}Inputs>) -> HttpResponse {{",
-                wf_snake, wf_pascal
-            ))
-        },
-        code: format!(
-            "    let client = WorkflowsClient::new(reqwest::Client::new());\n    let outputs = client.{}(body.into_inner()).await.unwrap_or_default();\n    HttpResponse::Ok().json(outputs)",
+    let actix_lines = vec![
+        "let client = WorkflowsClient::new(reqwest::Client::new());".to_string(),
+        format!(
+            "let outputs = client.{}(body.into_inner()).await.unwrap_or_default();",
             wf_snake
         ),
-        wrapper_end: if no_wrapping {
-            None
-        } else {
-            Some("}".to_string())
-        },
-    };
+        "HttpResponse::Ok().json(outputs)".to_string(),
+    ];
+    let actix = assemble_code_components(
+        format!(
+            "use actix_web::{{web, HttpResponse}};\nuse crate::workflows::{{WorkflowsClient, {0}Inputs}};",
+            wf_pascal
+        ),
+        format!(
+            "pub async fn handle_workflow_{}(body: web::Json<{}Inputs>) -> HttpResponse {{",
+            wf_snake, wf_pascal
+        ),
+        &actix_lines,
+        "}".to_string(),
+        no_imports,
+        no_wrapping,
+    );
 
-    let axum = CodeComponents {
-        imports: if no_imports {
-            None
-        } else {
-            Some(format!(
-                "use axum::Json;\nuse crate::workflows::{{WorkflowsClient, {0}Inputs, {0}Outputs}};",
-                wf_pascal
-            ))
-        },
-        wrapper_start: if no_wrapping {
-            None
-        } else {
-            Some(format!(
-                "pub async fn handle_workflow_{0}(Json(inputs): Json<{1}Inputs>) -> Json<{1}Outputs> {{",
-                wf_snake, wf_pascal
-            ))
-        },
-        code: format!(
-            "    let client = WorkflowsClient::new(reqwest::Client::new());\n    let outputs = client.{}(inputs).await.unwrap_or_default();\n    Json(outputs)",
+    let axum_lines = vec![
+        "let client = WorkflowsClient::new(reqwest::Client::new());".to_string(),
+        format!(
+            "let outputs = client.{}(inputs).await.unwrap_or_default();",
             wf_snake
         ),
-        wrapper_end: if no_wrapping {
-            None
-        } else {
-            Some("}".to_string())
-        },
-    };
+        "Json(outputs)".to_string(),
+    ];
+    let axum = assemble_code_components(
+        format!(
+            "use axum::Json;\nuse crate::workflows::{{WorkflowsClient, {0}Inputs, {0}Outputs}};",
+            wf_pascal
+        ),
+        format!(
+            "pub async fn handle_workflow_{0}(Json(inputs): Json<{1}Inputs>) -> Json<{1}Outputs> {{",
+            wf_snake, wf_pascal
+        ),
+        &axum_lines,
+        "}".to_string(),
+        no_imports,
+        no_wrapping,
+    );
 
     OperationSnippets {
         default,
@@ -645,6 +673,7 @@ webhooks:
         let result = generate_docs_json_str(&args).expect("Failed to generate docs JSON");
         assert!(result.contains(r#""/pets/{id}/{count}/{uuid}""#));
         assert!(result.contains(r#""newPet""#));
+        assert!(result.contains(r#""snippet": "    let base_url = \"https://test.api.com/v1\";"#));
         assert!(result.contains("api_client::handlers::pets::update_pet"));
         assert!(result.contains("api_client::handlers::default::raw_query_op"));
         assert!(result.contains("reqwest::Client::new()"));
@@ -662,6 +691,10 @@ webhooks:
             generate_docs_json_str(&args_stripped).expect("Failed to generate stripped docs JSON");
         assert!(!result_stripped.contains(r#""imports""#));
         assert!(!result_stripped.contains(r#""wrapper_start""#));
+        assert!(
+            result_stripped.contains(r#""snippet": "let base_url = \"https://test.api.com/v1\";"#)
+        );
+        assert!(result_stripped.contains(r#""code": "let base_url = \"https://test.api.com/v1\";"#));
 
         // Test Arazzo workflow documentation generation
         let arazzo_yaml = r#"
@@ -696,6 +729,9 @@ workflows:
         assert!(arazzo_json.contains("WorkflowsClient::new"));
         assert!(arazzo_json.contains("client.purchase_pet(inputs).await?"));
         assert!(arazzo_json.contains("handle_workflow_purchase_pet"));
+        assert!(
+            arazzo_json.contains(r#""snippet": "    let inputs = PurchasePetInputs::default();"#)
+        );
 
         let arazzo_stripped = ToDocsJsonArgs {
             input: arazzo_file.path().to_string_lossy().to_string(),
@@ -707,6 +743,11 @@ workflows:
             .expect("Failed to generate stripped Arazzo docs JSON");
         assert!(!arazzo_json_stripped.contains(r#""imports""#));
         assert!(!arazzo_json_stripped.contains(r#""wrapper_start""#));
+        assert!(arazzo_json_stripped
+            .contains(r#""snippet": "let inputs = PurchasePetInputs::default();"#));
+        assert!(
+            arazzo_json_stripped.contains(r#""code": "let inputs = PurchasePetInputs::default();"#)
+        );
     }
 
     #[test]
