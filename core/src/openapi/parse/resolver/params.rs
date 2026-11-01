@@ -42,6 +42,10 @@ pub enum SchemaOrBool {
 }
 
 impl SchemaOrBool {
+    /// Executes `as_schema` (as schema).
+    ///
+    /// # Returns
+    /// Resulting `Option<&RefOr<Schema>>` value.
     fn as_schema(&self) -> Option<&RefOr<Schema>> {
         match self {
             SchemaOrBool::Schema(schema) => Some(schema),
@@ -108,12 +112,17 @@ pub struct ShimParameter {
     pub raw: JsonValue,
 }
 
+/// Internal representation for `ResolvedParameter` (resolved parameter).
 struct ResolvedParameter {
+    /// Field `param` (param).
     param: ShimParameter,
+    /// Field `components` (components).
     components: Option<ShimComponents>,
+    /// Field `base_uri` (base uri).
     base_uri: Option<Url>,
 }
 
+/// Internal representation for `ShimParameterData` (shim parameter data).
 #[derive(Clone, Serialize, Deserialize, PartialEq, Default)]
 struct ShimParameterData {
     /// Name of the parameter.
@@ -284,6 +293,17 @@ impl fmt::Debug for ShimParameter {
 ///
 /// `is_oas3` toggles strict OpenAPI 3.x requirements for `schema`/`content`.
 /// Swagger 2.0 legacy parameters use `type`/`format`/`items` when present.
+///
+/// # Arguments
+/// * `params` - Input `params` parameter.
+/// * `components` - Input `components` parameter.
+/// * `is_oas3` - Input `is_oas3` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<RouteParam>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn resolve_parameters(
     params: &[RefOr<ShimParameter>],
     components: Option<&ShimComponents>,
@@ -293,6 +313,19 @@ pub fn resolve_parameters(
 }
 
 /// Resolves parameters with optional external reference resolution.
+///
+/// # Arguments
+/// * `params` - Input `params` parameter.
+/// * `components` - Input `components` parameter.
+/// * `is_oas3` - Input `is_oas3` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<RouteParam>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn resolve_parameters_with_registry(
     params: &[RefOr<ShimParameter>],
     components: Option<&ShimComponents>,
@@ -361,6 +394,12 @@ pub fn resolve_parameters_with_registry(
 }
 
 /// Determines whether a parameter should be ignored because it targets a reserved HTTP header.
+///
+/// # Arguments
+/// * `param` - Input `param` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn should_ignore_header_param(param: &ShimParameter) -> bool {
     if !param.parameter_in.eq_ignore_ascii_case("header") {
         return false;
@@ -373,6 +412,15 @@ fn should_ignore_header_param(param: &ShimParameter) -> bool {
 }
 
 /// Helper to resolve a `Ref` to its target Parameter definition.
+///
+/// # Arguments
+/// * `r` - Input `r` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `Option<ResolvedParameter>` value.
 fn resolve_parameter_ref(
     r: &utoipa::openapi::Ref,
     components: Option<&ShimComponents>,
@@ -414,6 +462,13 @@ fn process_parameter(
     process_parameter_with_registry(param, components, is_oas3, None, None)
 }
 
+/// Executes `filter_extensions` (filter extensions).
+///
+/// # Arguments
+/// * `raw` - Input `raw` parameter.
+///
+/// # Returns
+/// Resulting `BTreeMap<String, JsonValue>` value.
 fn filter_extensions(raw: &JsonValue) -> BTreeMap<String, JsonValue> {
     raw.as_object()
         .map(|obj| {
@@ -425,6 +480,20 @@ fn filter_extensions(raw: &JsonValue) -> BTreeMap<String, JsonValue> {
         .unwrap_or_default()
 }
 
+/// Executes `process_parameter_with_registry` (process parameter with registry).
+///
+/// # Arguments
+/// * `param` - Input `param` parameter.
+/// * `components` - Input `components` parameter.
+/// * `is_oas3` - Input `is_oas3` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<RouteParam>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn process_parameter_with_registry(
     param: &ShimParameter,
     components: Option<&ShimComponents>,
@@ -702,6 +771,17 @@ fn extract_content_example(
     None
 }
 
+/// Executes `raw_media_for_first_entry` (raw media for first entry).
+///
+/// # Arguments
+/// * `raw_content` - Input `raw_content` parameter.
+/// * `content` - Input `content` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `Option<JsonValue>` value.
 fn raw_media_for_first_entry(
     raw_content: Option<&JsonValue>,
     content: Option<&BTreeMap<String, Content>>,
@@ -715,6 +795,14 @@ fn raw_media_for_first_entry(
     raw_media_for_type(Some(raw_map), key, components, registry, base_uri)
 }
 
+/// Executes `extract_raw_media_example` (extract raw media example).
+///
+/// # Arguments
+/// * `raw_media` - Input `raw_media` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `Option<ExampleValue>` value.
 fn extract_raw_media_example(
     raw_media: &JsonValue,
     components: Option<&ShimComponents>,
@@ -767,6 +855,14 @@ fn extract_content_example_ref_or(
     }
 }
 
+/// Executes `extract_example_value_with_ref_overrides` (extract example value with ref overrides).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `Option<ExampleValue>` value.
 fn extract_example_value_with_ref_overrides(
     value: &JsonValue,
     components: Option<&ShimComponents>,
@@ -783,6 +879,15 @@ fn extract_example_value_with_ref_overrides(
     extract_example_value(value, components, &mut std::collections::HashSet::new())
 }
 
+/// Executes `extract_example_value` (extract example value).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+/// * `components` - Input `components` parameter.
+/// * `visiting` - Input `visiting` parameter.
+///
+/// # Returns
+/// Resulting `Option<ExampleValue>` value.
 fn extract_example_value(
     value: &JsonValue,
     components: Option<&ShimComponents>,
@@ -831,6 +936,13 @@ fn extract_example_value(
     None
 }
 
+/// Executes `example_meta_from_obj` (example meta from obj).
+///
+/// # Arguments
+/// * `obj` - Input `obj` parameter.
+///
+/// # Returns
+/// Resulting `(Option<String>, Option<String>)` value.
 fn example_meta_from_obj(
     obj: &serde_json::Map<String, serde_json::Value>,
 ) -> (Option<String>, Option<String>) {
@@ -845,6 +957,14 @@ fn example_meta_from_obj(
     (summary, description)
 }
 
+/// Executes `extract_schema_example` (extract schema example).
+///
+/// # Arguments
+/// * `schema_ref` - Input `schema_ref` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `Option<JsonValue>` value.
 fn extract_schema_example(
     schema_ref: &RefOr<Schema>,
     components: Option<&ShimComponents>,
@@ -855,6 +975,13 @@ fn extract_schema_example(
     }
 }
 
+/// Executes `extract_example_from_schema` (extract example from schema).
+///
+/// # Arguments
+/// * `schema` - Input `schema` parameter.
+///
+/// # Returns
+/// Resulting `Option<JsonValue>` value.
 fn extract_example_from_schema(schema: &Schema) -> Option<JsonValue> {
     let (example, examples) = match schema {
         Schema::Object(obj) => (&obj.example, &obj.examples),
@@ -866,6 +993,14 @@ fn extract_example_from_schema(schema: &Schema) -> Option<JsonValue> {
     example.clone().or_else(|| examples.first().cloned())
 }
 
+/// Executes `resolve_schema_example_ref` (resolve schema example ref).
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `Option<JsonValue>` value.
 fn resolve_schema_example_ref(
     ref_str: &str,
     components: Option<&ShimComponents>,
@@ -876,6 +1011,13 @@ fn resolve_schema_example_ref(
     extract_schema_example_from_value(schema_json)
 }
 
+/// Executes `extract_schema_example_from_value` (extract schema example from value).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `Option<JsonValue>` value.
 fn extract_schema_example_from_value(value: &JsonValue) -> Option<JsonValue> {
     let obj = value.as_object()?;
     if let Some(example) = obj.get("example") {
@@ -886,6 +1028,17 @@ fn extract_schema_example_from_value(value: &JsonValue) -> Option<JsonValue> {
         .and_then(|arr| arr.first().cloned())
 }
 
+/// Executes `raw_media_for_type` (raw media for type).
+///
+/// # Arguments
+/// * `content` - Input `content` parameter.
+/// * `media_type` - Input `media_type` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `Option<JsonValue>` value.
 fn raw_media_for_type(
     content: Option<&serde_json::Map<String, JsonValue>>,
     media_type: &str,
@@ -898,6 +1051,17 @@ fn raw_media_for_type(
         .or_else(|| media.as_object().map(|_| media.clone()))
 }
 
+/// Executes `resolve_media_type_ref` (resolve media type ref).
+///
+/// # Arguments
+/// * `raw_media` - Input `raw_media` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+/// * `visiting` - Input `visiting` parameter.
+///
+/// # Returns
+/// Resulting `Option<JsonValue>` value.
 fn resolve_media_type_ref(
     raw_media: &JsonValue,
     components: Option<&ShimComponents>,
@@ -936,16 +1100,37 @@ fn resolve_media_type_ref(
     None
 }
 
+/// Executes `extract_item_schema` (extract item schema).
+///
+/// # Arguments
+/// * `raw_media` - Input `raw_media` parameter.
+///
+/// # Returns
+/// Resulting `Option<Schema>` value.
 fn extract_item_schema(raw_media: &JsonValue) -> Option<Schema> {
     let item_schema = raw_media.get("itemSchema")?;
     serde_json::from_value::<Schema>(item_schema.clone()).ok()
 }
 
+/// Executes `extract_media_schema` (extract media schema).
+///
+/// # Arguments
+/// * `raw_media` - Input `raw_media` parameter.
+///
+/// # Returns
+/// Resulting `Option<RefOr<Schema>>` value.
 fn extract_media_schema(raw_media: &JsonValue) -> Option<RefOr<Schema>> {
     let schema_val = raw_media.get("schema")?;
     serde_json::from_value::<RefOr<Schema>>(schema_val.clone()).ok()
 }
 
+/// Executes `normalize_media_type` (normalize media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn normalize_media_type(media_type: &str) -> String {
     media_type
         .split(';')
@@ -955,6 +1140,13 @@ fn normalize_media_type(media_type: &str) -> String {
         .to_ascii_lowercase()
 }
 
+/// Executes `is_sequential_media_type` (is sequential media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_sequential_media_type(media_type: &str) -> bool {
     let normalized = normalize_media_type(media_type);
     matches!(
@@ -971,6 +1163,15 @@ fn is_sequential_media_type(media_type: &str) -> bool {
         .any(|suffix| normalized.ends_with(suffix))
 }
 
+/// Executes `resolve_example_ref` (resolve example ref).
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+/// * `components` - Input `components` parameter.
+/// * `visiting` - Input `visiting` parameter.
+///
+/// # Returns
+/// Resulting `Option<ExampleValue>` value.
 fn resolve_example_ref(
     ref_str: &str,
     components: Option<&ShimComponents>,
@@ -1055,6 +1256,14 @@ fn resolve_explode(explicit: Option<bool>, style: &Option<ParamStyle>) -> bool {
     matches!(style, Some(ParamStyle::Form) | Some(ParamStyle::Cookie))
 }
 
+/// Executes `map_legacy_parameter_type` (map legacy parameter type).
+///
+/// # Arguments
+/// * `param` - Input `param` parameter.
+/// * `required` - Input `required` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 fn map_legacy_parameter_type(param: &ShimParameter, required: bool) -> Option<String> {
     let schema_type = param.schema_type.as_deref()?;
     let ty = map_legacy_schema_type(schema_type, param.format.as_deref(), param.items.as_deref());
@@ -1066,6 +1275,15 @@ fn map_legacy_parameter_type(param: &ShimParameter, required: bool) -> Option<St
     }
 }
 
+/// Executes `map_legacy_schema_type` (map legacy schema type).
+///
+/// # Arguments
+/// * `schema_type` - Input `schema_type` parameter.
+/// * `format` - Input `format` parameter.
+/// * `items` - Input `items` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn map_legacy_schema_type(
     schema_type: &str,
     format: Option<&str>,
@@ -1108,6 +1326,18 @@ fn map_legacy_schema_type(
     }
 }
 
+/// Executes `validate_style_for_location` (validate style for location).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+/// * `source` - Input `source` parameter.
+/// * `style` - Input `style` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_style_for_location(
     name: &str,
     source: &ParamSource,
@@ -1147,14 +1377,26 @@ fn validate_style_for_location(
     Ok(())
 }
 
+/// Enumeration representing `ParamValueKind` (param value kind).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ParamValueKind {
+    /// Variant `Primitive` (primitive).
     Primitive,
+    /// Variant `Array` (array).
     Array,
+    /// Variant `Object` (object).
     Object,
+    /// Variant `Unknown` (unknown).
     Unknown,
 }
 
+/// Executes `infer_param_value_kind` (infer param value kind).
+///
+/// # Arguments
+/// * `param` - Input `param` parameter.
+///
+/// # Returns
+/// Resulting `ParamValueKind` value.
 fn infer_param_value_kind(param: &ShimParameter) -> ParamValueKind {
     if let Some(schema_ref) = &param.schema {
         return match schema_ref {
@@ -1183,6 +1425,13 @@ fn infer_param_value_kind(param: &ShimParameter) -> ParamValueKind {
     ParamValueKind::Unknown
 }
 
+/// Executes `infer_param_kind_from_schema` (infer param kind from schema).
+///
+/// # Arguments
+/// * `schema` - Input `schema` parameter.
+///
+/// # Returns
+/// Resulting `ParamValueKind` value.
 fn infer_param_kind_from_schema(schema: &RefOr<Schema>) -> ParamValueKind {
     match schema {
         RefOr::T(Schema::Array(_)) => ParamValueKind::Array,
@@ -1191,6 +1440,13 @@ fn infer_param_kind_from_schema(schema: &RefOr<Schema>) -> ParamValueKind {
     }
 }
 
+/// Executes `infer_param_kind_from_schema_type` (infer param kind from schema type).
+///
+/// # Arguments
+/// * `schema_type` - Input `schema_type` parameter.
+///
+/// # Returns
+/// Resulting `ParamValueKind` value.
 fn infer_param_kind_from_schema_type(schema_type: &SchemaType) -> ParamValueKind {
     match schema_type {
         SchemaType::Type(Type::Array) | SchemaType::Array(_) => ParamValueKind::Array,
@@ -1204,6 +1460,13 @@ fn infer_param_kind_from_schema_type(schema_type: &SchemaType) -> ParamValueKind
     }
 }
 
+/// Executes `infer_param_kind_from_legacy_type` (infer param kind from legacy type).
+///
+/// # Arguments
+/// * `schema_type` - Input `schema_type` parameter.
+///
+/// # Returns
+/// Resulting `ParamValueKind` value.
 fn infer_param_kind_from_legacy_type(schema_type: &str) -> ParamValueKind {
     match schema_type {
         "array" => ParamValueKind::Array,
@@ -1213,6 +1476,18 @@ fn infer_param_kind_from_legacy_type(schema_type: &str) -> ParamValueKind {
     }
 }
 
+/// Executes `validate_style_for_type` (validate style for type).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+/// * `style` - Input `style` parameter.
+/// * `kind` - Input `kind` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_style_for_type(
     name: &str,
     style: &Option<ParamStyle>,
@@ -1247,6 +1522,13 @@ fn validate_style_for_type(
     Ok(())
 }
 
+/// Executes `style_name` (style name).
+///
+/// # Arguments
+/// * `style` - Input `style` parameter.
+///
+/// # Returns
+/// Resulting `&'static str` value.
 fn style_name(style: &ParamStyle) -> &'static str {
     match style {
         ParamStyle::Matrix => "matrix",
@@ -1260,6 +1542,13 @@ fn style_name(style: &ParamStyle) -> &'static str {
     }
 }
 
+/// Executes `allowed_style_names` (allowed style names).
+///
+/// # Arguments
+/// * `source` - Input `source` parameter.
+///
+/// # Returns
+/// Resulting `&'static [&'static str]` value.
 fn allowed_style_names(source: &ParamSource) -> &'static [&'static str] {
     match source {
         ParamSource::Path => &["matrix", "label", "simple"],

@@ -63,6 +63,13 @@ pub struct OpenApiInfo {
 
 impl OpenApiInfo {
     /// Creates a new OpenApiInfo with required fields.
+    ///
+    /// # Arguments
+    /// * `title` - Input `title` parameter.
+    /// * `version` - Input `version` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn new(title: impl Into<String>, version: impl Into<String>) -> Self {
         Self {
             title: title.into(),
@@ -84,42 +91,85 @@ impl OpenApiInfo {
     }
 
     /// Sets an optional summary.
+    ///
+    /// # Arguments
+    /// * `summary` - Input `summary` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_summary(mut self, summary: impl Into<String>) -> Self {
         self.summary = Some(summary.into());
         self
     }
 
     /// Sets an optional description.
+    ///
+    /// # Arguments
+    /// * `description` - Input `description` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
         self
     }
 
     /// Sets the Terms of Service URL.
+    ///
+    /// # Arguments
+    /// * `terms` - Input `terms` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_terms_of_service(mut self, terms: impl Into<String>) -> Self {
         self.terms_of_service = Some(terms.into());
         self
     }
 
     /// Sets optional contact metadata.
+    ///
+    /// # Arguments
+    /// * `contact` - Input `contact` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_contact(mut self, contact: OpenApiContact) -> Self {
         self.contact = Some(contact);
         self
     }
 
     /// Sets optional license metadata.
+    ///
+    /// # Arguments
+    /// * `license` - Input `license` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_license(mut self, license: OpenApiLicense) -> Self {
         self.license = Some(license);
         self
     }
 
     /// Sets the `$self` URI for the OpenAPI document.
+    ///
+    /// # Arguments
+    /// * `self_uri` - Input `self_uri` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_self_uri(mut self, self_uri: impl Into<String>) -> Self {
         self.self_uri = Some(self_uri.into());
         self
     }
 
     /// Sets top-level external documentation for the generated OpenAPI document.
+    ///
+    /// # Arguments
+    /// * `url` - Input `url` parameter.
+    /// * `description` - Input `description` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_external_docs(
         mut self,
         url: impl Into<String>,
@@ -133,30 +183,60 @@ impl OpenApiInfo {
     }
 
     /// Adds a server definition to the OpenAPI document.
+    ///
+    /// # Arguments
+    /// * `server` - Input `server` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_server(mut self, server: OpenApiServer) -> Self {
         self.servers.push(server);
         self
     }
 
     /// Replaces the server list for the OpenAPI document.
+    ///
+    /// # Arguments
+    /// * `servers` - Input `servers` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_servers(mut self, servers: Vec<OpenApiServer>) -> Self {
         self.servers = servers;
         self
     }
 
     /// Adds a tag definition to the OpenAPI document.
+    ///
+    /// # Arguments
+    /// * `tag` - Input `tag` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_tag(mut self, tag: OpenApiTag) -> Self {
         self.tags.push(tag);
         self
     }
 
     /// Replaces the tag definitions for the OpenAPI document.
+    ///
+    /// # Arguments
+    /// * `tags` - Input `tags` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_tags(mut self, tags: Vec<OpenApiTag>) -> Self {
         self.tags = tags;
         self
     }
 
     /// Sets top-level security requirements.
+    ///
+    /// # Arguments
+    /// * `security` - Input `security` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_security(
         mut self,
         security: Vec<crate::openapi::parse::models::SecurityRequirementGroup>,
@@ -166,36 +246,75 @@ impl OpenApiInfo {
     }
 
     /// Adds a specification extension (`x-...`) to the Paths Object.
+    ///
+    /// # Arguments
+    /// * `key` - Input `key` parameter.
+    /// * `value` - Input `value` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_paths_extension(mut self, key: impl Into<String>, value: Value) -> Self {
         self.paths_extensions.insert(key.into(), value);
         self
     }
 
     /// Replaces the Paths Object extensions to emit.
+    ///
+    /// # Arguments
+    /// * `extensions` - Input `extensions` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_paths_extensions(mut self, extensions: BTreeMap<String, Value>) -> Self {
         self.paths_extensions = extensions;
         self
     }
 
     /// Adds a specification extension (`x-...`) to the Webhooks Object.
+    ///
+    /// # Arguments
+    /// * `key` - Input `key` parameter.
+    /// * `value` - Input `value` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_webhooks_extension(mut self, key: impl Into<String>, value: Value) -> Self {
         self.webhooks_extensions.insert(key.into(), value);
         self
     }
 
     /// Replaces the Webhooks Object extensions to emit.
+    ///
+    /// # Arguments
+    /// * `extensions` - Input `extensions` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_webhooks_extensions(mut self, extensions: BTreeMap<String, Value>) -> Self {
         self.webhooks_extensions = extensions;
         self
     }
 
     /// Adds a specification extension (`x-...`) to the OpenAPI root.
+    ///
+    /// # Arguments
+    /// * `key` - Input `key` parameter.
+    /// * `value` - Input `value` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_extension(mut self, key: impl Into<String>, value: Value) -> Self {
         self.extensions.insert(key.into(), value);
         self
     }
 
     /// Replaces the specification extensions to emit at the OpenAPI root.
+    ///
+    /// # Arguments
+    /// * `extensions` - Input `extensions` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_extensions(mut self, extensions: BTreeMap<String, Value>) -> Self {
         self.extensions = extensions;
         self
@@ -230,18 +349,36 @@ impl OpenApiContact {
     }
 
     /// Sets the contact name.
+    ///
+    /// # Arguments
+    /// * `name` - Input `name` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_name(mut self, name: impl Into<String>) -> Self {
         self.name = Some(name.into());
         self
     }
 
     /// Sets the contact URL.
+    ///
+    /// # Arguments
+    /// * `url` - Input `url` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_url(mut self, url: impl Into<String>) -> Self {
         self.url = Some(url.into());
         self
     }
 
     /// Sets the contact email.
+    ///
+    /// # Arguments
+    /// * `email` - Input `email` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_email(mut self, email: impl Into<String>) -> Self {
         self.email = Some(email.into());
         self
@@ -261,6 +398,12 @@ pub struct OpenApiLicense {
 
 impl OpenApiLicense {
     /// Creates a new license with the required name.
+    ///
+    /// # Arguments
+    /// * `name` - Input `name` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -270,12 +413,24 @@ impl OpenApiLicense {
     }
 
     /// Sets the license SPDX identifier.
+    ///
+    /// # Arguments
+    /// * `identifier` - Input `identifier` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_identifier(mut self, identifier: impl Into<String>) -> Self {
         self.identifier = Some(identifier.into());
         self
     }
 
     /// Sets the license URL.
+    ///
+    /// # Arguments
+    /// * `url` - Input `url` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_url(mut self, url: impl Into<String>) -> Self {
         self.url = Some(url.into());
         self
@@ -301,6 +456,12 @@ pub struct OpenApiTag {
 
 impl OpenApiTag {
     /// Creates a new tag with the required name.
+    ///
+    /// # Arguments
+    /// * `name` - Input `name` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -313,18 +474,37 @@ impl OpenApiTag {
     }
 
     /// Sets the tag summary.
+    ///
+    /// # Arguments
+    /// * `summary` - Input `summary` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_summary(mut self, summary: impl Into<String>) -> Self {
         self.summary = Some(summary.into());
         self
     }
 
     /// Sets the tag description.
+    ///
+    /// # Arguments
+    /// * `description` - Input `description` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
         self
     }
 
     /// Sets the tag external documentation.
+    ///
+    /// # Arguments
+    /// * `url` - Input `url` parameter.
+    /// * `description` - Input `description` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_external_docs(
         mut self,
         url: impl Into<String>,
@@ -338,12 +518,24 @@ impl OpenApiTag {
     }
 
     /// Sets the parent tag reference.
+    ///
+    /// # Arguments
+    /// * `parent` - Input `parent` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_parent(mut self, parent: impl Into<String>) -> Self {
         self.parent = Some(parent.into());
         self
     }
 
     /// Sets the tag kind.
+    ///
+    /// # Arguments
+    /// * `kind` - Input `kind` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_kind(mut self, kind: impl Into<String>) -> Self {
         self.kind = Some(kind.into());
         self
@@ -369,6 +561,13 @@ pub fn generate_json_schema(model: &ParsedModel, dialect: Option<&str>) -> AppRe
     }
 }
 
+/// Executes `build_info_object` (build info object).
+///
+/// # Arguments
+/// * `info` - Input `info` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn build_info_object(info: &OpenApiInfo) -> Value {
     let mut info_obj = Map::new();
     info_obj.insert("title".to_string(), json!(info.title));
@@ -415,6 +614,17 @@ fn build_info_object(info: &OpenApiInfo) -> Value {
 ///
 /// This is intended for Rust -> OpenAPI workflows where a single type is being reflected
 /// into an OpenAPI description.
+///
+/// # Arguments
+/// * `model` - Input `model` parameter.
+/// * `dialect` - Input `dialect` parameter.
+/// * `info` - Input `info` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Value>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn generate_openapi_document(
     model: &ParsedModel,
     dialect: Option<&str>,
@@ -460,6 +670,18 @@ pub fn generate_openapi_document(
 ///
 /// This is intended for Rust -> OpenAPI workflows that need both `components/schemas`
 /// and `paths`/`webhooks` derived from parsed routes.
+///
+/// # Arguments
+/// * `models` - Input `models` parameter.
+/// * `routes` - Input `routes` parameter.
+/// * `dialect` - Input `dialect` parameter.
+/// * `info` - Input `info` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Value>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn generate_openapi_document_with_routes(
     models: &[ParsedModel],
     routes: &[ParsedRoute],
@@ -561,6 +783,19 @@ pub fn generate_openapi_document_with_routes(
 /// components (responses, parameters, mediaTypes, etc.) must be preserved, and
 /// schema entries must retain raw JSON Schema keywords that are not expressible
 /// in Rust types.
+///
+/// # Arguments
+/// * `models` - Input `models` parameter.
+/// * `routes` - Input `routes` parameter.
+/// * `dialect` - Input `dialect` parameter.
+/// * `info` - Input `info` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Value>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn generate_openapi_document_with_routes_and_components(
     models: &[ParsedModel],
     routes: &[ParsedRoute],
@@ -606,6 +841,20 @@ pub fn generate_openapi_document_with_routes_and_components(
     Ok(doc)
 }
 
+/// Executes `build_paths_and_webhooks` (build paths and webhooks).
+///
+/// # Arguments
+/// * `routes` - Input `routes` parameter.
+/// * `emit_operation_servers` - Input `emit_operation_servers` parameter.
+/// * `root_security_empty` - Input `root_security_empty` parameter.
+/// * `paths_extensions` - Input `paths_extensions` parameter.
+/// * `webhooks_extensions` - Input `webhooks_extensions` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<(Map<String, Value>, Map<String, Value>)>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn build_paths_and_webhooks(
     routes: &[ParsedRoute],
     emit_operation_servers: bool,
@@ -630,6 +879,19 @@ fn build_paths_and_webhooks(
     Ok((paths, webhooks))
 }
 
+/// Executes `insert_route_operation` (insert route operation).
+///
+/// # Arguments
+/// * `target` - Input `target` parameter.
+/// * `route` - Input `route` parameter.
+/// * `emit_operation_servers` - Input `emit_operation_servers` parameter.
+/// * `root_security_empty` - Input `root_security_empty` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn insert_route_operation(
     target: &mut Map<String, Value>,
     route: &ParsedRoute,
@@ -684,6 +946,18 @@ fn insert_route_operation(
     Ok(())
 }
 
+/// Executes `merge_path_extensions` (merge path extensions).
+///
+/// # Arguments
+/// * `path_item` - Input `path_item` parameter.
+/// * `extensions` - Input `extensions` parameter.
+/// * `path` - Input `path` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn merge_path_extensions(
     path_item: &mut Map<String, Value>,
     extensions: &BTreeMap<String, Value>,
@@ -710,6 +984,15 @@ fn merge_path_extensions(
     Ok(())
 }
 
+/// Executes `build_operation` (build operation).
+///
+/// # Arguments
+/// * `route` - Input `route` parameter.
+/// * `emit_operation_servers` - Input `emit_operation_servers` parameter.
+/// * `root_security_empty` - Input `root_security_empty` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn build_operation(
     route: &ParsedRoute,
     emit_operation_servers: bool,
@@ -802,6 +1085,16 @@ fn build_operation(
     Value::Object(op)
 }
 
+/// Executes `validate_openapi_info` (validate openapi info).
+///
+/// # Arguments
+/// * `info` - Input `info` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_openapi_info(info: &OpenApiInfo) -> AppResult<()> {
     if let Some(license) = &info.license {
         if license.identifier.is_some() && license.url.is_some() {
@@ -815,6 +1108,17 @@ fn validate_openapi_info(info: &OpenApiInfo) -> AppResult<()> {
     Ok(())
 }
 
+/// Executes `validate_extension_keys` (validate extension keys).
+///
+/// # Arguments
+/// * `extensions` - Input `extensions` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_extension_keys(extensions: &BTreeMap<String, Value>, context: &str) -> AppResult<()> {
     for key in extensions.keys() {
         if !key.starts_with("x-") {
@@ -827,6 +1131,11 @@ fn validate_extension_keys(extensions: &BTreeMap<String, Value>, context: &str) 
     Ok(())
 }
 
+/// Executes `insert_extensions` (insert extensions).
+///
+/// # Arguments
+/// * `target` - Input `target` parameter.
+/// * `extensions` - Input `extensions` parameter.
 fn insert_extensions(target: &mut Map<String, Value>, extensions: &BTreeMap<String, Value>) {
     for (key, value) in extensions {
         if key.starts_with("x-") {
@@ -835,11 +1144,25 @@ fn insert_extensions(target: &mut Map<String, Value>, extensions: &BTreeMap<Stri
     }
 }
 
+/// Executes `servers_value` (servers value).
+///
+/// # Arguments
+/// * `servers` - Input `servers` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn servers_value(servers: &[OpenApiServer]) -> Value {
     let entries = servers.iter().map(server_value).collect::<Vec<_>>();
     Value::Array(entries)
 }
 
+/// Executes `server_value` (server value).
+///
+/// # Arguments
+/// * `server` - Input `server` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn server_value(server: &OpenApiServer) -> Value {
     let mut obj = Map::new();
     obj.insert("url".to_string(), json!(server.url));
@@ -859,6 +1182,13 @@ fn server_value(server: &OpenApiServer) -> Value {
     Value::Object(obj)
 }
 
+/// Executes `server_variable_value` (server variable value).
+///
+/// # Arguments
+/// * `variable` - Input `variable` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn server_variable_value(variable: &OpenApiServerVariable) -> Value {
     let mut obj = Map::new();
     obj.insert("default".to_string(), json!(variable.default));
@@ -871,6 +1201,14 @@ fn server_variable_value(variable: &OpenApiServerVariable) -> Value {
     Value::Object(obj)
 }
 
+/// Executes `collect_tag_entries` (collect tag entries).
+///
+/// # Arguments
+/// * `info_tags` - Input `info_tags` parameter.
+/// * `routes` - Input `routes` parameter.
+///
+/// # Returns
+/// Resulting `Vec<Value>` value.
 fn collect_tag_entries(info_tags: &[OpenApiTag], routes: &[ParsedRoute]) -> Vec<Value> {
     let mut entries = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -890,6 +1228,13 @@ fn collect_tag_entries(info_tags: &[OpenApiTag], routes: &[ParsedRoute]) -> Vec<
     entries
 }
 
+/// Executes `tag_value` (tag value).
+///
+/// # Arguments
+/// * `tag` - Input `tag` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn tag_value(tag: &OpenApiTag) -> Value {
     let mut obj = Map::new();
     obj.insert("name".to_string(), json!(tag.name));
@@ -912,6 +1257,12 @@ fn tag_value(tag: &OpenApiTag) -> Value {
 }
 
 /// Collects unique, non-empty tag names from parsed routes.
+///
+/// # Arguments
+/// * `routes` - Input `routes` parameter.
+///
+/// # Returns
+/// Resulting `Vec<String>` value.
 fn collect_route_tags(routes: &[ParsedRoute]) -> Vec<String> {
     let mut tags = std::collections::BTreeSet::new();
     for route in routes {
@@ -924,6 +1275,16 @@ fn collect_route_tags(routes: &[ParsedRoute]) -> Vec<String> {
     tags.into_iter().collect()
 }
 
+/// Executes `collect_security_schemes` (collect security schemes).
+///
+/// # Arguments
+/// * `routes` - Input `routes` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Map<String, Value>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn collect_security_schemes(routes: &[ParsedRoute]) -> AppResult<Map<String, Value>> {
     let mut seen: std::collections::HashMap<String, SecuritySchemeInfo> =
         std::collections::HashMap::new();
@@ -962,6 +1323,13 @@ fn collect_security_schemes(routes: &[ParsedRoute]) -> AppResult<Map<String, Val
     Ok(map)
 }
 
+/// Executes `security_scheme_value` (security scheme value).
+///
+/// # Arguments
+/// * `info` - Input `info` parameter.
+///
+/// # Returns
+/// Resulting `Option<Value>` value.
 fn security_scheme_value(info: &SecuritySchemeInfo) -> Option<Value> {
     let mut obj = Map::new();
     match &info.kind {
@@ -1012,6 +1380,13 @@ fn security_scheme_value(info: &SecuritySchemeInfo) -> Option<Value> {
     Some(Value::Object(obj))
 }
 
+/// Executes `oauth_flows_value` (oauth flows value).
+///
+/// # Arguments
+/// * `flows` - Input `flows` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn oauth_flows_value(flows: &crate::openapi::parse::models::OAuthFlows) -> Value {
     let mut map = Map::new();
     if let Some(flow) = flows.implicit.as_ref() {
@@ -1032,6 +1407,13 @@ fn oauth_flows_value(flows: &crate::openapi::parse::models::OAuthFlows) -> Value
     Value::Object(map)
 }
 
+/// Executes `oauth_flow_value` (oauth flow value).
+///
+/// # Arguments
+/// * `flow` - Input `flow` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn oauth_flow_value(flow: &crate::openapi::parse::models::OAuthFlow) -> Value {
     let mut map = Map::new();
     if let Some(url) = &flow.authorization_url {
@@ -1050,6 +1432,13 @@ fn oauth_flow_value(flow: &crate::openapi::parse::models::OAuthFlow) -> Value {
     Value::Object(map)
 }
 
+/// Executes `api_key_location` (api key location).
+///
+/// # Arguments
+/// * `source` - Input `source` parameter.
+///
+/// # Returns
+/// Resulting `Option<&'static str>` value.
 fn api_key_location(source: &ParamSource) -> Option<&'static str> {
     match source {
         ParamSource::Header => Some("header"),
@@ -1060,6 +1449,12 @@ fn api_key_location(source: &ParamSource) -> Option<&'static str> {
 }
 
 /// Collects unique, non-empty base paths from parsed routes.
+///
+/// # Arguments
+/// * `routes` - Input `routes` parameter.
+///
+/// # Returns
+/// Resulting `Vec<String>` value.
 fn collect_route_base_paths(routes: &[ParsedRoute]) -> Vec<String> {
     let mut paths = std::collections::BTreeSet::new();
     for route in routes {
@@ -1076,6 +1471,11 @@ fn collect_route_base_paths(routes: &[ParsedRoute]) -> Vec<String> {
     paths.into_iter().collect()
 }
 
+/// Executes `insert_example_value` (insert example value).
+///
+/// # Arguments
+/// * `target` - Input `target` parameter.
+/// * `example` - Input `example` parameter.
 fn insert_example_value(target: &mut Map<String, Value>, example: &ExampleValue) {
     let has_meta = example.summary.is_some() || example.description.is_some();
     let mut example_obj = Map::new();
@@ -1114,6 +1514,13 @@ fn insert_example_value(target: &mut Map<String, Value>, example: &ExampleValue)
     }
 }
 
+/// Executes `build_parameter` (build parameter).
+///
+/// # Arguments
+/// * `param` - Input `param` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn build_parameter(param: &RouteParam) -> Value {
     let mut obj = Map::new();
     obj.insert("name".to_string(), json!(param.name));
@@ -1167,6 +1574,14 @@ fn build_parameter(param: &RouteParam) -> Value {
     Value::Object(obj)
 }
 
+/// Executes `merge_json_objects` (merge json objects).
+///
+/// # Arguments
+/// * `base` - Input `base` parameter.
+/// * `raw` - Input `raw` parameter.
+///
+/// # Returns
+/// Resulting `Map<String, Value>` value.
 fn merge_json_objects(
     mut base: Map<String, Value>,
     raw: &Map<String, Value>,
@@ -1186,6 +1601,14 @@ fn merge_json_objects(
     base
 }
 
+/// Executes `merge_schema_value` (merge schema value).
+///
+/// # Arguments
+/// * `generated` - Input `generated` parameter.
+/// * `raw` - Input `raw` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn merge_schema_value(generated: Value, raw: Option<&Value>) -> Value {
     let Some(raw_val) = raw else {
         return generated;
@@ -1198,10 +1621,26 @@ fn merge_schema_value(generated: Value, raw: Option<&Value>) -> Value {
     }
 }
 
+/// Executes `merge_response_entry_with_raw` (merge response entry with raw).
+///
+/// # Arguments
+/// * `generated` - Input `generated` parameter.
+/// * `raw` - Input `raw` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn merge_response_entry_with_raw(generated: Value, raw: Option<&Value>) -> Value {
     merge_schema_value(generated, raw)
 }
 
+/// Executes `merge_request_body` (merge request body).
+///
+/// # Arguments
+/// * `raw` - Input `raw` parameter.
+/// * `body` - Input `body` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn merge_request_body(
     raw: &Value,
     body: Option<&crate::openapi::parse::models::RequestBodyDefinition>,
@@ -1213,6 +1652,13 @@ fn merge_request_body(
     merge_schema_value(generated, Some(raw))
 }
 
+/// Executes `build_request_body` (build request body).
+///
+/// # Arguments
+/// * `body` - Input `body` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn build_request_body(body: &crate::openapi::parse::models::RequestBodyDefinition) -> Value {
     let mut obj = Map::new();
     if let Some(desc) = &body.description {
@@ -1232,6 +1678,13 @@ fn build_request_body(body: &crate::openapi::parse::models::RequestBodyDefinitio
     Value::Object(obj)
 }
 
+/// Executes `build_request_body_media` (build request body media).
+///
+/// # Arguments
+/// * `body` - Input `body` parameter.
+///
+/// # Returns
+/// Resulting `Map<String, Value>` value.
 fn build_request_body_media(
     body: &crate::openapi::parse::models::RequestBodyDefinition,
 ) -> Map<String, Value> {
@@ -1271,6 +1724,13 @@ fn build_request_body_media(
     media
 }
 
+/// Executes `build_responses` (build responses).
+///
+/// # Arguments
+/// * `route` - Input `route` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn build_responses(route: &ParsedRoute) -> Value {
     let status = route.response_status.as_deref().unwrap_or("200");
     let entry = build_response_entry(route);
@@ -1292,6 +1752,19 @@ fn build_responses(route: &ParsedRoute) -> Value {
     Value::Object(responses)
 }
 
+/// Executes `build_response_object` (build response object).
+///
+/// # Arguments
+/// * `response_summary` - Input `response_summary` parameter.
+/// * `response_description` - Input `response_description` parameter.
+/// * `response_media_type` - Input `response_media_type` parameter.
+/// * `response_type` - Input `response_type` parameter.
+/// * `response_example` - Input `response_example` parameter.
+/// * `response_headers` - Input `response_headers` parameter.
+/// * `response_links` - Input `response_links` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn build_response_object(
     response_summary: Option<&str>,
     response_description: Option<&str>,
@@ -1383,6 +1856,13 @@ fn build_response_object(
     Value::Object(resp)
 }
 
+/// Executes `build_response_entry` (build response entry).
+///
+/// # Arguments
+/// * `route` - Input `route` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn build_response_entry(route: &ParsedRoute) -> Value {
     build_response_object(
         route.response_summary.as_deref(),
@@ -1395,6 +1875,13 @@ fn build_response_entry(route: &ParsedRoute) -> Value {
     )
 }
 
+/// Executes `build_link` (build link).
+///
+/// # Arguments
+/// * `link` - Input `link` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn build_link(link: &ParsedLink) -> Value {
     let mut obj = Map::new();
     if let Some(desc) = &link.description {
@@ -1432,6 +1919,14 @@ fn build_link(link: &ParsedLink) -> Value {
     Value::Object(obj)
 }
 
+/// Executes `build_callbacks` (build callbacks).
+///
+/// # Arguments
+/// * `callbacks` - Input `callbacks` parameter.
+/// * `root_security_empty` - Input `root_security_empty` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn build_callbacks(
     callbacks: &[crate::openapi::parse::models::ParsedCallback],
     root_security_empty: bool,
@@ -1467,6 +1962,12 @@ fn build_callbacks(
     Value::Object(cb_map)
 }
 
+/// Executes `insert_callback_operation` (insert callback operation).
+///
+/// # Arguments
+/// * `path_item` - Input `path_item` parameter.
+/// * `callback` - Input `callback` parameter.
+/// * `root_security_empty` - Input `root_security_empty` parameter.
 fn insert_callback_operation(
     path_item: &mut Map<String, Value>,
     callback: &crate::openapi::parse::models::ParsedCallback,
@@ -1495,6 +1996,14 @@ fn insert_callback_operation(
         .insert(callback.method.clone(), op);
 }
 
+/// Executes `build_callback_operation` (build callback operation).
+///
+/// # Arguments
+/// * `callback` - Input `callback` parameter.
+/// * `emit_security` - Input `emit_security` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn build_callback_operation(
     callback: &crate::openapi::parse::models::ParsedCallback,
     emit_security: bool,
@@ -1523,6 +2032,13 @@ fn build_callback_operation(
     Value::Object(op)
 }
 
+/// Executes `build_callback_responses` (build callback responses).
+///
+/// # Arguments
+/// * `callback` - Input `callback` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn build_callback_responses(callback: &crate::openapi::parse::models::ParsedCallback) -> Value {
     let mut responses = Map::new();
     let status = callback.response_status.as_deref().unwrap_or("200");
@@ -1539,6 +2055,13 @@ fn build_callback_responses(callback: &crate::openapi::parse::models::ParsedCall
     Value::Object(responses)
 }
 
+/// Executes `build_security` (build security).
+///
+/// # Arguments
+/// * `requirements` - Input `requirements` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn build_security(
     requirements: &[crate::openapi::parse::models::SecurityRequirementGroup],
 ) -> Value {
@@ -1563,6 +2086,13 @@ fn build_security(
     Value::Array(list)
 }
 
+/// Executes `encoding_info_value` (encoding info value).
+///
+/// # Arguments
+/// * `info` - Input `info` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn encoding_info_value(info: &crate::openapi::parse::models::EncodingInfo) -> Value {
     let mut obj = Map::new();
     if let Some(ct) = &info.content_type {
@@ -1606,10 +2136,24 @@ fn encoding_info_value(info: &crate::openapi::parse::models::EncodingInfo) -> Va
     Value::Object(obj)
 }
 
+/// Executes `schema_from_rust_type` (schema from rust type).
+///
+/// # Arguments
+/// * `ty` - Input `ty` parameter.
+///
+/// # Returns
+/// Resulting `(Value, bool)` value.
 fn schema_from_rust_type(ty: &str) -> (Value, bool) {
     crate::type_mapping::map_rust_type_to_unwrapped_openapi_schema(ty)
 }
 
+/// Executes `param_source_str` (param source str).
+///
+/// # Arguments
+/// * `source` - Input `source` parameter.
+///
+/// # Returns
+/// Resulting `&'static str` value.
 fn param_source_str(source: &ParamSource) -> &'static str {
     match source {
         ParamSource::Path => "path",
@@ -1622,6 +2166,13 @@ fn param_source_str(source: &ParamSource) -> &'static str {
     }
 }
 
+/// Executes `style_to_str` (style to str).
+///
+/// # Arguments
+/// * `style` - Input `style` parameter.
+///
+/// # Returns
+/// Resulting `&'static str` value.
 fn style_to_str(style: &ParamStyle) -> &'static str {
     match style {
         ParamStyle::Matrix => "matrix",
@@ -1635,6 +2186,13 @@ fn style_to_str(style: &ParamStyle) -> &'static str {
     }
 }
 
+/// Executes `is_reserved_method` (is reserved method).
+///
+/// # Arguments
+/// * `method` - Input `method` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_reserved_method(method: &str) -> bool {
     matches!(
         method,
@@ -1642,6 +2200,13 @@ fn is_reserved_method(method: &str) -> bool {
     )
 }
 
+/// Executes `is_sequential_media_type` (is sequential media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_sequential_media_type(media_type: &str) -> bool {
     let mt = crate::openapi::parse::models::MediaType::parse(media_type);
     [
@@ -1656,6 +2221,13 @@ fn is_sequential_media_type(media_type: &str) -> bool {
     .any(|b| b)
 }
 
+/// Executes `schema_item_schema` (schema item schema).
+///
+/// # Arguments
+/// * `schema` - Input `schema` parameter.
+///
+/// # Returns
+/// Resulting `Option<Value>` value.
 fn schema_item_schema(schema: &Value) -> Option<Value> {
     schema
         .as_object()
@@ -1664,6 +2236,16 @@ fn schema_item_schema(schema: &Value) -> Option<Value> {
 }
 
 /// Generates schema for a struct.
+///
+/// # Arguments
+/// * `struct_def` - Input `struct_def` parameter.
+/// * `dialect` - Input `dialect` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Value>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn generate_struct_schema(struct_def: &ParsedStruct, dialect: Option<&str>) -> AppResult<Value> {
     let mut schema = Map::new();
 
@@ -1763,6 +2345,16 @@ fn generate_struct_schema(struct_def: &ParsedStruct, dialect: Option<&str>) -> A
 }
 
 /// Generates schema for an enum using `oneOf`.
+///
+/// # Arguments
+/// * `enum_def` - Input `enum_def` parameter.
+/// * `dialect` - Input `dialect` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Value>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn generate_enum_schema(enum_def: &ParsedEnum, dialect: Option<&str>) -> AppResult<Value> {
     let mut schema = Map::new();
 
@@ -1844,6 +2436,13 @@ fn generate_enum_schema(enum_def: &ParsedEnum, dialect: Option<&str>) -> AppResu
     Ok(Value::Object(schema))
 }
 
+/// Executes `external_docs_value` (external docs value).
+///
+/// # Arguments
+/// * `ext` - Input `ext` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn external_docs_value(ext: &ParsedExternalDocs) -> Value {
     let mut map = Map::new();
     map.insert("url".to_string(), json!(ext.url));
@@ -1854,6 +2453,13 @@ fn external_docs_value(ext: &ParsedExternalDocs) -> Value {
 }
 
 /// Processes a single field to determine its JSON name, schema, and optionality.
+///
+/// # Arguments
+/// * `field` - Input `field` parameter.
+/// * `rename_all` - Input `rename_all` parameter.
+///
+/// # Returns
+/// Resulting `(String, Value, bool)` value.
 fn process_field(field: &ParsedField, rename_all: Option<&RenameRule>) -> (String, Value, bool) {
     // 1. Determine Name
     let name = field

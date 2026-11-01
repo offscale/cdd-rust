@@ -106,6 +106,15 @@ pub fn create_pool(
 
 /// Connects to the default `"postgres"` maintenance database and issues `CREATE DATABASE`
 /// for ephemeral test environments (ignoring `"already exists"` errors).
+///
+/// # Arguments
+/// * `db_url` - Input `db_url` parameter.
+///
+/// # Returns
+/// Resulting `Result<(), ServerError>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 #[cfg(not(target_os = "wasi"))]
 fn run_ephemeral_setup(db_url: &str) -> Result<(), ServerError> {
     let (base_url, db_name) = parse_ephemeral_db_url(db_url)?;

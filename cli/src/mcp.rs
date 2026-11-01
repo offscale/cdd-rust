@@ -285,6 +285,19 @@ pub fn dispatch_tool_command(
                 _ => ServerFramework::ActixWeb,
             };
 
+            let github_org = args
+                .get("github_org")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            let repo_name = args
+                .get("repo_name")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            let monorepo = args
+                .get("monorepo")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+
             let config = FromOpenApiConfig {
                 subcommand,
                 input,
@@ -295,6 +308,9 @@ pub fn dispatch_tool_command(
                 tests,
                 mcp,
                 framework,
+                github_org,
+                repo_name,
+                monorepo,
             };
 
             from_openapi(&config)?;
@@ -426,6 +442,18 @@ pub fn dispatch_tool_command(
                     .unwrap_or(false),
                 tests: args.get("tests").and_then(Value::as_bool).unwrap_or(false),
                 mcp: args.get("mcp").and_then(Value::as_bool).unwrap_or(false),
+                github_org: args
+                    .get("github_org")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                repo_name: args
+                    .get("repo_name")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                monorepo: args
+                    .get("monorepo")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
             };
             from_arazzo(&config)?;
             Ok(format!(
@@ -471,6 +499,13 @@ pub fn dispatch_tool_command(
 }
 
 /// Builds a serialized [`JsonRpcResponse`] with a strongly typed result payload.
+///
+/// # Arguments
+/// * `id` - Input `id` parameter.
+/// * `result` - Input `result` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 fn ok_response<T: serde::Serialize>(id: RequestId, result: &T) -> Option<String> {
     serde_json::to_value(result).ok().and_then(|val| {
         let resp = JsonRpcResponse {
@@ -484,6 +519,14 @@ fn ok_response<T: serde::Serialize>(id: RequestId, result: &T) -> Option<String>
 }
 
 /// Builds a serialized [`JsonRpcResponse`] with a [`JsonRpcError`].
+///
+/// # Arguments
+/// * `id` - Input `id` parameter.
+/// * `code` - Input `code` parameter.
+/// * `message` - Input `message` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 fn err_response(id: RequestId, code: i32, message: impl Into<String>) -> Option<String> {
     let resp = JsonRpcResponse {
         jsonrpc: "2.0".to_string(),

@@ -88,6 +88,13 @@ pub fn serialize_arazzo_document(doc: &ArazzoDocument, format: ArazzoFormat) -> 
     }
 }
 
+/// Executes `emit_info` (emit info).
+///
+/// # Arguments
+/// * `info` - Input `info` parameter.
+///
+/// # Returns
+/// Resulting `JsonValue` value.
 fn emit_info(info: &ArazzoInfo) -> JsonValue {
     let mut m = Map::new();
     m.insert("title".to_string(), JsonValue::String(info.title.clone()));
@@ -105,6 +112,13 @@ fn emit_info(info: &ArazzoInfo) -> JsonValue {
     JsonValue::Object(m)
 }
 
+/// Executes `emit_source_description` (emit source description).
+///
+/// # Arguments
+/// * `src` - Input `src` parameter.
+///
+/// # Returns
+/// Resulting `JsonValue` value.
 fn emit_source_description(src: &SourceDescription) -> JsonValue {
     let mut m = Map::new();
     m.insert("name".to_string(), JsonValue::String(src.name.clone()));
@@ -119,6 +133,13 @@ fn emit_source_description(src: &SourceDescription) -> JsonValue {
     JsonValue::Object(m)
 }
 
+/// Executes `emit_schema` (emit schema).
+///
+/// # Arguments
+/// * `schema` - Input `schema` parameter.
+///
+/// # Returns
+/// Resulting `JsonValue` value.
 fn emit_schema(schema: &ParsedSchema) -> JsonValue {
     if let Some(r) = &schema.reference {
         let mut m = Map::new();
@@ -128,6 +149,13 @@ fn emit_schema(schema: &ParsedSchema) -> JsonValue {
     schema.raw_schema.clone()
 }
 
+/// Executes `emit_workflow` (emit workflow).
+///
+/// # Arguments
+/// * `wf` - Input `wf` parameter.
+///
+/// # Returns
+/// Resulting `JsonValue` value.
 fn emit_workflow(wf: &Workflow) -> JsonValue {
     let mut m = Map::new();
     m.insert(
@@ -199,6 +227,13 @@ fn emit_workflow(wf: &Workflow) -> JsonValue {
     JsonValue::Object(m)
 }
 
+/// Executes `emit_step` (emit step).
+///
+/// # Arguments
+/// * `step` - Input `step` parameter.
+///
+/// # Returns
+/// Resulting `JsonValue` value.
 fn emit_step(step: &WorkflowStep) -> JsonValue {
     let mut m = Map::new();
     m.insert(
@@ -298,6 +333,13 @@ fn emit_step(step: &WorkflowStep) -> JsonValue {
     JsonValue::Object(m)
 }
 
+/// Executes `emit_parameter_or_reusable` (emit parameter or reusable).
+///
+/// # Arguments
+/// * `item` - Input `item` parameter.
+///
+/// # Returns
+/// Resulting `JsonValue` value.
 fn emit_parameter_or_reusable(item: &ParameterOrReusable) -> JsonValue {
     match item {
         ParameterOrReusable::Parameter(p) => emit_parameter(p),
@@ -305,6 +347,13 @@ fn emit_parameter_or_reusable(item: &ParameterOrReusable) -> JsonValue {
     }
 }
 
+/// Executes `emit_parameter` (emit parameter).
+///
+/// # Arguments
+/// * `p` - Input `p` parameter.
+///
+/// # Returns
+/// Resulting `JsonValue` value.
 fn emit_parameter(p: &ArazzoParameter) -> JsonValue {
     let mut m = Map::new();
     m.insert("name".to_string(), JsonValue::String(p.name.clone()));
@@ -319,6 +368,13 @@ fn emit_parameter(p: &ArazzoParameter) -> JsonValue {
     JsonValue::Object(m)
 }
 
+/// Executes `emit_reusable` (emit reusable).
+///
+/// # Arguments
+/// * `r` - Input `r` parameter.
+///
+/// # Returns
+/// Resulting `JsonValue` value.
 fn emit_reusable(r: &ReusableObject) -> JsonValue {
     let mut m = Map::new();
     m.insert(
@@ -332,6 +388,13 @@ fn emit_reusable(r: &ReusableObject) -> JsonValue {
     JsonValue::Object(m)
 }
 
+/// Executes `emit_request_body` (emit request body).
+///
+/// # Arguments
+/// * `rb` - Input `rb` parameter.
+///
+/// # Returns
+/// Resulting `JsonValue` value.
 fn emit_request_body(rb: &ArazzoRequestBody) -> JsonValue {
     let mut m = Map::new();
     if let Some(ct) = &rb.content_type {
@@ -350,6 +413,13 @@ fn emit_request_body(rb: &ArazzoRequestBody) -> JsonValue {
     JsonValue::Object(m)
 }
 
+/// Executes `emit_replacement` (emit replacement).
+///
+/// # Arguments
+/// * `rep` - Input `rep` parameter.
+///
+/// # Returns
+/// Resulting `JsonValue` value.
 fn emit_replacement(rep: &PayloadReplacement) -> JsonValue {
     let mut m = Map::new();
     m.insert("target".to_string(), JsonValue::String(rep.target.clone()));
@@ -361,6 +431,13 @@ fn emit_replacement(rep: &PayloadReplacement) -> JsonValue {
     JsonValue::Object(m)
 }
 
+/// Executes `emit_criterion` (emit criterion).
+///
+/// # Arguments
+/// * `c` - Input `c` parameter.
+///
+/// # Returns
+/// Resulting `JsonValue` value.
 fn emit_criterion(c: &Criterion) -> JsonValue {
     let mut m = Map::new();
     if let Some(ctx) = &c.context {
@@ -380,6 +457,13 @@ fn emit_criterion(c: &Criterion) -> JsonValue {
     JsonValue::Object(m)
 }
 
+/// Executes `emit_criterion_type` (emit criterion type).
+///
+/// # Arguments
+/// * `ct` - Input `ct` parameter.
+///
+/// # Returns
+/// Resulting `JsonValue` value.
 fn emit_criterion_type(ct: &CriterionType) -> JsonValue {
     match ct {
         CriterionType::Simple => JsonValue::String("simple".to_string()),
@@ -399,6 +483,13 @@ fn emit_criterion_type(ct: &CriterionType) -> JsonValue {
     }
 }
 
+/// Executes `emit_success_action_or_reusable` (emit success action or reusable).
+///
+/// # Arguments
+/// * `item` - Input `item` parameter.
+///
+/// # Returns
+/// Resulting `JsonValue` value.
 fn emit_success_action_or_reusable(item: &ActionOrReusable<SuccessAction>) -> JsonValue {
     match item {
         ActionOrReusable::Action(sa) => emit_success_action(sa),
@@ -406,6 +497,13 @@ fn emit_success_action_or_reusable(item: &ActionOrReusable<SuccessAction>) -> Js
     }
 }
 
+/// Executes `emit_success_action` (emit success action).
+///
+/// # Arguments
+/// * `sa` - Input `sa` parameter.
+///
+/// # Returns
+/// Resulting `JsonValue` value.
 fn emit_success_action(sa: &SuccessAction) -> JsonValue {
     let mut m = Map::new();
     m.insert("name".to_string(), JsonValue::String(sa.name.clone()));
@@ -435,6 +533,13 @@ fn emit_success_action(sa: &SuccessAction) -> JsonValue {
     JsonValue::Object(m)
 }
 
+/// Executes `emit_failure_action_or_reusable` (emit failure action or reusable).
+///
+/// # Arguments
+/// * `item` - Input `item` parameter.
+///
+/// # Returns
+/// Resulting `JsonValue` value.
 fn emit_failure_action_or_reusable(item: &ActionOrReusable<FailureAction>) -> JsonValue {
     match item {
         ActionOrReusable::Action(fa) => emit_failure_action(fa),
@@ -442,6 +547,13 @@ fn emit_failure_action_or_reusable(item: &ActionOrReusable<FailureAction>) -> Js
     }
 }
 
+/// Executes `emit_failure_action` (emit failure action).
+///
+/// # Arguments
+/// * `fa` - Input `fa` parameter.
+///
+/// # Returns
+/// Resulting `JsonValue` value.
 fn emit_failure_action(fa: &FailureAction) -> JsonValue {
     let mut m = Map::new();
     m.insert("name".to_string(), JsonValue::String(fa.name.clone()));
@@ -477,6 +589,11 @@ fn emit_failure_action(fa: &FailureAction) -> JsonValue {
     JsonValue::Object(m)
 }
 
+/// Executes `emit_action_target` (emit action target).
+///
+/// # Arguments
+/// * `m` - Input `m` parameter.
+/// * `target` - Input `target` parameter.
 fn emit_action_target(m: &mut Map<String, JsonValue>, target: &ActionTarget) {
     match target {
         ActionTarget::None => {}
@@ -489,6 +606,13 @@ fn emit_action_target(m: &mut Map<String, JsonValue>, target: &ActionTarget) {
     }
 }
 
+/// Executes `emit_outputs` (emit outputs).
+///
+/// # Arguments
+/// * `outputs` - Input `outputs` parameter.
+///
+/// # Returns
+/// Resulting `JsonValue` value.
 fn emit_outputs(outputs: &indexmap::IndexMap<String, RuntimeExpressionOrSelector>) -> JsonValue {
     let mut m = Map::new();
     for (k, v) in outputs {
@@ -503,6 +627,13 @@ fn emit_outputs(outputs: &indexmap::IndexMap<String, RuntimeExpressionOrSelector
     JsonValue::Object(m)
 }
 
+/// Executes `emit_selector` (emit selector).
+///
+/// # Arguments
+/// * `sel` - Input `sel` parameter.
+///
+/// # Returns
+/// Resulting `JsonValue` value.
 fn emit_selector(sel: &SelectorObject) -> JsonValue {
     let mut m = Map::new();
     m.insert(
@@ -520,6 +651,13 @@ fn emit_selector(sel: &SelectorObject) -> JsonValue {
     JsonValue::Object(m)
 }
 
+/// Executes `emit_components` (emit components).
+///
+/// # Arguments
+/// * `comps` - Input `comps` parameter.
+///
+/// # Returns
+/// Resulting `JsonValue` value.
 fn emit_components(comps: &ArazzoComponents) -> JsonValue {
     let mut m = Map::new();
     if !comps.inputs.is_empty() {
@@ -554,6 +692,11 @@ fn emit_components(comps: &ArazzoComponents) -> JsonValue {
     JsonValue::Object(m)
 }
 
+/// Executes `insert_extensions` (insert extensions).
+///
+/// # Arguments
+/// * `m` - Input `m` parameter.
+/// * `extensions` - Input `extensions` parameter.
 fn insert_extensions(m: &mut Map<String, JsonValue>, extensions: &BTreeMap<String, JsonValue>) {
     for (k, v) in extensions {
         m.insert(k.clone(), v.clone());

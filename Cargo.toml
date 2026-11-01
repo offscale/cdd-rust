@@ -6,6 +6,15 @@ members = [
 ]
 default-members = ["core"]
 resolver = "2"
+
 [workspace.lints.rust]
+missing_docs = "deny"
 unexpected_cfgs = { level = "allow", check-cfg = ["cfg(tarpaulin_include)", "cfg(coverage_nightly)", "cfg(coverage)"] }
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+
+[workspace.lints.clippy]
+missing_docs_in_private_items = "deny"
+unwrap_used = "deny"
 

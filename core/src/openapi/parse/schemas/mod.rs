@@ -47,11 +47,31 @@ use utoipa::openapi::{Components, Deprecated, RefOr};
 /// # Spec Compliance
 /// Extracts `$self` from the root via `ShimOpenApi` to establish the document's Base URI
 /// for reference resolution as per OAS 3.2.0 Appendix F.
+///
+/// # Arguments
+/// * `yaml_content` - Input `yaml_content` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<ParsedModel>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn parse_openapi_spec(yaml_content: &str) -> AppResult<Vec<ParsedModel>> {
     parse_openapi_spec_with_registry(yaml_content, None, None)
 }
 
 /// Parses an OpenAPI YAML string and extracts definitions, allowing external reference resolution.
+///
+/// # Arguments
+/// * `yaml_content` - Input `yaml_content` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `retrieval_uri` - Input `retrieval_uri` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<ParsedModel>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn parse_openapi_spec_with_registry(
     yaml_content: &str,
     registry: Option<&DocumentRegistry>,
@@ -60,6 +80,7 @@ pub fn parse_openapi_spec_with_registry(
     // 1. Parse raw YAML/JSON to detect OpenAPI wrapper vs schema-root documents.
     let mut json_val: serde_json::Value = serde_yaml::from_str(yaml_content)
         .map_err(|e| AppError::General(format!("Failed to parse YAML container: {}", e)))?;
+    crate::openapi::parse::normalization::upgrade_google_discovery_to_openapi3(&mut json_val);
     let has_openapi = json_val.get("openapi").is_some() || json_val.get("swagger").is_some();
     if !has_openapi {
         normalize_nullable_schemas(&mut json_val);
@@ -359,6 +380,16 @@ pub fn parse_openapi_spec_with_registry(
     Ok(models)
 }
 
+/// Executes `parse_schema_root_document` (parse schema root document).
+///
+/// # Arguments
+/// * `raw` - Input `raw` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<ParsedModel>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_schema_root_document(raw: &serde_json::Value) -> AppResult<Vec<ParsedModel>> {
     let mut resolved_raw = if contains_dynamic_ref(raw) {
         resolve_dynamic_refs_in_schema_root(raw, None)
@@ -508,6 +539,11 @@ fn parse_schema_root_document(raw: &serde_json::Value) -> AppResult<Vec<ParsedMo
     Ok(models)
 }
 
+/// Executes `apply_resolved_schemas` (apply resolved schemas).
+///
+/// # Arguments
+/// * `components` - Input `components` parameter.
+/// * `resolved` - Input `resolved` parameter.
 fn apply_resolved_schemas(components: &mut Components, resolved: &HashMap<String, Value>) {
     for (name, value) in resolved {
         let mut normalized = value.clone();
@@ -520,6 +556,13 @@ fn apply_resolved_schemas(components: &mut Components, resolved: &HashMap<String
     }
 }
 
+/// Executes `schema_root_name` (schema root name).
+///
+/// # Arguments
+/// * `raw` - Input `raw` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn schema_root_name(raw: &serde_json::Value) -> String {
     if let Some(title) = raw
         .get("title")
@@ -542,6 +585,13 @@ fn schema_root_name(raw: &serde_json::Value) -> String {
     "RootSchema".to_string()
 }
 
+/// Executes `schema_name_from_id` (schema name from id).
+///
+/// # Arguments
+/// * `raw` - Input `raw` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn schema_name_from_id(raw: &str) -> String {
     let trimmed = raw.split('#').next().unwrap_or(raw).trim_end_matches('/');
     let last = trimmed
@@ -559,6 +609,13 @@ fn schema_name_from_id(raw: &str) -> String {
     }
 }
 
+/// Executes `sanitize_schema_name` (sanitize schema name).
+///
+/// # Arguments
+/// * `raw` - Input `raw` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn sanitize_schema_name(raw: &str) -> String {
     crate::openapi::parse::models::RustIdent::sanitize_pascal(raw, "RootSchema").into_inner()
 }
@@ -568,6 +625,12 @@ fn sanitize_schema_name(raw: &str) -> String {
 /// Returns two maps:
 /// - schema-level externalDocs by schema name
 /// - property-level externalDocs by schema name, then property name
+///
+/// # Arguments
+/// * `schemas` - Input `schemas` parameter.
+///
+/// # Returns
+/// Resulting `( HashMap<String, ParsedExternalDocs>, HashMap<String, HashMap<String, ParsedExternalDocs>>, )` value.
 fn collect_schema_external_docs(
     schemas: &serde_json::Map<String, Value>,
 ) -> (
@@ -602,6 +665,14 @@ fn collect_schema_external_docs(
     (schema_docs, field_docs)
 }
 
+/// Executes `schema_denies_unknown_fields` (schema denies unknown fields).
+///
+/// # Arguments
+/// * `schema` - Input `schema` parameter.
+/// * `ctx` - Input `ctx` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn schema_denies_unknown_fields(schema: &Schema, ctx: &ResolutionContext) -> bool {
     match schema {
         Schema::Object(obj) => {
@@ -619,6 +690,14 @@ fn schema_denies_unknown_fields(schema: &Schema, ctx: &ResolutionContext) -> boo
     }
 }
 
+/// Executes `ref_or_denies_unknown_fields` (ref or denies unknown fields).
+///
+/// # Arguments
+/// * `item` - Input `item` parameter.
+/// * `ctx` - Input `ctx` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn ref_or_denies_unknown_fields(item: &RefOr<Schema>, ctx: &ResolutionContext) -> bool {
     match item {
         RefOr::T(schema) => schema_denies_unknown_fields(schema, ctx),
@@ -628,6 +707,13 @@ fn ref_or_denies_unknown_fields(item: &RefOr<Schema>, ctx: &ResolutionContext) -
     }
 }
 
+/// Executes `collect_discriminator_defaults` (collect discriminator defaults).
+///
+/// # Arguments
+/// * `schemas` - Input `schemas` parameter.
+///
+/// # Returns
+/// Resulting `HashMap<String, String>` value.
 fn collect_discriminator_defaults(
     schemas: &serde_json::Map<String, Value>,
 ) -> HashMap<String, String> {
@@ -648,6 +734,13 @@ fn collect_discriminator_defaults(
     defaults
 }
 
+/// Executes `parse_external_docs_value` (parse external docs value).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `Option<ParsedExternalDocs>` value.
 fn parse_external_docs_value(value: &Value) -> Option<ParsedExternalDocs> {
     serde_json::from_value::<ShimExternalDocs>(value.clone())
         .ok()
@@ -657,6 +750,11 @@ fn parse_external_docs_value(value: &Value) -> Option<ParsedExternalDocs> {
         })
 }
 
+/// Executes `apply_field_external_docs` (apply field external docs).
+///
+/// # Arguments
+/// * `fields` - Input `fields` parameter.
+/// * `docs` - Input `docs` parameter.
 fn apply_field_external_docs(
     fields: &mut [crate::classes::parse::ParsedField],
     docs: Option<&HashMap<String, ParsedExternalDocs>>,
@@ -672,6 +770,13 @@ fn apply_field_external_docs(
     }
 }
 
+/// Executes `extract_string_enum_variants` (extract string enum variants).
+///
+/// # Arguments
+/// * `obj` - Input `obj` parameter.
+///
+/// # Returns
+/// Resulting `Option<Vec<ParsedVariant>>` value.
 fn extract_string_enum_variants(
     obj: &utoipa::openapi::schema::Object,
 ) -> Option<Vec<ParsedVariant>> {
@@ -707,6 +812,13 @@ fn extract_string_enum_variants(
     Some(variants)
 }
 
+/// Executes `extract_const_enum_variants` (extract const enum variants).
+///
+/// # Arguments
+/// * `raw_schema` - Input `raw_schema` parameter.
+///
+/// # Returns
+/// Resulting `Option<Vec<ParsedVariant>>` value.
 fn extract_const_enum_variants(raw_schema: &Value) -> Option<Vec<ParsedVariant>> {
     let obj = raw_schema.as_object()?;
     let items = obj.get("oneOf").or_else(|| obj.get("anyOf"))?.as_array()?;
@@ -762,6 +874,13 @@ fn extract_const_enum_variants(raw_schema: &Value) -> Option<Vec<ParsedVariant>>
     Some(variants)
 }
 
+/// Executes `sanitize_enum_variant` (sanitize enum variant).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn sanitize_enum_variant(value: &str) -> String {
     crate::openapi::parse::models::RustIdent::sanitize_pascal(value, "Value").into_inner()
 }

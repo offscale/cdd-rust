@@ -18,11 +18,23 @@ pub fn test_imports() -> String {
 }
 
 /// Generates test function signature.
+///
+/// # Arguments
+/// * `fn_name` - Input `fn_name` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn test_fn_signature(fn_name: &str) -> String {
     format!("#[actix_web::test]\nasync fn {}() {{", fn_name)
 }
 
 /// Generates app init code.
+///
+/// # Arguments
+/// * `app_factory` - Input `app_factory` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn test_app_init(app_factory: &str) -> String {
     format!(
         "    let app = test::init_service({}(App::new())).await;",
@@ -31,6 +43,12 @@ pub fn test_app_init(app_factory: &str) -> String {
 }
 
 /// Generates body setup stub.
+///
+/// # Arguments
+/// * `body` - Input `body` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn test_body_setup_code(body: &crate::openapi::parse::RequestBodyDefinition) -> String {
     match body.format {
         crate::openapi::parse::BodyFormat::Json => json_body_setup(body),
@@ -41,6 +59,13 @@ pub fn test_body_setup_code(body: &crate::openapi::parse::RequestBodyDefinition)
     }
 }
 
+/// Executes `json_body_setup` (json body setup).
+///
+/// # Arguments
+/// * `body` - Input `body` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn json_body_setup(body: &crate::openapi::parse::RequestBodyDefinition) -> String {
     if let Some(example) = &body.example {
         if example.is_serialized() {
@@ -74,6 +99,13 @@ fn json_body_setup(body: &crate::openapi::parse::RequestBodyDefinition) -> Strin
     )
 }
 
+/// Executes `form_body_setup` (form body setup).
+///
+/// # Arguments
+/// * `body` - Input `body` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn form_body_setup(body: &crate::openapi::parse::RequestBodyDefinition) -> String {
     if let Some(example) = &body.example {
         if example.is_serialized() {
@@ -114,6 +146,13 @@ fn form_body_setup(body: &crate::openapi::parse::RequestBodyDefinition) -> Strin
     )
 }
 
+/// Executes `multipart_body_setup` (multipart body setup).
+///
+/// # Arguments
+/// * `body` - Input `body` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn multipart_body_setup(body: &crate::openapi::parse::RequestBodyDefinition) -> String {
     let media = if body.media_type.is_empty() {
         "multipart/form-data"
@@ -152,6 +191,15 @@ fn multipart_body_setup(body: &crate::openapi::parse::RequestBodyDefinition) -> 
     )
 }
 
+/// Executes `build_multipart_payload` (build multipart payload).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+/// * `body` - Input `body` parameter.
+/// * `boundary` - Input `boundary` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn build_multipart_payload(
     value: &serde_json::Value,
     body: &crate::openapi::parse::RequestBodyDefinition,
@@ -171,6 +219,14 @@ fn build_multipart_payload(
     }
 }
 
+/// Executes `build_multipart_fallback_payload` (build multipart fallback payload).
+///
+/// # Arguments
+/// * `body` - Input `body` parameter.
+/// * `boundary` - Input `boundary` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn build_multipart_fallback_payload(
     body: &crate::openapi::parse::RequestBodyDefinition,
     boundary: &str,
@@ -214,6 +270,13 @@ fn build_multipart_fallback_payload(
     )
 }
 
+/// Executes `dummy_form_map` (dummy form map).
+///
+/// # Arguments
+/// * `encoding` - Input `encoding` parameter.
+///
+/// # Returns
+/// Resulting `serde_json::Map<String, serde_json::Value>` value.
 fn dummy_form_map(
     encoding: Option<&std::collections::HashMap<String, EncodingInfo>>,
 ) -> serde_json::Map<String, serde_json::Value> {
@@ -232,6 +295,13 @@ fn dummy_form_map(
     map
 }
 
+/// Executes `dummy_value_for_encoding` (dummy value for encoding).
+///
+/// # Arguments
+/// * `info` - Input `info` parameter.
+///
+/// # Returns
+/// Resulting `serde_json::Value` value.
 fn dummy_value_for_encoding(info: &EncodingInfo) -> serde_json::Value {
     let content_type = info
         .content_type
@@ -248,6 +318,15 @@ fn dummy_value_for_encoding(info: &EncodingInfo) -> serde_json::Value {
     }
 }
 
+/// Executes `render_named_multipart` (render named multipart).
+///
+/// # Arguments
+/// * `map` - Input `map` parameter.
+/// * `encoding` - Input `encoding` parameter.
+/// * `boundary` - Input `boundary` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn render_named_multipart(
     map: &serde_json::Map<String, serde_json::Value>,
     encoding: Option<&std::collections::HashMap<String, EncodingInfo>>,
@@ -271,6 +350,16 @@ fn render_named_multipart(
     finalize_multipart_payload(payload, boundary)
 }
 
+/// Executes `render_positional_multipart` (render positional multipart).
+///
+/// # Arguments
+/// * `items` - Input `items` parameter.
+/// * `prefix` - Input `prefix` parameter.
+/// * `item` - Input `item` parameter.
+/// * `boundary` - Input `boundary` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn render_positional_multipart(
     items: &[serde_json::Value],
     prefix: Option<&Vec<EncodingInfo>>,
@@ -296,6 +385,16 @@ fn render_positional_multipart(
     finalize_multipart_payload(payload, boundary)
 }
 
+/// Executes `render_single_part` (render single part).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+/// * `value` - Input `value` parameter.
+/// * `boundary` - Input `boundary` parameter.
+/// * `content_type` - Input `content_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn render_single_part(
     name: &str,
     value: &serde_json::Value,
@@ -307,6 +406,15 @@ fn render_single_part(
     finalize_multipart_payload(payload, boundary)
 }
 
+/// Executes `append_multipart_part` (append multipart part).
+///
+/// # Arguments
+/// * `out` - Input `out` parameter.
+/// * `boundary` - Input `boundary` parameter.
+/// * `name` - Input `name` parameter.
+/// * `content_type` - Input `content_type` parameter.
+/// * `headers` - Input `headers` parameter.
+/// * `value` - Input `value` parameter.
 fn append_multipart_part(
     out: &mut String,
     boundary: &str,
@@ -330,6 +438,11 @@ fn append_multipart_part(
     out.push_str("\r\n");
 }
 
+/// Executes `append_multipart_headers` (append multipart headers).
+///
+/// # Arguments
+/// * `out` - Input `out` parameter.
+/// * `headers` - Input `headers` parameter.
 fn append_multipart_headers(
     out: &mut String,
     headers: Option<&std::collections::HashMap<String, String>>,
@@ -349,6 +462,13 @@ fn append_multipart_headers(
     }
 }
 
+/// Executes `header_value_for_type` (header value for type).
+///
+/// # Arguments
+/// * `ty` - Input `ty` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn header_value_for_type(ty: &str) -> String {
     if ty.contains("Uuid") {
         "00000000-0000-0000-0000-000000000000".to_string()
@@ -363,11 +483,26 @@ fn header_value_for_type(ty: &str) -> String {
     }
 }
 
+/// Executes `finalize_multipart_payload` (finalize multipart payload).
+///
+/// # Arguments
+/// * `payload` - Input `payload` parameter.
+/// * `boundary` - Input `boundary` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn finalize_multipart_payload(mut payload: String, boundary: &str) -> String {
     payload.push_str(&format!("--{}--", boundary));
     payload
 }
 
+/// Executes `infer_multipart_content_type` (infer multipart content type).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `&'static str` value.
 fn infer_multipart_content_type(value: &serde_json::Value) -> &'static str {
     match value {
         serde_json::Value::Object(_) | serde_json::Value::Array(_) => "application/json",
@@ -378,6 +513,14 @@ fn infer_multipart_content_type(value: &serde_json::Value) -> &'static str {
     }
 }
 
+/// Executes `serialize_multipart_value` (serialize multipart value).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+/// * `content_type` - Input `content_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn serialize_multipart_value(value: &serde_json::Value, content_type: &str) -> String {
     if content_type.to_ascii_lowercase().contains("json") {
         return value.to_string();
@@ -392,6 +535,13 @@ fn serialize_multipart_value(value: &serde_json::Value, content_type: &str) -> S
     }
 }
 
+/// Executes `first_content_type` (first content type).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 fn first_content_type(value: &str) -> Option<String> {
     let ct = value.split(',').next().unwrap_or(value).trim();
     if ct.is_empty() {
@@ -401,6 +551,13 @@ fn first_content_type(value: &str) -> Option<String> {
     }
 }
 
+/// Executes `text_body_setup` (text body setup).
+///
+/// # Arguments
+/// * `body` - Input `body` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn text_body_setup(body: &crate::openapi::parse::RequestBodyDefinition) -> String {
     let media = if body.media_type.is_empty() {
         "text/plain"
@@ -424,6 +581,13 @@ fn text_body_setup(body: &crate::openapi::parse::RequestBodyDefinition) -> Strin
     )
 }
 
+/// Executes `binary_body_setup` (binary body setup).
+///
+/// # Arguments
+/// * `body` - Input `body` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn binary_body_setup(body: &crate::openapi::parse::RequestBodyDefinition) -> String {
     let media = if body.media_type.is_empty() {
         "application/octet-stream"
@@ -445,6 +609,13 @@ fn binary_body_setup(body: &crate::openapi::parse::RequestBodyDefinition) -> Str
     )
 }
 
+/// Executes `json_payload_for_media_type` (json payload for media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn json_payload_for_media_type(media_type: &str) -> String {
     if is_sequential_json_media_type(media_type) {
         "\"{\\\"dummy\\\":\\\"value\\\"}\\n{\\\"dummy\\\":\\\"value\\\"}\"".to_string()
@@ -453,6 +624,13 @@ fn json_payload_for_media_type(media_type: &str) -> String {
     }
 }
 
+/// Executes `json_value_expr` (json value expr).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn json_value_expr(value: &serde_json::Value) -> String {
     let serialized = value.to_string();
     let literal = rust_string_literal(&serialized);
@@ -462,16 +640,37 @@ fn json_value_expr(value: &serde_json::Value) -> String {
     )
 }
 
+/// Executes `json_string_expr` (json string expr).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn json_string_expr(value: &serde_json::Value) -> String {
     let serialized = value.to_string();
     rust_string_literal(&serialized)
 }
 
+/// Executes `text_string_expr` (text string expr).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn text_string_expr(value: &serde_json::Value) -> String {
     let payload = example_to_string(value);
     rust_string_literal(&payload)
 }
 
+/// Executes `example_to_string` (example to string).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn example_to_string(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::String(s) => s.clone(),
@@ -482,15 +681,36 @@ fn example_to_string(value: &serde_json::Value) -> String {
     }
 }
 
+/// Executes `serialized_payload_expr` (serialized payload expr).
+///
+/// # Arguments
+/// * `example` - Input `example` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn serialized_payload_expr(example: &ExampleValue) -> String {
     let payload = example_to_string(&example.value);
     rust_string_literal(&payload)
 }
 
+/// Executes `rust_string_literal` (rust string literal).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn rust_string_literal(value: &str) -> String {
     format!("{:?}", value)
 }
 
+/// Executes `is_sequential_json_media_type` (is sequential json media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_sequential_json_media_type(media_type: &str) -> bool {
     let normalized = normalize_media_type(media_type);
     matches!(
@@ -504,6 +724,13 @@ fn is_sequential_json_media_type(media_type: &str) -> bool {
         || normalized.ends_with("+json-seq")
 }
 
+/// Executes `normalize_media_type` (normalize media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn normalize_media_type(media_type: &str) -> String {
     media_type
         .split(';')
@@ -513,6 +740,13 @@ fn normalize_media_type(media_type: &str) -> String {
         .to_ascii_lowercase()
 }
 
+/// Executes `is_json_media_type` (is json media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_json_media_type(media_type: &str) -> bool {
     let normalized = normalize_media_type(media_type);
     normalized == "application/json"
@@ -521,6 +755,14 @@ fn is_json_media_type(media_type: &str) -> bool {
         || is_sequential_json_media_type(&normalized)
 }
 
+/// Executes `serialize_form_urlencoded` (serialize form urlencoded).
+///
+/// # Arguments
+/// * `map` - Input `map` parameter.
+/// * `encoding` - Input `encoding` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn serialize_form_urlencoded(
     map: &serde_json::Map<String, serde_json::Value>,
     encoding: Option<&std::collections::HashMap<String, EncodingInfo>>,
@@ -566,6 +808,17 @@ fn serialize_form_urlencoded(
     pairs.join("&")
 }
 
+/// Executes `serialize_form_param` (serialize form param).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+/// * `value` - Input `value` parameter.
+/// * `style` - Input `style` parameter.
+/// * `explode` - Input `explode` parameter.
+/// * `allow_reserved` - Input `allow_reserved` parameter.
+///
+/// # Returns
+/// Resulting `Vec<String>` value.
 fn serialize_form_param(
     name: &str,
     value: &serde_json::Value,
@@ -588,6 +841,17 @@ fn serialize_form_param(
     }
 }
 
+/// Executes `serialize_form_array` (serialize form array).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+/// * `style` - Input `style` parameter.
+/// * `explode` - Input `explode` parameter.
+/// * `allow_reserved` - Input `allow_reserved` parameter.
+/// * `items` - Input `items` parameter.
+///
+/// # Returns
+/// Resulting `Vec<String>` value.
 fn serialize_form_array(
     name: &str,
     style: &ParamStyle,
@@ -652,6 +916,17 @@ fn serialize_form_array(
     }
 }
 
+/// Executes `serialize_form_object` (serialize form object).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+/// * `style` - Input `style` parameter.
+/// * `explode` - Input `explode` parameter.
+/// * `allow_reserved` - Input `allow_reserved` parameter.
+/// * `map` - Input `map` parameter.
+///
+/// # Returns
+/// Resulting `Vec<String>` value.
 fn serialize_form_object(
     name: &str,
     style: &ParamStyle,
@@ -740,12 +1015,29 @@ fn serialize_form_object(
     }
 }
 
+/// Executes `encode_form_deep_object_name` (encode form deep object name).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+/// * `key` - Input `key` parameter.
+/// * `allow_reserved` - Input `allow_reserved` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn encode_form_deep_object_name(name: &str, key: &str, allow_reserved: bool) -> String {
     let name = encode_form_component(name, allow_reserved);
     let key = encode_form_component(key, allow_reserved);
     format!("{}%5B{}%5D", name, key)
 }
 
+/// Executes `encode_form_component` (encode form component).
+///
+/// # Arguments
+/// * `input` - Input `input` parameter.
+/// * `allow_reserved` - Input `allow_reserved` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn encode_form_component(input: &str, allow_reserved: bool) -> String {
     let bytes = input.as_bytes();
     let mut out = String::new();
@@ -762,6 +1054,13 @@ fn encode_form_component(input: &str, allow_reserved: bool) -> String {
     out
 }
 
+/// Executes `is_reserved` (is reserved).
+///
+/// # Arguments
+/// * `b` - Input `b` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_reserved(b: u8) -> bool {
     matches!(
         b,
@@ -786,6 +1085,14 @@ fn is_reserved(b: u8) -> bool {
 }
 
 /// Generates request builder chain.
+///
+/// # Arguments
+/// * `method` - Input `method` parameter.
+/// * `uri` - Input `uri` parameter.
+/// * `body_setup` - Input `body_setup` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn test_request_builder(method: &str, uri: &str, body_setup: &str) -> String {
     let method_lower = method.to_lowercase();
     let builder_call = match method_lower.as_str() {
@@ -1423,6 +1730,11 @@ fn parse_event_stream(body: &str) -> serde_json::Value {
 }
 
 /// Helper to validate response body against OpenAPI schema.
+///
+/// # Arguments
+/// * `resp` - Input `resp` parameter.
+/// * `method` - Input `method` parameter.
+/// * `path_template` - Input `path_template` parameter.
 async fn validate_response(resp: actix_web::dev::ServiceResponse, method: &str, path_template: &str) {
     use actix_web::body::MessageBody;
     let status = resp.status();
@@ -1529,6 +1841,12 @@ async fn validate_response(resp: actix_web::dev::ServiceResponse, method: &str, 
 }
 
 /// Generates a unit test for a specific handler function to be placed alongside it.
+///
+/// # Arguments
+/// * `route` - Input `route` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn handler_unit_test(route: &crate::openapi::parse::ParsedRoute) -> String {
     use crate::openapi::parse::ParamSource;
 

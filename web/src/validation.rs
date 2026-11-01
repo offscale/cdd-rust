@@ -46,6 +46,12 @@ pub struct StrictValidationMiddleware<S> {
 }
 
 /// Returns `true` when the request is a write operation (`POST`, `PUT`, `PATCH`) with `Content-Type: text/plain`.
+///
+/// # Arguments
+/// * `req` - Input `req` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_unsupported_text_plain_write(req: &ServiceRequest) -> bool {
     let is_write = matches!(*req.method(), Method::POST | Method::PUT | Method::PATCH);
     if !is_write {

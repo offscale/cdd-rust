@@ -51,14 +51,29 @@ pub struct ParsedResponseDetails {
     pub links: Vec<ParsedLink>,
 }
 
+/// Internal representation for `ResolvedResponse` (resolved response).
 struct ResolvedResponse {
+    /// Field `response` (response).
     response: utoipa::openapi::Response,
+    /// Field `raw` (raw).
     raw: Option<JsonValue>,
+    /// Field `components` (components).
     components: Option<ShimComponents>,
+    /// Field `base_uri` (base uri).
     base_uri: Option<Url>,
 }
 
 /// Extracts the success response type and its headers/links.
+///
+/// # Arguments
+/// * `responses` - Input `responses` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Option<ParsedResponseDetails>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn extract_response_details(
     responses: &ShimResponses,
     components: Option<&ShimComponents>,
@@ -67,6 +82,18 @@ pub fn extract_response_details(
 }
 
 /// Extracts the success response details with external reference resolution.
+///
+/// # Arguments
+/// * `responses` - Input `responses` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Option<ParsedResponseDetails>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn extract_response_details_with_registry(
     responses: &ShimResponses,
     components: Option<&ShimComponents>,
@@ -288,6 +315,13 @@ pub fn extract_response_details_with_registry(
     Ok(None)
 }
 
+/// Executes `parsed_server_from_utoipa` (parsed server from utoipa).
+///
+/// # Arguments
+/// * `server` - Input `server` parameter.
+///
+/// # Returns
+/// Resulting `ParsedServer` value.
 fn parsed_server_from_utoipa(server: &Server) -> ParsedServer {
     let mut variables = BTreeMap::new();
     if let Some(vars) = server.variables.as_ref() {
@@ -311,6 +345,13 @@ fn parsed_server_from_utoipa(server: &Server) -> ParsedServer {
     }
 }
 
+/// Executes `resolve_server_url_from_parsed` (resolve server url from parsed).
+///
+/// # Arguments
+/// * `server` - Input `server` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn resolve_server_url_from_parsed(server: &ParsedServer) -> String {
     let mut url = server.url.clone();
     for (name, var) in &server.variables {
@@ -320,6 +361,14 @@ fn resolve_server_url_from_parsed(server: &ParsedServer) -> String {
     url
 }
 
+/// Executes `raw_schema_is_false` (raw schema is false).
+///
+/// # Arguments
+/// * `raw_media` - Input `raw_media` parameter.
+/// * `key` - Input `key` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn raw_schema_is_false(raw_media: Option<&JsonValue>, key: &str) -> bool {
     matches!(
         raw_media
@@ -329,6 +378,13 @@ fn raw_schema_is_false(raw_media: Option<&JsonValue>, key: &str) -> bool {
     )
 }
 
+/// Executes `filter_header_extensions` (filter header extensions).
+///
+/// # Arguments
+/// * `obj` - Input `obj` parameter.
+///
+/// # Returns
+/// Resulting `BTreeMap<String, JsonValue>` value.
 fn filter_header_extensions(
     obj: &serde_json::Map<String, JsonValue>,
 ) -> BTreeMap<String, JsonValue> {
@@ -338,6 +394,20 @@ fn filter_header_extensions(
         .collect()
 }
 
+/// Executes `extract_response_headers` (extract response headers).
+///
+/// # Arguments
+/// * `response` - Input `response` parameter.
+/// * `raw_response` - Input `raw_response` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<ResponseHeader>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn extract_response_headers(
     response: &utoipa::openapi::Response,
     raw_response: Option<&JsonValue>,
@@ -381,6 +451,18 @@ fn extract_response_headers(
 }
 
 /// Extracts header definitions from raw response JSON so OAS 3.2 `content` is honored.
+///
+/// # Arguments
+/// * `raw_headers` - Input `raw_headers` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<ResponseHeader>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn extract_headers_from_raw(
     raw_headers: &serde_json::Map<String, JsonValue>,
     components: Option<&ShimComponents>,
@@ -460,6 +542,19 @@ fn extract_headers_from_raw(
 }
 
 /// Resolves a header type and media type when using `content`.
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+/// * `content_val` - Input `content_val` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<(String, String, Option<ExampleValue>)>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn extract_header_content_info(
     name: &str,
     content_val: &JsonValue,
@@ -524,6 +619,14 @@ fn extract_header_content_info(
     Ok((ty, media_type.to_string(), example))
 }
 
+/// Executes `extract_header_example_from_schema` (extract header example from schema).
+///
+/// # Arguments
+/// * `obj` - Input `obj` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `Option<ExampleValue>` value.
 fn extract_header_example_from_schema(
     obj: &serde_json::Map<String, JsonValue>,
     components: Option<&ShimComponents>,
@@ -548,6 +651,15 @@ fn extract_header_example_from_schema(
     None
 }
 
+/// Executes `extract_header_example_from_media` (extract header example from media).
+///
+/// # Arguments
+/// * `media_val` - Input `media_val` parameter.
+/// * `components` - Input `components` parameter.
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `Option<ExampleValue>` value.
 fn extract_header_example_from_media(
     media_val: &JsonValue,
     components: Option<&ShimComponents>,
@@ -573,6 +685,19 @@ fn extract_header_example_from_media(
 }
 
 /// Resolves a header that may be a `$ref`, applying description overrides.
+///
+/// # Arguments
+/// * `raw_header` - Input `raw_header` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+/// * `visited` - Input `visited` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<JsonValue>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn resolve_header_value(
     raw_header: &JsonValue,
     components: Option<&ShimComponents>,
@@ -618,6 +743,17 @@ fn resolve_header_value(
     Ok(resolved)
 }
 
+/// Executes `header_schema_to_type` (header schema to type).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+/// * `schema_val` - Input `schema_val` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<String>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn header_schema_to_type(name: &str, schema_val: &JsonValue) -> AppResult<String> {
     if let Some(flag) = schema_val.as_bool() {
         if !flag {
@@ -638,6 +774,17 @@ fn header_schema_to_type(name: &str, schema_val: &JsonValue) -> AppResult<String
     map_schema_to_rust_type_with_raw(&schema, true, Some(schema_val))
 }
 
+/// Executes `parse_header_style` (parse header style).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+/// * `style` - Input `style` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Option<ParamStyle>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_header_style(name: &str, style: Option<&str>) -> AppResult<Option<ParamStyle>> {
     let Some(style_str) = style else {
         return Ok(None);
@@ -657,6 +804,15 @@ fn parse_header_style(name: &str, style: Option<&str>) -> AppResult<Option<Param
 }
 
 /// Resolves a header component reference to its raw JSON definition.
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `Option<JsonValue>` value.
 fn resolve_header_from_components(
     ref_str: &str,
     components: Option<&ShimComponents>,
@@ -675,6 +831,17 @@ fn resolve_header_from_components(
         .map(|(raw, _, _)| raw)
 }
 
+/// Executes `raw_media_for_type` (raw media for type).
+///
+/// # Arguments
+/// * `raw_response` - Input `raw_response` parameter.
+/// * `media_type` - Input `media_type` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `Option<serde_json::Value>` value.
 fn raw_media_for_type(
     raw_response: &serde_json::Value,
     media_type: &str,
@@ -687,16 +854,41 @@ fn raw_media_for_type(
         .or_else(|| media.as_object().map(|_| media.clone()))
 }
 
+/// Executes `extract_item_schema` (extract item schema).
+///
+/// # Arguments
+/// * `raw_media` - Input `raw_media` parameter.
+///
+/// # Returns
+/// Resulting `Option<RefOr<Schema>>` value.
 fn extract_item_schema(raw_media: &serde_json::Value) -> Option<RefOr<Schema>> {
     let item = raw_media.get("itemSchema")?.clone();
     serde_json::from_value::<RefOr<Schema>>(item).ok()
 }
 
+/// Executes `extract_media_schema` (extract media schema).
+///
+/// # Arguments
+/// * `raw_media` - Input `raw_media` parameter.
+///
+/// # Returns
+/// Resulting `Option<RefOr<Schema>>` value.
 fn extract_media_schema(raw_media: &serde_json::Value) -> Option<RefOr<Schema>> {
     let schema_val = raw_media.get("schema")?.clone();
     serde_json::from_value::<RefOr<Schema>>(schema_val).ok()
 }
 
+/// Executes `resolve_media_type_ref` (resolve media type ref).
+///
+/// # Arguments
+/// * `raw_media` - Input `raw_media` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+/// * `visiting` - Input `visiting` parameter.
+///
+/// # Returns
+/// Resulting `Option<serde_json::Value>` value.
 fn resolve_media_type_ref(
     raw_media: &serde_json::Value,
     components: Option<&ShimComponents>,
@@ -748,6 +940,12 @@ fn empty_content() -> &'static Content {
 }
 
 /// 5. First available entry
+///
+/// # Arguments
+/// * `content` - Input `content` parameter.
+///
+/// # Returns
+/// Resulting `Option<(&str, &Content)>` value.
 fn select_response_media(content: &IndexMap<String, RefOr<Content>>) -> Option<(&str, &Content)> {
     if let Some((key, media)) =
         select_best_media(content, is_json_media_type, Some("application/json"))
@@ -773,6 +971,15 @@ fn select_response_media(content: &IndexMap<String, RefOr<Content>>) -> Option<(
     })
 }
 
+/// Executes `select_best_media` (select best media).
+///
+/// # Arguments
+/// * `content` - Input `content` parameter.
+/// * `predicate` - Input `predicate` parameter.
+/// * `preferred` - Input `preferred` parameter.
+///
+/// # Returns
+/// Resulting `Option<(&'a str, &'a Content)> where F: Fn(&str) -> bool,` value.
 fn select_best_media<'a, F>(
     content: &'a IndexMap<String, RefOr<Content>>,
     predicate: F,
@@ -790,6 +997,14 @@ where
     Some((k.as_str(), media))
 }
 
+/// Executes `media_specificity_score` (media specificity score).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+/// * `preferred` - Input `preferred` parameter.
+///
+/// # Returns
+/// Resulting `(i32, i32, usize)` value.
 fn media_specificity_score(media_type: &str, preferred: Option<&str>) -> (i32, i32, usize) {
     let normalized = normalize_media_type(media_type);
     let preferred_bonus = preferred
@@ -805,6 +1020,13 @@ fn media_specificity_score(media_type: &str, preferred: Option<&str>) -> (i32, i
     (preferred_bonus, wildcard_score, normalized.len())
 }
 
+/// Executes `infer_body_type_from_media_type` (infer body type from media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 fn infer_body_type_from_media_type(media_type: &str) -> Option<String> {
     let media = normalize_media_type(media_type);
 
@@ -832,22 +1054,57 @@ fn infer_body_type_from_media_type(media_type: &str) -> Option<String> {
     None
 }
 
+/// Executes `normalize_media_type` (normalize media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn normalize_media_type(media_type: &str) -> String {
     crate::openapi::parse::models::MediaType::normalize(media_type)
 }
 
+/// Executes `is_json_media_type` (is json media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_json_media_type(media_type: &str) -> bool {
     crate::openapi::parse::models::MediaType::parse(media_type).is_json()
 }
 
+/// Executes `is_text_media_type` (is text media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_text_media_type(media_type: &str) -> bool {
     crate::openapi::parse::models::MediaType::parse(media_type).is_text()
 }
 
+/// Executes `is_sequential_json_media_type` (is sequential json media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_sequential_json_media_type(media_type: &str) -> bool {
     crate::openapi::parse::models::MediaType::parse(media_type).is_sequential_json()
 }
 
+/// Executes `is_sequential_media_type` (is sequential media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_sequential_media_type(media_type: &str) -> bool {
     if is_sequential_json_media_type(media_type) {
         return true;
@@ -859,6 +1116,16 @@ fn is_sequential_media_type(media_type: &str) -> bool {
     )
 }
 
+/// Executes `resolve_response_from_components` (resolve response from components).
+///
+/// # Arguments
+/// * `r` - Input `r` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `Option<ResolvedResponse>` value.
 fn resolve_response_from_components(
     r: &utoipa::openapi::Ref,
     components: Option<&ShimComponents>,
@@ -894,6 +1161,16 @@ fn resolve_response_from_components(
         })
 }
 
+/// Executes `resolve_link_from_ref` (resolve link from ref).
+///
+/// # Arguments
+/// * `r` - Input `r` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `Option<utoipa::openapi::link::Link>` value.
 fn resolve_link_from_ref(
     r: &utoipa::openapi::Ref,
     components: Option<&ShimComponents>,
@@ -904,6 +1181,10 @@ fn resolve_link_from_ref(
     link_from_component_json(&raw, &r.description)
 }
 
+/// Executes `normalize_link_object` (normalize link object).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
 fn normalize_link_object(value: &mut JsonValue) {
     let JsonValue::Object(link_obj) = value else {
         return;
@@ -922,6 +1203,14 @@ fn normalize_link_object(value: &mut JsonValue) {
     }
 }
 
+/// Executes `link_from_component_json` (link from component json).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+/// * `description_override` - Input `description_override` parameter.
+///
+/// # Returns
+/// Resulting `Option<utoipa::openapi::link::Link>` value.
 fn link_from_component_json(
     value: &JsonValue,
     description_override: &str,
@@ -938,6 +1227,13 @@ fn link_from_component_json(
     Some(link)
 }
 
+/// Executes `link_from_raw` (link from raw).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `Option<utoipa::openapi::link::Link>` value.
 fn link_from_raw(value: &JsonValue) -> Option<utoipa::openapi::link::Link> {
     let obj = value.as_object()?;
     let operation_id = obj
@@ -981,6 +1277,16 @@ fn link_from_raw(value: &JsonValue) -> Option<utoipa::openapi::link::Link> {
     Some(builder.build())
 }
 
+/// Executes `resolve_link_raw_from_components` (resolve link raw from components).
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `Option<JsonValue>` value.
 fn resolve_link_raw_from_components(
     ref_str: &str,
     components: Option<&ShimComponents>,
@@ -999,6 +1305,20 @@ fn resolve_link_raw_from_components(
         .map(|(raw, _, _)| raw)
 }
 
+/// Executes `resolve_link_value` (resolve link value).
+///
+/// # Arguments
+/// * `raw_link` - Input `raw_link` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+/// * `visited` - Input `visited` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<JsonValue>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn resolve_link_value(
     raw_link: &JsonValue,
     components: Option<&ShimComponents>,
@@ -1040,6 +1360,13 @@ fn resolve_link_value(
     Ok(resolved)
 }
 
+/// Executes `parse_server_from_raw` (parse server from raw).
+///
+/// # Arguments
+/// * `server` - Input `server` parameter.
+///
+/// # Returns
+/// Resulting `Option<ParsedServer>` value.
 fn parse_server_from_raw(server: &JsonValue) -> Option<ParsedServer> {
     let obj = server.as_object()?;
     let url = obj.get("url")?.as_str()?.to_string();
@@ -1092,6 +1419,17 @@ fn parse_server_from_raw(server: &JsonValue) -> Option<ParsedServer> {
     })
 }
 
+/// Executes `parse_link_parameters` (parse link parameters).
+///
+/// # Arguments
+/// * `parameters` - Input `parameters` parameter.
+/// * `link_name` - Input `link_name` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<std::collections::HashMap<String, LinkParamValue>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_link_parameters(
     parameters: &BTreeMap<String, serde_json::Value>,
     link_name: &str,
@@ -1110,6 +1448,16 @@ fn parse_link_parameters(
     Ok(parsed)
 }
 
+/// Executes `parse_link_request_body` (parse link request body).
+///
+/// # Arguments
+/// * `request_body` - Input `request_body` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Option<LinkRequestBody>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_link_request_body(
     request_body: &Option<serde_json::Value>,
 ) -> AppResult<Option<LinkRequestBody>> {
@@ -1124,6 +1472,19 @@ fn parse_link_request_body(
     Ok(Some(LinkRequestBody::Literal(body.clone())))
 }
 
+/// Executes `extract_links_from_raw` (extract links from raw).
+///
+/// # Arguments
+/// * `raw_links` - Input `raw_links` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<ParsedLink>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn extract_links_from_raw(
     raw_links: &JsonValue,
     components: Option<&ShimComponents>,
@@ -1210,6 +1571,16 @@ fn extract_links_from_raw(
     Ok(links)
 }
 
+/// Executes `runtime_expr_from_json` (runtime expr from json).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Option<RuntimeExpression>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn runtime_expr_from_json(value: &serde_json::Value) -> AppResult<Option<RuntimeExpression>> {
     let candidate = match value {
         serde_json::Value::String(s) => s.as_str(),
@@ -1224,6 +1595,17 @@ fn runtime_expr_from_json(value: &serde_json::Value) -> AppResult<Option<Runtime
     Ok(None)
 }
 
+/// Executes `validate_link_parameter_key` (validate link parameter key).
+///
+/// # Arguments
+/// * `link_name` - Input `link_name` parameter.
+/// * `key` - Input `key` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_link_parameter_key(link_name: &str, key: &str) -> AppResult<()> {
     if let Some((prefix, rest)) = key.split_once('.') {
         if matches!(prefix, "path" | "query" | "header" | "cookie") && rest.is_empty() {

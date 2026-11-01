@@ -256,16 +256,35 @@ pub trait BackendStrategy: CodegenStrategy {
     }
 
     /// Generates a handler function signature.
+    ///
+    /// # Arguments
+    /// * `route` - Input `route` parameter.
+    /// * `args` - Input `args` parameter.
+    ///
+    /// # Returns
+    /// Resulting `String` value.
     fn handler_signature(&self, route: &ParsedRoute, args: &[String]) -> String {
         self.emit_handler(route, args)
     }
 
     /// Optional extra doc comments to insert above the handler.
+    ///
+    /// # Arguments
+    /// * `route` - Input `route` parameter.
+    ///
+    /// # Returns
+    /// Resulting `String` value.
     fn extra_handler_docs(&self, _route: &ParsedRoute) -> String {
         String::new()
     }
 
     /// Generates the type string for path parameter extraction.
+    ///
+    /// # Arguments
+    /// * `inner_types` - Input `inner_types` parameter.
+    ///
+    /// # Returns
+    /// Resulting `String` value.
     fn path_extractor(&self, inner_types: &[String]) -> String {
         if inner_types.len() == 1 {
             inner_types[0].clone()
@@ -280,11 +299,24 @@ pub trait BackendStrategy: CodegenStrategy {
     }
 
     /// Generates the type string for strongly typed query parameter extraction.
+    ///
+    /// # Arguments
+    /// * `inner_type` - Input `inner_type` parameter.
+    ///
+    /// # Returns
+    /// Resulting `String` value.
     fn typed_query_extractor(&self, inner_type: &str) -> String {
         inner_type.to_string()
     }
 
     /// Generates the type string for the entire Query String extraction (OAS 3.2).
+    ///
+    /// # Arguments
+    /// * `inner_type` - Input `inner_type` parameter.
+    /// * `content_media_type` - Input `content_media_type` parameter.
+    ///
+    /// # Returns
+    /// Resulting `String` value.
     fn query_string_extractor(
         &self,
         inner_type: &str,
@@ -294,6 +326,12 @@ pub trait BackendStrategy: CodegenStrategy {
     }
 
     /// Generates the type string for Header parameter extraction.
+    ///
+    /// # Arguments
+    /// * `inner_type` - Input `inner_type` parameter.
+    ///
+    /// # Returns
+    /// Resulting `String` value.
     fn header_extractor(&self, inner_type: &str) -> String {
         inner_type.to_string()
     }
@@ -304,31 +342,67 @@ pub trait BackendStrategy: CodegenStrategy {
     }
 
     /// Generates the type string for JSON request body extraction.
+    ///
+    /// # Arguments
+    /// * `body_type` - Input `body_type` parameter.
+    ///
+    /// # Returns
+    /// Resulting `String` value.
     fn body_extractor(&self, body_type: &str) -> String {
         body_type.to_string()
     }
 
     /// Generates the type string for Form request body extraction.
+    ///
+    /// # Arguments
+    /// * `body_type` - Input `body_type` parameter.
+    ///
+    /// # Returns
+    /// Resulting `String` value.
     fn form_extractor(&self, body_type: &str) -> String {
         body_type.to_string()
     }
 
     /// Generates the type string for Multipart request body extraction.
+    ///
+    /// # Arguments
+    /// * `body_type` - Input `body_type` parameter.
+    ///
+    /// # Returns
+    /// Resulting `String` value.
     fn multipart_extractor(&self, body_type: &str) -> String {
         body_type.to_string()
     }
 
     /// Generates the type string for Text request body extraction.
+    ///
+    /// # Arguments
+    /// * `body_type` - Input `body_type` parameter.
+    ///
+    /// # Returns
+    /// Resulting `String` value.
     fn text_extractor(&self, body_type: &str) -> String {
         body_type.to_string()
     }
 
     /// Generates the type string for Binary request body extraction.
+    ///
+    /// # Arguments
+    /// * `body_type` - Input `body_type` parameter.
+    ///
+    /// # Returns
+    /// Resulting `String` value.
     fn bytes_extractor(&self, body_type: &str) -> String {
         body_type.to_string()
     }
 
     /// Generates the parameter declaration string for a Security extraction/Guard.
+    ///
+    /// # Arguments
+    /// * `requirements` - Input `requirements` parameter.
+    ///
+    /// # Returns
+    /// Resulting `String` value.
     fn security_extractor(&self, _requirements: &[SecurityRequirementGroup]) -> String {
         String::new()
     }
@@ -339,6 +413,13 @@ pub trait BackendStrategy: CodegenStrategy {
     }
 
     /// Generates the route registration code statement (empty for client/CLI targets).
+    ///
+    /// # Arguments
+    /// * `route` - Input `route` parameter.
+    /// * `handler_full_path` - Input `handler_full_path` parameter.
+    ///
+    /// # Returns
+    /// Resulting `String` value.
     fn route_registration_statement(
         &self,
         _route: &ParsedRoute,
@@ -353,15 +434,41 @@ pub trait BackendStrategy: CodegenStrategy {
     fn test_imports(&self) -> String;
 
     /// Returns the test function signature (including attributes).
+    ///
+    /// # Arguments
+    /// * `fn_name` - Input `fn_name` parameter.
+    ///
+    /// # Returns
+    /// Resulting `String` value.
     fn test_fn_signature(&self, fn_name: &str) -> String;
 
     /// Returns code to initialize the application for testing.
+    ///
+    /// # Arguments
+    /// * `app_factory` - Input `app_factory` parameter.
+    ///
+    /// # Returns
+    /// Resulting `String` value.
     fn test_app_init(&self, app_factory: &str) -> String;
 
     /// Returns the code snippet that attaches a dummy body to the request.
+    ///
+    /// # Arguments
+    /// * `body` - Input `body` parameter.
+    ///
+    /// # Returns
+    /// Resulting `String` value.
     fn test_body_setup_code(&self, body: &RequestBodyDefinition) -> String;
 
     /// Returns code to build the request object.
+    ///
+    /// # Arguments
+    /// * `method` - Input `method` parameter.
+    /// * `uri` - Input `uri` parameter.
+    /// * `body_setup` - Input `body_setup` parameter.
+    ///
+    /// # Returns
+    /// Resulting `String` value.
     fn test_request_builder(&self, method: &str, uri: &str, body_setup: &str) -> String;
 
     /// Returns code to execute the request against the app.
@@ -376,11 +483,24 @@ pub trait BackendStrategy: CodegenStrategy {
     }
 
     /// Generates a unit test for a specific handler function to be placed alongside it.
+    ///
+    /// # Arguments
+    /// * `route` - Input `route` parameter.
+    ///
+    /// # Returns
+    /// Resulting `String` value.
     fn handler_unit_test(&self, _route: &ParsedRoute) -> String {
         String::new()
     }
 
     /// Allows the strategy to fully override test function generation.
+    ///
+    /// # Arguments
+    /// * `route` - Input `route` parameter.
+    /// * `app_factory` - Input `app_factory` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Option<String>` value.
     fn generate_custom_test(&self, _route: &ParsedRoute, _app_factory: &str) -> Option<String> {
         None
     }

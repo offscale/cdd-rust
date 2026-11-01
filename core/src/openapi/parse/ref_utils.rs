@@ -13,12 +13,20 @@ use percent_encoding::percent_decode_str;
 use std::path::Path;
 use url::Url;
 
+/// Constant `DUMMY_BASE` (dummy base).
 const DUMMY_BASE: &str = "http://example.invalid/";
 
 /// Normalizes a `$ref` to a local JSON Pointer (e.g. `#/components/...`) if it targets the
 /// current document as identified by `$self`.
 ///
 /// Returns `None` if the reference is external or lacks a fragment.
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+/// * `self_uri` - Input `self_uri` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 pub(crate) fn normalize_ref_to_local(ref_str: &str, self_uri: Option<&str>) -> Option<String> {
     if ref_str.starts_with("#/") || ref_str == "#" {
         return Some(ref_str.to_string());
@@ -41,6 +49,14 @@ pub(crate) fn normalize_ref_to_local(ref_str: &str, self_uri: Option<&str>) -> O
 /// Extracts a component name from a `$ref` if it points to `#/components/{section}/{name}`.
 ///
 /// Returns `None` if the reference is not local to the current document.
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+/// * `self_uri` - Input `self_uri` parameter.
+/// * `section` - Input `section` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 pub(crate) fn extract_component_name(
     ref_str: &str,
     self_uri: Option<&str>,
@@ -66,6 +82,12 @@ pub(crate) fn extract_component_name(
 }
 
 /// Decodes a JSON Pointer segment (handles `~1` and `~0`).
+///
+/// # Arguments
+/// * `segment` - Input `segment` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub(crate) fn decode_pointer_segment(segment: &str) -> String {
     let decoded = segment.replace("~1", "/").replace("~0", "~");
     percent_decode_str(&decoded)
@@ -73,6 +95,14 @@ pub(crate) fn decode_pointer_segment(segment: &str) -> String {
         .into_owned()
 }
 
+/// Executes `ref_doc_matches_self` (ref doc matches self).
+///
+/// # Arguments
+/// * `ref_doc` - Input `ref_doc` parameter.
+/// * `self_uri` - Input `self_uri` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn ref_doc_matches_self(ref_doc: &str, self_uri: &str) -> bool {
     if ref_doc == self_uri {
         return true;

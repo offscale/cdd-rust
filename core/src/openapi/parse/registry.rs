@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use url::Url;
 use utoipa::openapi::{Components, RefOr, Schema};
 
+/// Constant `DUMMY_BASE` (dummy base).
 const DUMMY_BASE: &str = "http://example.invalid/";
 
 /// The kind of document stored in the registry.
@@ -66,11 +67,17 @@ pub struct DocumentEntry {
 /// Registry for externally supplied OpenAPI / JSON Schema documents.
 #[derive(Default)]
 pub struct DocumentRegistry {
+    /// Field `docs` (docs).
     docs: Vec<DocumentEntry>,
+    /// Field `index` (index).
     index: HashMap<String, usize>,
+    /// Field `schema_ids` (schema ids).
     schema_ids: HashMap<String, SchemaTarget>,
+    /// Field `schema_anchors` (schema anchors).
     schema_anchors: HashMap<String, SchemaTarget>,
+    /// Field `inline_schema_ids` (inline schema ids).
     inline_schema_ids: HashMap<String, Schema>,
+    /// Field `inline_schema_anchors` (inline schema anchors).
     inline_schema_anchors: HashMap<String, Schema>,
 }
 
@@ -81,6 +88,16 @@ impl DocumentRegistry {
     }
 
     /// Registers an OpenAPI document from YAML.
+    ///
+    /// # Arguments
+    /// * `retrieval_uri` - Input `retrieval_uri` parameter.
+    /// * `yaml` - Input `yaml` parameter.
+    ///
+    /// # Returns
+    /// Resulting `AppResult<()>` value.
+    ///
+    /// # Errors
+    /// Returns an error if validation, parsing, or execution fails.
     pub fn register_openapi_yaml(&mut self, retrieval_uri: &str, yaml: &str) -> AppResult<()> {
         let raw: JsonValue = serde_yaml::from_str(yaml)
             .map_err(|e| AppError::General(format!("Failed to parse OpenAPI YAML: {}", e)))?;
@@ -88,6 +105,16 @@ impl DocumentRegistry {
     }
 
     /// Registers a JSON Schema document from YAML.
+    ///
+    /// # Arguments
+    /// * `retrieval_uri` - Input `retrieval_uri` parameter.
+    /// * `yaml` - Input `yaml` parameter.
+    ///
+    /// # Returns
+    /// Resulting `AppResult<()>` value.
+    ///
+    /// # Errors
+    /// Returns an error if validation, parsing, or execution fails.
     pub fn register_schema_yaml(&mut self, retrieval_uri: &str, yaml: &str) -> AppResult<()> {
         let raw: JsonValue = serde_yaml::from_str(yaml)
             .map_err(|e| AppError::General(format!("Failed to parse Schema YAML: {}", e)))?;
@@ -95,6 +122,16 @@ impl DocumentRegistry {
     }
 
     /// Registers an OpenAPI document from JSON value.
+    ///
+    /// # Arguments
+    /// * `retrieval_uri` - Input `retrieval_uri` parameter.
+    /// * `raw` - Input `raw` parameter.
+    ///
+    /// # Returns
+    /// Resulting `AppResult<()>` value.
+    ///
+    /// # Errors
+    /// Returns an error if validation, parsing, or execution fails.
     pub fn register_openapi_json(&mut self, retrieval_uri: &str, raw: JsonValue) -> AppResult<()> {
         let mut shim: ShimOpenApi = serde_json::from_value(raw.clone()).map_err(|e| {
             AppError::General(format!(
@@ -132,6 +169,16 @@ impl DocumentRegistry {
     }
 
     /// Registers a JSON Schema document from JSON value.
+    ///
+    /// # Arguments
+    /// * `retrieval_uri` - Input `retrieval_uri` parameter.
+    /// * `raw` - Input `raw` parameter.
+    ///
+    /// # Returns
+    /// Resulting `AppResult<()>` value.
+    ///
+    /// # Errors
+    /// Returns an error if validation, parsing, or execution fails.
     pub fn register_schema_json(
         &mut self,
         retrieval_uri: &str,
@@ -171,11 +218,24 @@ impl DocumentRegistry {
     }
 
     /// Returns a registered document by any known URI.
+    ///
+    /// # Arguments
+    /// * `uri` - Input `uri` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Option<&DocumentEntry>` value.
     pub fn get(&self, uri: &str) -> Option<&DocumentEntry> {
         self.index.get(uri).and_then(|idx| self.docs.get(*idx))
     }
 
     /// Resolves an external schema `$ref` against the registry.
+    ///
+    /// # Arguments
+    /// * `ref_str` - Input `ref_str` parameter.
+    /// * `base` - Input `base` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Option<&'a Schema>` value.
     pub fn resolve_schema_ref<'a>(
         &'a self,
         ref_str: &str,
@@ -234,6 +294,14 @@ impl DocumentRegistry {
     }
 
     /// Resolves an external component `$ref` (non-schema) to its raw JSON value.
+    ///
+    /// # Arguments
+    /// * `ref_str` - Input `ref_str` parameter.
+    /// * `base` - Input `base` parameter.
+    /// * `section` - Input `section` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Option<JsonValue>` value.
     pub fn resolve_component_ref(
         &self,
         ref_str: &str,
@@ -261,11 +329,27 @@ impl DocumentRegistry {
     }
 
     /// Resolves a Path Item `$ref` across external OpenAPI documents.
+    ///
+    /// # Arguments
+    /// * `ref_str` - Input `ref_str` parameter.
+    /// * `base` - Input `base` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Option<ShimPathItem>` value.
     pub fn resolve_path_item_ref(&self, ref_str: &str, base: Option<&Url>) -> Option<ShimPathItem> {
         self.resolve_path_item_ref_with_components(ref_str, base)
             .map(|(pi, _, _)| pi)
     }
 
+    /// Executes `resolve_component_ref_with_components` (resolve component ref with components).
+    ///
+    /// # Arguments
+    /// * `ref_str` - Input `ref_str` parameter.
+    /// * `base` - Input `base` parameter.
+    /// * `section` - Input `section` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Option<(JsonValue, Option<ShimComponents>, Option<Url>)>` value.
     pub(crate) fn resolve_component_ref_with_components(
         &self,
         ref_str: &str,
@@ -285,6 +369,14 @@ impl DocumentRegistry {
         Some((raw, components, base_uri))
     }
 
+    /// Executes `resolve_path_item_ref_with_components` (resolve path item ref with components).
+    ///
+    /// # Arguments
+    /// * `ref_str` - Input `ref_str` parameter.
+    /// * `base` - Input `base` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Option<(ShimPathItem, Option<ShimComponents>, Option<Url>)>` value.
     pub(crate) fn resolve_path_item_ref_with_components(
         &self,
         ref_str: &str,
@@ -343,6 +435,16 @@ impl DocumentRegistry {
         Some((resolved, components, base_uri))
     }
 
+    /// Executes `insert_entry` (insert entry).
+    ///
+    /// # Arguments
+    /// * `entry` - Input `entry` parameter.
+    ///
+    /// # Returns
+    /// Resulting `AppResult<usize>` value.
+    ///
+    /// # Errors
+    /// Returns an error if validation, parsing, or processing fails.
     fn insert_entry(&mut self, entry: DocumentEntry) -> AppResult<usize> {
         let idx = self.docs.len();
         let mut aliases = Vec::new();
@@ -372,6 +474,10 @@ impl DocumentRegistry {
         Ok(idx)
     }
 
+    /// Executes `register_schema_indices_for_openapi` (register schema indices for openapi).
+    ///
+    /// # Arguments
+    /// * `doc_idx` - Input `doc_idx` parameter.
     fn register_schema_indices_for_openapi(&mut self, doc_idx: usize) {
         let Some(comps) = self.docs[doc_idx]
             .shim
@@ -396,6 +502,10 @@ impl DocumentRegistry {
         }
     }
 
+    /// Executes `register_schema_indices_for_root` (register schema indices for root).
+    ///
+    /// # Arguments
+    /// * `doc_idx` - Input `doc_idx` parameter.
     fn register_schema_indices_for_root(&mut self, doc_idx: usize) {
         let entry = &self.docs[doc_idx];
         let obj = &entry.raw;
@@ -421,6 +531,14 @@ impl DocumentRegistry {
         }
     }
 
+    /// Executes `resolve_schema_id` (resolve schema id).
+    ///
+    /// # Arguments
+    /// * `parsed` - Input `parsed` parameter.
+    /// * `base` - Input `base` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Option<&'a SchemaTarget>` value.
     fn resolve_schema_id<'a>(
         &'a self,
         parsed: &crate::openapi::parse::schemas::refs::ParsedReference<'_>,
@@ -438,6 +556,14 @@ impl DocumentRegistry {
         self.schema_ids.get(&doc_uri)
     }
 
+    /// Executes `resolve_schema_anchor` (resolve schema anchor).
+    ///
+    /// # Arguments
+    /// * `parsed` - Input `parsed` parameter.
+    /// * `base` - Input `base` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Option<&'a SchemaTarget>` value.
     fn resolve_schema_anchor<'a>(
         &'a self,
         parsed: &crate::openapi::parse::schemas::refs::ParsedReference<'_>,
@@ -464,6 +590,14 @@ impl DocumentRegistry {
             .find_map(|candidate| self.schema_anchors.get(candidate))
     }
 
+    /// Executes `resolve_inline_schema_id` (resolve inline schema id).
+    ///
+    /// # Arguments
+    /// * `parsed` - Input `parsed` parameter.
+    /// * `base` - Input `base` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Option<&'a Schema>` value.
     fn resolve_inline_schema_id<'a>(
         &'a self,
         parsed: &crate::openapi::parse::schemas::refs::ParsedReference<'_>,
@@ -481,6 +615,14 @@ impl DocumentRegistry {
         self.inline_schema_ids.get(&doc_uri)
     }
 
+    /// Executes `resolve_inline_schema_anchor` (resolve inline schema anchor).
+    ///
+    /// # Arguments
+    /// * `parsed` - Input `parsed` parameter.
+    /// * `base` - Input `base` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Option<&'a Schema>` value.
     fn resolve_inline_schema_anchor<'a>(
         &'a self,
         parsed: &crate::openapi::parse::schemas::refs::ParsedReference<'_>,
@@ -507,6 +649,13 @@ impl DocumentRegistry {
             .find_map(|candidate| self.inline_schema_anchors.get(candidate))
     }
 
+    /// Executes `schema_from_target` (schema from target).
+    ///
+    /// # Arguments
+    /// * `target` - Input `target` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Option<&Schema>` value.
     fn schema_from_target(&self, target: &SchemaTarget) -> Option<&Schema> {
         match target {
             SchemaTarget::Root(doc) => self.docs[*doc].schema_root.as_ref(),
@@ -519,6 +668,13 @@ impl DocumentRegistry {
     }
 }
 
+/// Executes `extract_concrete_schema` (extract concrete schema).
+///
+/// # Arguments
+/// * `ref_or` - Input `ref_or` parameter.
+///
+/// # Returns
+/// Resulting `Option<&Schema>` value.
 fn extract_concrete_schema(ref_or: &RefOr<Schema>) -> Option<&Schema> {
     match ref_or {
         RefOr::T(schema) => Some(schema),
@@ -527,6 +683,14 @@ fn extract_concrete_schema(ref_or: &RefOr<Schema>) -> Option<&Schema> {
 }
 
 impl DocumentEntry {
+    /// Executes `component_value` (component value).
+    ///
+    /// # Arguments
+    /// * `section` - Input `section` parameter.
+    /// * `name` - Input `name` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Option<JsonValue>` value.
     fn component_value(&self, section: &str, name: &str) -> Option<JsonValue> {
         let comps = self.shim.as_ref()?.components.as_ref()?;
 
@@ -550,11 +714,26 @@ impl DocumentEntry {
     }
 }
 
+/// Executes `resolve_base_url` (resolve base url).
+///
+/// # Arguments
+/// * `retrieval_uri` - Input `retrieval_uri` parameter.
+/// * `self_uri` - Input `self_uri` parameter.
+///
+/// # Returns
+/// Resulting `Option<Url>` value.
 fn resolve_base_url(retrieval_uri: &str, self_uri: Option<&str>) -> Option<Url> {
     let base_str = compute_base_uri(retrieval_uri, self_uri);
     parse_base_url(&base_str)
 }
 
+/// Executes `parse_base_url` (parse base url).
+///
+/// # Arguments
+/// * `base_str` - Input `base_str` parameter.
+///
+/// # Returns
+/// Resulting `Option<Url>` value.
 fn parse_base_url(base_str: &str) -> Option<Url> {
     if let Ok(url) = Url::parse(base_str) {
         return Some(url);
@@ -564,6 +743,14 @@ fn parse_base_url(base_str: &str) -> Option<Url> {
         .and_then(|dummy| dummy.join(base_str).ok())
 }
 
+/// Executes `resolve_doc_uri` (resolve doc uri).
+///
+/// # Arguments
+/// * `doc` - Input `doc` parameter.
+/// * `base` - Input `base` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 fn resolve_doc_uri(doc: &str, base: Option<&Url>) -> Option<String> {
     if let Ok(url) = Url::parse(doc) {
         return Some(url.to_string());
@@ -572,6 +759,13 @@ fn resolve_doc_uri(doc: &str, base: Option<&Url>) -> Option<String> {
     base.join(doc).ok().map(|u| u.to_string())
 }
 
+/// Executes `fragment_is_root` (fragment is root).
+///
+/// # Arguments
+/// * `fragment` - Input `fragment` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn fragment_is_root(fragment: Option<&str>) -> bool {
     match fragment {
         None => true,
@@ -579,6 +773,13 @@ fn fragment_is_root(fragment: Option<&str>) -> bool {
     }
 }
 
+/// Executes `insert_root_anchor` (insert root anchor).
+///
+/// # Arguments
+/// * `anchors` - Input `anchors` parameter.
+/// * `anchor` - Input `anchor` parameter.
+/// * `base` - Input `base` parameter.
+/// * `doc_idx` - Input `doc_idx` parameter.
 fn insert_root_anchor(
     anchors: &mut HashMap<String, SchemaTarget>,
     anchor: &str,
@@ -598,6 +799,16 @@ fn insert_root_anchor(
     }
 }
 
+/// Executes `parse_components_model` (parse components model).
+///
+/// # Arguments
+/// * `raw` - Input `raw` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Option<Components>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_components_model(raw: &JsonValue) -> AppResult<Option<Components>> {
     let mut normalized = raw.clone();
     normalize_nullable_schemas(&mut normalized);

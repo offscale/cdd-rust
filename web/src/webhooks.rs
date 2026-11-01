@@ -26,6 +26,13 @@ pub struct TriggerQuery {
 /// Administrative endpoint to trigger a webhook.
 ///
 /// Dispatches a predefined payload to the provided `target_url`.
+///
+/// # Arguments
+/// * `path` - Input `path` parameter.
+/// * `query` - Input `query` parameter.
+///
+/// # Returns
+/// Resulting `impl Responder` value.
 pub async fn trigger_webhook(
     path: web::Path<String>,
     query: web::Query<TriggerQuery>,
@@ -57,6 +64,9 @@ pub async fn trigger_webhook(
 }
 
 /// Configuration for webhook endpoints.
+///
+/// # Arguments
+/// * `cfg` - Input `cfg` parameter.
 pub fn config(cfg: &mut web::ServiceConfig) {
     cfg.service(web::scope("/_mock").route(
         "/trigger-webhook/{webhook_name}",

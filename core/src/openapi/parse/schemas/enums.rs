@@ -85,6 +85,12 @@ pub(crate) fn parse_variants(
 }
 
 /// Heuristic to name variants based on Rust types.
+///
+/// # Arguments
+/// * `ty` - Input `ty` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 fn derive_name_from_type(ty: &str) -> Option<String> {
     match ty {
         "String" => Some("String".to_string()),

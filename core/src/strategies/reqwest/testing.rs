@@ -18,22 +18,48 @@ pub fn test_imports() -> String {
 }
 
 /// Returns the test function signature.
+///
+/// # Arguments
+/// * `fn_name` - Input `fn_name` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn test_fn_signature(fn_name: &str) -> String {
     format!("#[tokio::test]\nasync fn test_{}() {{\n", fn_name)
 }
 
 /// Returns code to initialize the client for testing.
+///
+/// # Arguments
+/// * `app_factory` - Input `app_factory` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn test_app_init(app_factory: &str) -> String {
     let _ = app_factory;
     "    let client = Client::new();\n    let base_url = \"http://localhost:8080\";\n".to_string()
 }
 
 /// Returns the body setup code.
+///
+/// # Arguments
+/// * `body` - Input `body` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn test_body_setup_code(_body: &RequestBodyDefinition) -> String {
     "    let req_body = json!({});\n".to_string()
 }
 
 /// Returns the request builder string.
+///
+/// # Arguments
+/// * `method` - Input `method` parameter.
+/// * `uri` - Input `uri` parameter.
+/// * `body_setup` - Input `body_setup` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn test_request_builder(method: &str, uri: &str, body_setup: &str) -> String {
     let mut code = String::new();
     if !body_setup.is_empty() {
@@ -67,6 +93,13 @@ pub fn test_validation_helper() -> String {
 }
 
 /// Returns the validation helper.
+///
+/// # Arguments
+/// * `route` - Input `route` parameter.
+/// * `app_factory` - Input `app_factory` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn generate_custom_test(
     route: &crate::openapi::parse::ParsedRoute,
     app_factory: &str,

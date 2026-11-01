@@ -41,6 +41,13 @@ pub fn extract_routes_from_reqwest_functions(code: &str) -> AppResult<Vec<Parsed
     Ok(routes)
 }
 
+/// Executes `parse_reqwest_route` (parse reqwest route).
+///
+/// # Arguments
+/// * `func` - Input `func` parameter.
+///
+/// # Returns
+/// Resulting `Option<ParsedRoute>` value.
 fn parse_reqwest_route(func: &ast::Fn) -> Option<ParsedRoute> {
     let handler_name = func.name()?.text().to_string();
 
@@ -119,6 +126,12 @@ fn parse_reqwest_route(func: &ast::Fn) -> Option<ParsedRoute> {
 
 /// Inspects `ast::MethodCallExpr` and `ast::MacroCall` nodes inside a function block
 /// to extract the HTTP method and path template.
+///
+/// # Arguments
+/// * `body` - Input `body` parameter.
+///
+/// # Returns
+/// Resulting `(Option<String>, Option<String>)` value.
 fn extract_method_and_path_from_body(body: &ast::BlockExpr) -> (Option<String>, Option<String>) {
     let mut detected_method = None;
     let mut detected_path = None;
@@ -152,6 +165,13 @@ fn extract_method_and_path_from_body(body: &ast::BlockExpr) -> (Option<String>, 
     (detected_method, detected_path)
 }
 
+/// Executes `extract_path_from_expr` (extract path from expr).
+///
+/// # Arguments
+/// * `expr` - Input `expr` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 fn extract_path_from_expr(expr: &ast::Expr) -> Option<String> {
     for node in expr.syntax().descendants_with_tokens() {
         if let Some(macro_call) = node.as_node().and_then(|n| ast::MacroCall::cast(n.clone())) {
@@ -173,6 +193,13 @@ fn extract_path_from_expr(expr: &ast::Expr) -> Option<String> {
     None
 }
 
+/// Executes `extract_path_from_macro` (extract path from macro).
+///
+/// # Arguments
+/// * `macro_call` - Input `macro_call` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 fn extract_path_from_macro(macro_call: &ast::MacroCall) -> Option<String> {
     if macro_call.path().is_none_or(|p| p.to_string() != "format") {
         return None;

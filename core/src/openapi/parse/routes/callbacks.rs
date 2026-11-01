@@ -39,6 +39,18 @@ pub struct CallbackResolutionContext<'a> {
 }
 
 /// Resolves a Callback object which can be an inline map or a Reference.
+///
+/// # Arguments
+/// * `cb_ref` - Input `cb_ref` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<ResolvedCallbackObject>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn resolve_callback_object(
     cb_ref: &RefOr<BTreeMap<String, ShimPathItem>>,
     components: Option<&ShimComponents>,
@@ -92,6 +104,19 @@ pub fn resolve_callback_object(
 }
 
 /// Helper to iterate methods in a Callback Path Item and extract operations.
+///
+/// # Arguments
+/// * `callbacks` - Input `callbacks` parameter.
+/// * `name` - Input `name` parameter.
+/// * `expression` - Input `expression` parameter.
+/// * `path_item` - Input `path_item` parameter.
+/// * `ctx` - Input `ctx` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn extract_callback_operations(
     callbacks: &mut Vec<ParsedCallback>,
     name: &str,
@@ -246,6 +271,18 @@ pub fn extract_callback_operations(
     Ok(())
 }
 
+/// Executes `merge_callback_params` (merge callback params).
+///
+/// # Arguments
+/// * `op_params` - Input `op_params` parameter.
+/// * `common_params` - Input `common_params` parameter.
+/// * `method` - Input `method` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<RouteParam>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn merge_callback_params(
     op_params: &[RouteParam],
     common_params: &[RouteParam],

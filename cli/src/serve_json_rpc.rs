@@ -29,30 +29,48 @@ pub struct ServeJsonRpcArgs {
 /// JSON-RPC 2.0 Request Envelope.
 #[derive(Deserialize, Debug)]
 struct JsonRpcRequest {
+    /// JSON-RPC protocol version (`"2.0"`).
     jsonrpc: String,
+    /// Target RPC method name.
     method: String,
+    /// Optional method parameters payload.
     params: Option<Value>,
+    /// Optional request correlation identifier.
     id: Option<Value>,
 }
 
 /// JSON-RPC 2.0 Response Envelope.
 #[derive(Serialize, Debug)]
 struct JsonRpcResponse {
+    /// JSON-RPC protocol version (`"2.0"`).
     jsonrpc: String,
+    /// Successful result payload when no error occurred.
     #[serde(skip_serializing_if = "Option::is_none")]
     result: Option<Value>,
+    /// Error object when the call failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<JsonRpcError>,
+    /// Request correlation identifier.
     id: Value,
 }
 
 /// JSON-RPC 2.0 Error Object.
 #[derive(Serialize, Debug)]
 struct JsonRpcError {
+    /// Numeric JSON-RPC error code.
     code: i32,
+    /// Human-readable error message.
     message: String,
 }
 
+/// Handles incoming HTTP JSON-RPC 2.0 requests and dispatches them to CLI tools.
+///
+/// # Arguments
+/// * `body` - Raw HTTP request body string.
+/// * `shutdown_notify` - Optional notification handle used to trigger graceful server shutdown in tests.
+///
+/// # Returns
+/// An [`actix_web::Responder`] serializing the JSON-RPC 2.0 response envelope.
 async fn handle_rpc(
     body: String,
     shutdown_notify: Option<web::Data<std::sync::Arc<tokio::sync::Notify>>>,

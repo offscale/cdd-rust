@@ -39,6 +39,18 @@ pub(crate) fn flatten_schema_fields(
 /// - If `Object`: extract properties. Check if field already exists in accumulator; if so, replace it (override).
 /// - If `AllOf`: recursively collect for all items. Rules of overrides apply sequentially.
 /// - If `additionalProperties` is present: add a flattened HashMap field.
+///
+/// # Arguments
+/// * `schema` - Input `schema` parameter.
+/// * `context` - Input `context` parameter.
+/// * `fields` - Input `fields` parameter.
+/// * `visited` - Input `visited` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn collect_fields_recursive(
     schema: &Schema,
     context: &ResolutionContext,
@@ -159,14 +171,27 @@ fn collect_fields_recursive(
     Ok(())
 }
 
+/// Internal representation for `FieldMetadata` (field metadata).
 #[derive(Default)]
 struct FieldMetadata {
+    /// Field `description` (description).
     description: Option<String>,
+    /// Field `deprecated` (deprecated).
     deprecated: bool,
+    /// Field `read_only` (read only).
     read_only: bool,
+    /// Field `write_only` (write only).
     write_only: bool,
 }
 
+/// Executes `extract_field_metadata` (extract field metadata).
+///
+/// # Arguments
+/// * `schema` - Input `schema` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `FieldMetadata` value.
 fn extract_field_metadata(schema: &RefOr<Schema>, context: &ResolutionContext) -> FieldMetadata {
     let resolved = match schema {
         RefOr::T(s) => Some(s),

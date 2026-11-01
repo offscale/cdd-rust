@@ -114,6 +114,16 @@ pub fn extract_routes_from_mcp(code: &str) -> AppResult<Vec<ParsedRoute>> {
     Ok(routes)
 }
 
+/// Executes `build_basic_route` (build basic route).
+///
+/// # Arguments
+/// * `path` - Input `path` parameter.
+/// * `method` - Input `method` parameter.
+/// * `handler_name` - Input `handler_name` parameter.
+/// * `summary` - Input `summary` parameter.
+///
+/// # Returns
+/// Resulting `ParsedRoute` value.
 fn build_basic_route(
     path: String,
     method: String,
@@ -159,6 +169,13 @@ fn build_basic_route(
     }
 }
 
+/// Executes `parse_actix_route` (parse actix route).
+///
+/// # Arguments
+/// * `func` - Input `func` parameter.
+///
+/// # Returns
+/// Resulting `Option<ParsedRoute>` value.
 fn parse_actix_route(func: &ast::Fn) -> Option<ParsedRoute> {
     let handler_name = func.name()?.text().to_string();
 
@@ -194,6 +211,12 @@ fn parse_actix_route(func: &ast::Fn) -> Option<ParsedRoute> {
 }
 
 /// Converts Axum `:param` segments in a route path to OpenAPI `{param}` template format.
+///
+/// # Arguments
+/// * `raw_path` - Input `raw_path` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn normalize_axum_path(raw_path: &str) -> String {
     raw_path
         .split('/')
@@ -209,6 +232,12 @@ fn normalize_axum_path(raw_path: &str) -> String {
 }
 
 /// Parses `.route("/path", ...)` method call expressions from Actix `ServiceConfig` or Axum `Router`.
+///
+/// # Arguments
+/// * `call` - Input `call` parameter.
+///
+/// # Returns
+/// Resulting `Option<ParsedRoute>` value.
 fn parse_method_call_route(call: &ast::MethodCallExpr) -> Option<ParsedRoute> {
     let name_ref = call.name_ref()?;
     if name_ref.text() != "route" {
@@ -237,6 +266,13 @@ fn parse_method_call_route(call: &ast::MethodCallExpr) -> Option<ParsedRoute> {
     ))
 }
 
+/// Executes `extract_method_and_handler` (extract method and handler).
+///
+/// # Arguments
+/// * `expr` - Input `expr` parameter.
+///
+/// # Returns
+/// Resulting `Option<(String, String)>` value.
 fn extract_method_and_handler(expr: &ast::Expr) -> Option<(String, String)> {
     let mut detected_method: Option<String> = None;
     let mut handler_arg: Option<ast::Expr> = None;
@@ -283,6 +319,13 @@ fn extract_method_and_handler(expr: &ast::Expr) -> Option<(String, String)> {
     Some((method, handler_name))
 }
 
+/// Executes `parse_mcp_fn_route` (parse mcp fn route).
+///
+/// # Arguments
+/// * `func` - Input `func` parameter.
+///
+/// # Returns
+/// Resulting `Option<ParsedRoute>` value.
 fn parse_mcp_fn_route(func: &ast::Fn) -> Option<ParsedRoute> {
     let handler_name = func.name()?.text().to_string();
     let mut tool_name = None;
@@ -317,6 +360,13 @@ fn parse_mcp_fn_route(func: &ast::Fn) -> Option<ParsedRoute> {
     ))
 }
 
+/// Executes `parse_mcp_register_call` (parse mcp register call).
+///
+/// # Arguments
+/// * `call` - Input `call` parameter.
+///
+/// # Returns
+/// Resulting `Option<ParsedRoute>` value.
 fn parse_mcp_register_call(call: &ast::MethodCallExpr) -> Option<ParsedRoute> {
     let name_ref = call.name_ref()?;
     if name_ref.text() != "register_tool" {

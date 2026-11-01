@@ -66,6 +66,13 @@ impl Default for SecurityConfig {
 /// Computes a deterministic 256-bit keyed message authentication code (hex-encoded)
 /// over `secret` and `message` using 4 independent SipHash/FNV mixing lanes,
 /// ensuring any single-bit change in either `secret` or `message` alters the digest.
+///
+/// # Arguments
+/// * `secret` - Input `secret` parameter.
+/// * `message` - Input `message` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn compute_keyed_mac_hex(secret: &str, message: &str) -> String {
     const PRIMES: [u64; 4] = [
         0x9E37_79B9_7F4A_7C15,
@@ -115,6 +122,13 @@ fn compute_keyed_mac_hex(secret: &str, message: &str) -> String {
 }
 
 /// Compares two byte slices in constant time.
+///
+/// # Arguments
+/// * `lhs` - Input `lhs` parameter.
+/// * `rhs` - Input `rhs` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn ct_eq_bytes(lhs: &[u8], rhs: &[u8]) -> bool {
     if lhs.len() != rhs.len() {
         return false;
@@ -291,6 +305,17 @@ pub struct HybridAuthMiddleware<S> {
 }
 
 /// Evaluates synchronous authentication rules before any asynchronous DAO lookup.
+///
+/// # Arguments
+/// * `enforce_auth` - Input `enforce_auth` parameter.
+/// * `is_mock_mode` - Input `is_mock_mode` parameter.
+/// * `token_opt` - Input `token_opt` parameter.
+///
+/// # Returns
+/// Resulting `Result<bool, String>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn evaluate_sync_auth(
     enforce_auth: bool,
     is_mock_mode: bool,
@@ -314,6 +339,15 @@ fn evaluate_sync_auth(
 }
 
 /// Validates the extracted bearer token against mock or database credentials.
+///
+/// # Arguments
+/// * `enforce_auth` - Input `enforce_auth` parameter.
+/// * `token_opt` - Input `token_opt` parameter.
+/// * `is_mock_mode` - Input `is_mock_mode` parameter.
+/// * `user_dao` - Input `user_dao` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 async fn validate_request_token(
     enforce_auth: bool,
     token_opt: Option<String>,
@@ -330,6 +364,12 @@ async fn validate_request_token(
 }
 
 /// Extracts the Bearer token from the `Authorization` HTTP header, if present.
+///
+/// # Arguments
+/// * `req` - Input `req` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 fn extract_bearer_token(req: &ServiceRequest) -> Option<String> {
     let header_val = req.headers().get("Authorization")?;
     let header_str = header_val.to_str().ok()?;
@@ -338,6 +378,9 @@ fn extract_bearer_token(req: &ServiceRequest) -> Option<String> {
 }
 
 /// Attaches the default API Key and OAuth2 marker extensions to the incoming request.
+///
+/// # Arguments
+/// * `req` - Input `req` parameter.
 fn attach_auth_extensions(req: &ServiceRequest) {
     let mut ext = req.extensions_mut();
     ext.insert(ApiKey);

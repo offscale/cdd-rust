@@ -23,6 +23,19 @@ pub fn generate_contract_tests_file(
     generate_contract_tests_file_dyn(routes, openapi_path, app_factory, strategy)
 }
 
+/// Executes `generate_contract_tests_file_dyn` (generate contract tests file dyn).
+///
+/// # Arguments
+/// * `routes` - Input `routes` parameter.
+/// * `openapi_path` - Input `openapi_path` parameter.
+/// * `app_factory` - Input `app_factory` parameter.
+/// * `strategy` - Input `strategy` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<String>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn generate_contract_tests_file_dyn(
     routes: &[ParsedRoute],
     openapi_path: &str,
@@ -59,6 +72,15 @@ fn generate_contract_tests_file_dyn(
     Ok(code)
 }
 
+/// Executes `generate_test_fn` (generate test fn).
+///
+/// # Arguments
+/// * `route` - Input `route` parameter.
+/// * `app_factory` - Input `app_factory` parameter.
+/// * `strategy` - Input `strategy` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn generate_test_fn(
     route: &ParsedRoute,
     app_factory: &str,
@@ -139,6 +161,13 @@ fn generate_test_fn(
     code
 }
 
+/// Executes `dummy_json_value` (dummy json value).
+///
+/// # Arguments
+/// * `ty` - Input `ty` parameter.
+///
+/// # Returns
+/// Resulting `serde_json::Value` value.
 fn dummy_json_value(ty: &str) -> serde_json::Value {
     let parsed = crate::openapi::parse::models::RustType::parse(ty);
     match parsed.unwrap_option() {
@@ -158,6 +187,14 @@ fn dummy_json_value(ty: &str) -> serde_json::Value {
     }
 }
 
+/// Executes `apply_path_params` (apply path params).
+///
+/// # Arguments
+/// * `path_template` - Input `path_template` parameter.
+/// * `params` - Input `params` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn apply_path_params(path_template: &str, params: &[crate::openapi::parse::RouteParam]) -> String {
     let mut uri = path_template.to_string();
     for param in params.iter().filter(|p| p.source == ParamSource::Path) {
@@ -168,6 +205,13 @@ fn apply_path_params(path_template: &str, params: &[crate::openapi::parse::Route
     uri
 }
 
+/// Executes `serialize_path_param` (serialize path param).
+///
+/// # Arguments
+/// * `param` - Input `param` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn serialize_path_param(param: &crate::openapi::parse::RouteParam) -> String {
     if let Some(example) = &param.example {
         if example.is_serialized() {
@@ -195,6 +239,16 @@ fn serialize_path_param(param: &crate::openapi::parse::RouteParam) -> String {
     }
 }
 
+/// Executes `serialize_path_primitive` (serialize path primitive).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+/// * `style` - Input `style` parameter.
+/// * `allow_reserved` - Input `allow_reserved` parameter.
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn serialize_path_primitive(
     name: &str,
     style: &ParamStyle,
@@ -209,6 +263,17 @@ fn serialize_path_primitive(
     }
 }
 
+/// Executes `serialize_path_array` (serialize path array).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+/// * `style` - Input `style` parameter.
+/// * `explode` - Input `explode` parameter.
+/// * `allow_reserved` - Input `allow_reserved` parameter.
+/// * `items` - Input `items` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn serialize_path_array(
     name: &str,
     style: &ParamStyle,
@@ -245,6 +310,17 @@ fn serialize_path_array(
     }
 }
 
+/// Executes `serialize_path_object` (serialize path object).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+/// * `style` - Input `style` parameter.
+/// * `explode` - Input `explode` parameter.
+/// * `allow_reserved` - Input `allow_reserved` parameter.
+/// * `map` - Input `map` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn serialize_path_object(
     name: &str,
     style: &ParamStyle,
@@ -318,14 +394,36 @@ fn serialize_path_object(
     }
 }
 
+/// Executes `encode_path_name` (encode path name).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn encode_path_name(name: &str) -> String {
     encode_rfc3986(name, false)
 }
 
+/// Executes `encode_path_value` (encode path value).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+/// * `allow_reserved` - Input `allow_reserved` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn encode_path_value(value: &str, allow_reserved: bool) -> String {
     encode_rfc3986(value, allow_reserved)
 }
 
+/// Executes `build_querystring_value` (build querystring value).
+///
+/// # Arguments
+/// * `param` - Input `param` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn build_querystring_value(param: &crate::openapi::parse::RouteParam) -> String {
     if let Some(example) = &param.example {
         if example.is_serialized() {
@@ -356,6 +454,14 @@ fn build_querystring_value(param: &crate::openapi::parse::RouteParam) -> String 
     }
 }
 
+/// Executes `serialize_content_value` (serialize content value).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn serialize_content_value(media_type: &ContentMediaType, value: &serde_json::Value) -> String {
     match media_type {
         ContentMediaType::Json => value.to_string(),
@@ -367,6 +473,13 @@ fn serialize_content_value(media_type: &ContentMediaType, value: &serde_json::Va
     }
 }
 
+/// Executes `example_to_string` (example to string).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn example_to_string(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::String(s) => s.clone(),
@@ -377,14 +490,35 @@ fn example_to_string(value: &serde_json::Value) -> String {
     }
 }
 
+/// Executes `example_value_to_string` (example value to string).
+///
+/// # Arguments
+/// * `example` - Input `example` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn example_value_to_string(example: &crate::openapi::parse::ExampleValue) -> String {
     example_to_string(&example.value)
 }
 
+/// Executes `rust_string_literal` (rust string literal).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn rust_string_literal(value: &str) -> String {
     format!("{:?}", value)
 }
 
+/// Executes `serialize_query_params` (serialize query params).
+///
+/// # Arguments
+/// * `params` - Input `params` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn serialize_query_params(params: &[crate::openapi::parse::RouteParam]) -> String {
     let mut pairs = Vec::new();
     for param in params.iter().filter(|p| p.source == ParamSource::Query) {
@@ -393,6 +527,13 @@ fn serialize_query_params(params: &[crate::openapi::parse::RouteParam]) -> Strin
     pairs.join("&")
 }
 
+/// Executes `build_header_setup` (build header setup).
+///
+/// # Arguments
+/// * `route` - Input `route` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn build_header_setup(route: &ParsedRoute) -> String {
     let mut setup = String::new();
     for param in route
@@ -410,6 +551,13 @@ fn build_header_setup(route: &ParsedRoute) -> String {
     setup
 }
 
+/// Executes `build_cookie_setup` (build cookie setup).
+///
+/// # Arguments
+/// * `route` - Input `route` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn build_cookie_setup(route: &ParsedRoute) -> String {
     let cookie_header = serialize_cookie_params(&route.params);
     if cookie_header.is_empty() {
@@ -420,6 +568,13 @@ fn build_cookie_setup(route: &ParsedRoute) -> String {
     format!("        .insert_header((\"Cookie\", {}))\n", literal)
 }
 
+/// Executes `serialize_cookie_params` (serialize cookie params).
+///
+/// # Arguments
+/// * `params` - Input `params` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn serialize_cookie_params(params: &[crate::openapi::parse::RouteParam]) -> String {
     let mut pairs = Vec::new();
     for param in params.iter().filter(|p| p.source == ParamSource::Cookie) {
@@ -428,6 +583,13 @@ fn serialize_cookie_params(params: &[crate::openapi::parse::RouteParam]) -> Stri
     pairs.join("; ")
 }
 
+/// Executes `serialize_header_param` (serialize header param).
+///
+/// # Arguments
+/// * `param` - Input `param` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn serialize_header_param(param: &crate::openapi::parse::RouteParam) -> String {
     if let Some(example) = &param.example {
         if example.is_serialized() {
@@ -452,6 +614,15 @@ fn serialize_header_param(param: &crate::openapi::parse::RouteParam) -> String {
     }
 }
 
+/// Executes `serialize_header_array` (serialize header array).
+///
+/// # Arguments
+/// * `style` - Input `style` parameter.
+/// * `explode` - Input `explode` parameter.
+/// * `items` - Input `items` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn serialize_header_array(
     _style: &ParamStyle,
     _explode: bool,
@@ -468,6 +639,15 @@ fn serialize_header_array(
         .join(",")
 }
 
+/// Executes `serialize_header_object` (serialize header object).
+///
+/// # Arguments
+/// * `style` - Input `style` parameter.
+/// * `explode` - Input `explode` parameter.
+/// * `map` - Input `map` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn serialize_header_object(
     _style: &ParamStyle,
     explode: bool,
@@ -490,6 +670,13 @@ fn serialize_header_object(
     }
 }
 
+/// Executes `serialize_cookie_param` (serialize cookie param).
+///
+/// # Arguments
+/// * `param` - Input `param` parameter.
+///
+/// # Returns
+/// Resulting `Vec<String>` value.
 fn serialize_cookie_param(param: &crate::openapi::parse::RouteParam) -> Vec<String> {
     if let Some(example) = &param.example {
         if example.is_serialized() {
@@ -519,6 +706,16 @@ fn serialize_cookie_param(param: &crate::openapi::parse::RouteParam) -> Vec<Stri
     }
 }
 
+/// Executes `serialize_cookie_array` (serialize cookie array).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+/// * `style` - Input `style` parameter.
+/// * `explode` - Input `explode` parameter.
+/// * `items` - Input `items` parameter.
+///
+/// # Returns
+/// Resulting `Vec<String>` value.
 fn serialize_cookie_array(
     name: &str,
     style: &ParamStyle,
@@ -564,6 +761,16 @@ fn serialize_cookie_array(
     }
 }
 
+/// Executes `serialize_cookie_object` (serialize cookie object).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+/// * `style` - Input `style` parameter.
+/// * `explode` - Input `explode` parameter.
+/// * `map` - Input `map` parameter.
+///
+/// # Returns
+/// Resulting `Vec<String>` value.
 fn serialize_cookie_object(
     name: &str,
     style: &ParamStyle,
@@ -608,6 +815,13 @@ fn serialize_cookie_object(
     }
 }
 
+/// Executes `serialize_query_param` (serialize query param).
+///
+/// # Arguments
+/// * `param` - Input `param` parameter.
+///
+/// # Returns
+/// Resulting `Vec<String>` value.
 fn serialize_query_param(param: &crate::openapi::parse::RouteParam) -> Vec<String> {
     if let Some(example) = &param.example {
         if example.is_serialized() {
@@ -645,6 +859,17 @@ fn serialize_query_param(param: &crate::openapi::parse::RouteParam) -> Vec<Strin
     }
 }
 
+/// Executes `serialize_array_param` (serialize array param).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+/// * `style` - Input `style` parameter.
+/// * `explode` - Input `explode` parameter.
+/// * `allow_reserved` - Input `allow_reserved` parameter.
+/// * `items` - Input `items` parameter.
+///
+/// # Returns
+/// Resulting `Vec<String>` value.
 fn serialize_array_param(
     name: &str,
     style: &ParamStyle,
@@ -702,6 +927,17 @@ fn serialize_array_param(
     }
 }
 
+/// Executes `serialize_object_param` (serialize object param).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+/// * `style` - Input `style` parameter.
+/// * `explode` - Input `explode` parameter.
+/// * `allow_reserved` - Input `allow_reserved` parameter.
+/// * `map` - Input `map` parameter.
+///
+/// # Returns
+/// Resulting `Vec<String>` value.
 fn serialize_object_param(
     name: &str,
     style: &ParamStyle,
@@ -782,20 +1018,50 @@ fn serialize_object_param(
     }
 }
 
+/// Executes `encode_deep_object_name` (encode deep object name).
+///
+/// # Arguments
+/// * `param_name` - Input `param_name` parameter.
+/// * `key` - Input `key` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn encode_deep_object_name(param_name: &str, key: &str) -> String {
     let name = encode_name(param_name);
     let key = encode_name(key);
     format!("{}%5B{}%5D", name, key)
 }
 
+/// Executes `encode_name` (encode name).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn encode_name(name: &str) -> String {
     encode_rfc3986(name, false)
 }
 
+/// Executes `encode_value` (encode value).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+/// * `allow_reserved` - Input `allow_reserved` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn encode_value(value: &str, allow_reserved: bool) -> String {
     encode_rfc3986(value, allow_reserved)
 }
 
+/// Executes `serialize_form_urlencoded_querystring` (serialize form urlencoded querystring).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn serialize_form_urlencoded_querystring(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::Object(map) => map
@@ -814,6 +1080,14 @@ fn serialize_form_urlencoded_querystring(value: &serde_json::Value) -> String {
     }
 }
 
+/// Executes `encode_rfc3986` (encode rfc3986).
+///
+/// # Arguments
+/// * `input` - Input `input` parameter.
+/// * `allow_reserved` - Input `allow_reserved` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn encode_rfc3986(input: &str, allow_reserved: bool) -> String {
     let bytes = input.as_bytes();
     let mut out = String::new();
@@ -845,6 +1119,13 @@ fn encode_rfc3986(input: &str, allow_reserved: bool) -> String {
     out
 }
 
+/// Executes `is_unreserved` (is unreserved).
+///
+/// # Arguments
+/// * `b` - Input `b` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_unreserved(b: u8) -> bool {
     matches!(
         b,
@@ -852,6 +1133,13 @@ fn is_unreserved(b: u8) -> bool {
     )
 }
 
+/// Executes `is_reserved` (is reserved).
+///
+/// # Arguments
+/// * `b` - Input `b` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_reserved(b: u8) -> bool {
     matches!(
         b,
@@ -875,10 +1163,24 @@ fn is_reserved(b: u8) -> bool {
     )
 }
 
+/// Executes `is_hex_digit` (is hex digit).
+///
+/// # Arguments
+/// * `b` - Input `b` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_hex_digit(b: u8) -> bool {
     b.is_ascii_hexdigit()
 }
 
+/// Executes `encode_form_urlencoded` (encode form urlencoded).
+///
+/// # Arguments
+/// * `input` - Input `input` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn encode_form_urlencoded(input: &str) -> String {
     let bytes = input.as_bytes();
     let mut out = String::new();

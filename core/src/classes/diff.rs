@@ -73,6 +73,17 @@ impl Display for Diff {
 }
 
 /// Calculates the difference between existing Source Code and a Target Definition.
+///
+/// # Arguments
+/// * `source_code` - Input `source_code` parameter.
+/// * `struct_name` - Input `struct_name` parameter.
+/// * `target` - Input `target` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<Diff>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn calculate_diff(
     source_code: &str,
     struct_name: &str,
@@ -122,10 +133,24 @@ pub fn calculate_diff(
     Ok(diffs)
 }
 
+/// Executes `get_effective_name` (get effective name).
+///
+/// # Arguments
+/// * `f` - Input `f` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn get_effective_name(f: &ParsedField) -> String {
     f.rename.clone().unwrap_or_else(|| f.name.clone())
 }
 
+/// Executes `strip_ws` (strip ws).
+///
+/// # Arguments
+/// * `s` - Input `s` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn strip_ws(s: &str) -> String {
     s.chars().filter(|c| !c.is_whitespace()).collect()
 }

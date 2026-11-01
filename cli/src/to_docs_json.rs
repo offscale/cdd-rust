@@ -87,6 +87,17 @@ pub struct CodeComponents {
 
 /// Assembles a complete [`CodeComponents`] struct from its optional imports,
 /// optional wrapper lines, and unindented body lines.
+///
+/// # Arguments
+/// * `raw_imports` - Input `raw_imports` parameter.
+/// * `wrapper_start_str` - Input `wrapper_start_str` parameter.
+/// * `unindented_lines` - Input `unindented_lines` parameter.
+/// * `wrapper_end_str` - Input `wrapper_end_str` parameter.
+/// * `no_imports` - Input `no_imports` parameter.
+/// * `no_wrapping` - Input `no_wrapping` parameter.
+///
+/// # Returns
+/// Resulting `CodeComponents` value.
 fn assemble_code_components(
     raw_imports: String,
     wrapper_start_str: String,
@@ -165,6 +176,15 @@ pub fn run_to_docs_json(args: &ToDocsJsonArgs) -> AppResult<()> {
 }
 
 /// Builds a concise SDK primitive invocation snippet for `default` (`ReqwestStrategy`).
+///
+/// # Arguments
+/// * `route` - Input `route` parameter.
+/// * `base_url` - Input `base_url` parameter.
+/// * `no_imports` - Input `no_imports` parameter.
+/// * `no_wrapping` - Input `no_wrapping` parameter.
+///
+/// # Returns
+/// Resulting `CodeComponents` value.
 fn build_sdk_client_snippet(
     route: &ParsedRoute,
     base_url: &str,
@@ -294,6 +314,19 @@ fn build_sdk_client_snippet(
 
 /// Builds structured [`CodeComponents`] (`imports`, `wrapper_start`, `snippet`, `wrapper_end`, `code`)
 /// for a route using `generate_query_struct` and `generate_function`.
+///
+/// # Arguments
+/// * `route` - Input `route` parameter.
+/// * `strategy` - Input `strategy` parameter.
+/// * `default_wrapper_start` - Input `default_wrapper_start` parameter.
+/// * `no_imports` - Input `no_imports` parameter.
+/// * `no_wrapping` - Input `no_wrapping` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<CodeComponents>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn build_strategy_snippet(
     route: &ParsedRoute,
     strategy: &impl BackendStrategy,
@@ -340,6 +373,14 @@ fn build_strategy_snippet(
 }
 
 /// Builds workflow code snippets (`default`, `actix`, `axum`) for a single Arazzo [`Workflow`].
+///
+/// # Arguments
+/// * `wf` - Input `wf` parameter.
+/// * `no_imports` - Input `no_imports` parameter.
+/// * `no_wrapping` - Input `no_wrapping` parameter.
+///
+/// # Returns
+/// Resulting `OperationSnippets` value.
 fn build_workflow_snippets(
     wf: &Workflow,
     no_imports: bool,
@@ -420,6 +461,16 @@ fn build_workflow_snippets(
 }
 
 /// Generates the JSON documentation string from an Arazzo 1.1.0 specification.
+///
+/// # Arguments
+/// * `doc` - Input `doc` parameter.
+/// * `args` - Input `args` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<String>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn generate_arazzo_docs_json_str(doc: &ArazzoDocument, args: &ToDocsJsonArgs) -> AppResult<String> {
     let mut workflows = BTreeMap::new();
     for wf in &doc.workflows {

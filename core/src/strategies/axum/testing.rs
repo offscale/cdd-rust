@@ -290,6 +290,13 @@ pub fn test_validation_helper() -> String {
 }
 
 /// Resolves a sample path segment value appropriate for the parameter's Rust type.
+///
+/// # Arguments
+/// * `route` - Input `route` parameter.
+/// * `param_name` - Input `param_name` parameter.
+///
+/// # Returns
+/// Resulting `&'static str` value.
 fn sample_value_for_param(route: &ParsedRoute, param_name: &str) -> &'static str {
     let mut ty = "i64";
     for p in route.params.iter().chain(route.path_params.iter()) {
@@ -303,6 +310,12 @@ fn sample_value_for_param(route: &ParsedRoute, param_name: &str) -> &'static str
 }
 
 /// Resolves the expected HTTP status code for a route's unit test.
+///
+/// # Arguments
+/// * `route` - Input `route` parameter.
+///
+/// # Returns
+/// Resulting `u16` value.
 fn expected_status_code(route: &ParsedRoute) -> u16 {
     let Some(status_str) = route.response_status.as_deref() else {
         return 200;

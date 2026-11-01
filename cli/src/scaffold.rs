@@ -167,6 +167,12 @@ pub fn run_scaffold(args: &ScaffoldArgs, strategy: &impl BackendStrategy) -> App
 
 /// Helper to group routes by their primary tag.
 /// Routes without tags default to "default".
+///
+/// # Arguments
+/// * `routes` - Input `routes` parameter.
+///
+/// # Returns
+/// Resulting `HashMap<String, Vec<ParsedRoute>>` value.
 fn group_routes_by_tag(routes: &[ParsedRoute]) -> HashMap<String, Vec<ParsedRoute>> {
     let mut map: HashMap<String, Vec<ParsedRoute>> = HashMap::new();
 
@@ -184,6 +190,12 @@ fn group_routes_by_tag(routes: &[ParsedRoute]) -> HashMap<String, Vec<ParsedRout
 }
 
 /// Wrapper for core snake_case utility specific to module naming conventions.
+///
+/// # Arguments
+/// * `s` - Input `s` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn to_snake_case(s: &str) -> String {
     cdd_core::openapi::parse::routes::naming::to_snake_case(s)
 }

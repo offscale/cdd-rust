@@ -29,6 +29,7 @@ use std::path::Path;
 use url::Url;
 use utoipa::openapi::{Components, RefOr, Schema};
 
+/// Constant `DUMMY_BASE` (dummy base).
 const DUMMY_BASE: &str = "http://example.invalid/";
 
 /// Context passed down during parsing to handle Base URI resolution.
@@ -52,11 +53,26 @@ pub struct ResolutionContext<'a> {
 
 impl<'a> ResolutionContext<'a> {
     /// Creates a new context.
+    ///
+    /// # Arguments
+    /// * `base_uri_str` - Input `base_uri_str` parameter.
+    /// * `components` - Input `components` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn new(base_uri_str: Option<String>, components: &'a Components) -> Self {
         Self::with_registry(base_uri_str, components, None)
     }
 
     /// Creates a new context with an optional document registry.
+    ///
+    /// # Arguments
+    /// * `base_uri_str` - Input `base_uri_str` parameter.
+    /// * `components` - Input `components` parameter.
+    /// * `registry` - Input `registry` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     pub fn with_registry(
         base_uri_str: Option<String>,
         components: &'a Components,
@@ -136,6 +152,12 @@ pub struct ParsedReference<'a> {
 ///
 /// This does not perform IO or full RFC resolution, but categorizes the reference
 /// structure for internal routing (extraction vs resolution).
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+///
+/// # Returns
+/// Resulting `ParsedReference<'_>` value.
 pub fn parse_reference(ref_str: &str) -> ParsedReference<'_> {
     // RFC 3986 3.5: Fragment separator is '#'
     if let Some((doc, frag)) = ref_str.split_once('#') {
@@ -182,6 +204,12 @@ pub fn parse_reference(ref_str: &str) -> ParsedReference<'_> {
 }
 
 /// Simple heuristic checks if a string starts with a URI scheme.
+///
+/// # Arguments
+/// * `uri` - Input `uri` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_remote(uri: &str) -> bool {
     // Regex-free check for common schemes or general scheme syntax (alpha + alnum/+-.)
     if let Some(colon) = uri.find(':') {
@@ -198,6 +226,12 @@ fn is_remote(uri: &str) -> bool {
 /// 1. If a fragment exists, use the last segment of the JSON pointer.
 /// 2. If no fragment, use the file stem of the document path.
 /// 3. Fallback to "Unknown".
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn extract_ref_name(ref_str: &str) -> String {
     let parsed = parse_reference(ref_str);
 
@@ -226,6 +260,13 @@ pub fn extract_ref_name(ref_str: &str) -> String {
 /// actually points to the current document (via matching `$self`).
 ///
 /// Returns `None` if the reference cannot be resolved locally.
+///
+/// # Arguments
+/// * `ref_or` - Input `ref_or` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `Option<&'a Schema>` value.
 pub fn resolve_ref_local<'a>(
     ref_or: &'a RefOr<Schema>,
     context: &'a ResolutionContext<'a>,
@@ -241,6 +282,13 @@ pub fn resolve_ref_local<'a>(
 ///
 /// Also handling OAS 3.2 Appendix F: If `$self` is set to `"https://example.com/api"`,
 /// then `"https://example.com/api#/components/schemas/User"` resolves locally.
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `Option<&'a Schema>` value.
 pub fn resolve_ref_name<'a>(
     ref_str: &str,
     context: &'a ResolutionContext<'a>,
@@ -294,6 +342,14 @@ pub fn resolve_ref_name<'a>(
     }
 }
 
+/// Executes `resolve_ref_via_schema_id` (resolve ref via schema id).
+///
+/// # Arguments
+/// * `parsed` - Input `parsed` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `Option<&'a Schema>` value.
 fn resolve_ref_via_schema_id<'a>(
     parsed: &ParsedReference<'_>,
     context: &'a ResolutionContext<'a>,
@@ -327,6 +383,14 @@ fn resolve_ref_via_schema_id<'a>(
     None
 }
 
+/// Executes `resolve_ref_via_schema_anchor` (resolve ref via schema anchor).
+///
+/// # Arguments
+/// * `parsed` - Input `parsed` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `Option<&'a Schema>` value.
 fn resolve_ref_via_schema_anchor<'a>(
     parsed: &ParsedReference<'_>,
     context: &'a ResolutionContext<'a>,
@@ -362,6 +426,14 @@ fn resolve_ref_via_schema_anchor<'a>(
     None
 }
 
+/// Executes `resolve_ref_document_uri` (resolve ref document uri).
+///
+/// # Arguments
+/// * `doc` - Input `doc` parameter.
+/// * `base` - Input `base` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 pub(crate) fn resolve_ref_document_uri(doc: &str, base: Option<&Url>) -> Option<String> {
     if let Ok(url) = Url::parse(doc) {
         return Some(url.to_string());
@@ -372,6 +444,13 @@ pub(crate) fn resolve_ref_document_uri(doc: &str, base: Option<&Url>) -> Option<
 }
 
 /// Collects `$id` values from raw component schemas and resolves them to absolute URIs.
+///
+/// # Arguments
+/// * `raw_schemas` - Input `raw_schemas` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `HashMap<String, String>` value.
 pub(crate) fn collect_schema_ids(
     raw_schemas: Option<&serde_json::Map<String, serde_json::Value>>,
     base_uri: Option<&Url>,
@@ -408,6 +487,13 @@ pub(crate) fn collect_schema_ids(
 /// Anchors are resolved against the schema `$id` when present, otherwise against
 /// the document base URI when available. We also register a fragment-only form
 /// (`#anchor`) to support local references.
+///
+/// # Arguments
+/// * `raw_schemas` - Input `raw_schemas` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `HashMap<String, String>` value.
 pub(crate) fn collect_schema_anchors(
     raw_schemas: Option<&serde_json::Map<String, serde_json::Value>>,
     base_uri: Option<&Url>,
@@ -440,6 +526,12 @@ pub(crate) fn collect_schema_anchors(
 }
 
 /// Returns true if a schema JSON value contains `$dynamicRef` anywhere in its tree.
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 pub(crate) fn contains_dynamic_ref(value: &JsonValue) -> bool {
     match value {
         JsonValue::Object(map) => {
@@ -461,6 +553,16 @@ pub(crate) fn contains_dynamic_ref(value: &JsonValue) -> bool {
 /// dynamic anchor is in scope).
 ///
 /// Returns a map of component names to updated schema JSON values.
+///
+/// # Arguments
+/// * `entry_name` - Input `entry_name` parameter.
+/// * `raw_schemas` - Input `raw_schemas` parameter.
+/// * `schema_ids` - Input `schema_ids` parameter.
+/// * `document_base` - Input `document_base` parameter.
+/// * `self_uri` - Input `self_uri` parameter.
+///
+/// # Returns
+/// Resulting `HashMap<String, JsonValue>` value.
 pub(crate) fn resolve_dynamic_refs_for_component(
     entry_name: &str,
     raw_schemas: &serde_json::Map<String, JsonValue>,
@@ -491,6 +593,13 @@ pub(crate) fn resolve_dynamic_refs_for_component(
 /// This applies the same dynamic anchor scoping rules as component resolution,
 /// but does not attempt to follow component `$ref` targets (since there are no
 /// `components` in schema-root documents).
+///
+/// # Arguments
+/// * `raw` - Input `raw` parameter.
+/// * `document_base` - Input `document_base` parameter.
+///
+/// # Returns
+/// Resulting `JsonValue` value.
 pub(crate) fn resolve_dynamic_refs_in_schema_root(
     raw: &JsonValue,
     document_base: Option<&Url>,
@@ -514,22 +623,40 @@ pub(crate) fn resolve_dynamic_refs_in_schema_root(
     cloned
 }
 
+/// Internal representation for `DynamicScope` (dynamic scope).
 #[derive(Clone, Default)]
 struct DynamicScope {
+    /// Field `anchors` (anchors).
     anchors: Vec<(String, String)>,
 }
 
 impl DynamicScope {
+    /// Executes `push` (push).
+    ///
+    /// # Arguments
+    /// * `name` - Input `name` parameter.
+    /// * `target` - Input `target` parameter.
     fn push(&mut self, name: String, target: String) {
         self.anchors.push((name, target));
     }
 
+    /// Executes `pop` (pop).
+    ///
+    /// # Arguments
+    /// * `count` - Input `count` parameter.
     fn pop(&mut self, count: usize) {
         for _ in 0..count {
             self.anchors.pop();
         }
     }
 
+    /// Executes `resolve` (resolve).
+    ///
+    /// # Arguments
+    /// * `name` - Input `name` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Option<&str>` value.
     fn resolve(&self, name: &str) -> Option<&str> {
         self.anchors
             .iter()
@@ -538,16 +665,30 @@ impl DynamicScope {
     }
 }
 
+/// Internal representation for `RefResolutionScope` (ref resolution scope).
 struct RefResolutionScope<'a> {
+    /// Field `document_base` (document base).
     document_base: Option<&'a Url>,
+    /// Field `raw_schemas` (raw schemas).
     raw_schemas: &'a serde_json::Map<String, JsonValue>,
+    /// Field `schema_ids` (schema ids).
     schema_ids: &'a HashMap<String, String>,
+    /// Field `self_uri` (self uri).
     self_uri: Option<&'a str>,
+    /// Field `scope` (scope).
     scope: &'a mut DynamicScope,
+    /// Field `resolved` (resolved).
     resolved: &'a mut HashMap<String, JsonValue>,
+    /// Field `visiting` (visiting).
     visiting: &'a mut HashSet<String>,
 }
 
+/// Executes `resolve_dynamic_refs_in_resource` (resolve dynamic refs in resource).
+///
+/// # Arguments
+/// * `node` - Input `node` parameter.
+/// * `current_base` - Input `current_base` parameter.
+/// * `ctx` - Input `ctx` parameter.
 fn resolve_dynamic_refs_in_resource(
     node: &mut JsonValue,
     current_base: Option<&Url>,
@@ -566,6 +707,12 @@ fn resolve_dynamic_refs_in_resource(
     ctx.scope.pop(anchor_count);
 }
 
+/// Executes `resolve_dynamic_refs_walk` (resolve dynamic refs walk).
+///
+/// # Arguments
+/// * `node` - Input `node` parameter.
+/// * `current_base` - Input `current_base` parameter.
+/// * `ctx` - Input `ctx` parameter.
 fn resolve_dynamic_refs_walk(
     node: &mut JsonValue,
     current_base: Option<&Url>,
@@ -623,6 +770,13 @@ fn resolve_dynamic_refs_walk(
     }
 }
 
+/// Executes `resolve_component_dynamic_refs_for_ref` (resolve component dynamic refs for ref).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+/// * `ref_str` - Input `ref_str` parameter.
+/// * `current_base` - Input `current_base` parameter.
+/// * `ctx` - Input `ctx` parameter.
 fn resolve_component_dynamic_refs_for_ref(
     name: &str,
     ref_str: &str,
@@ -645,6 +799,16 @@ fn resolve_component_dynamic_refs_for_ref(
     ctx.visiting.remove(name);
 }
 
+/// Executes `resolve_component_ref_name` (resolve component ref name).
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+/// * `self_uri` - Input `self_uri` parameter.
+/// * `schema_ids` - Input `schema_ids` parameter.
+/// * `current_base` - Input `current_base` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 fn resolve_component_ref_name(
     ref_str: &str,
     self_uri: Option<&str>,
@@ -672,6 +836,15 @@ fn resolve_component_ref_name(
     None
 }
 
+/// Executes `resolve_dynamic_ref_value` (resolve dynamic ref value).
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+/// * `current_base` - Input `current_base` parameter.
+/// * `scope` - Input `scope` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn resolve_dynamic_ref_value(
     ref_str: &str,
     current_base: Option<&Url>,
@@ -690,6 +863,14 @@ fn resolve_dynamic_ref_value(
     resolve_ref_with_base(ref_str, current_base)
 }
 
+/// Executes `resolve_ref_with_base` (resolve ref with base).
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+/// * `base` - Input `base` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn resolve_ref_with_base(ref_str: &str, base: Option<&Url>) -> String {
     let parsed = parse_reference(ref_str);
     if matches!(parsed.kind, ReferenceKind::Remote) {
@@ -716,6 +897,15 @@ fn resolve_ref_with_base(ref_str: &str, base: Option<&Url>) -> String {
     }
 }
 
+/// Executes `resolve_ref_base` (resolve ref base).
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+/// * `current_base` - Input `current_base` parameter.
+/// * `document_base` - Input `document_base` parameter.
+///
+/// # Returns
+/// Resulting `Option<Url>` value.
 fn resolve_ref_base(
     ref_str: &str,
     current_base: Option<&Url>,
@@ -730,6 +920,14 @@ fn resolve_ref_base(
     document_base.or(current_base).cloned()
 }
 
+/// Executes `resource_base` (resource base).
+///
+/// # Arguments
+/// * `node` - Input `node` parameter.
+/// * `current_base` - Input `current_base` parameter.
+///
+/// # Returns
+/// Resulting `(Option<Url>, Option<String>)` value.
 fn resource_base(node: &JsonValue, current_base: Option<&Url>) -> (Option<Url>, Option<String>) {
     if let Some(id) = node.get("$id").and_then(|v| v.as_str()) {
         let base_url = resolve_schema_base(id, current_base).or_else(|| current_base.cloned());
@@ -740,6 +938,13 @@ fn resource_base(node: &JsonValue, current_base: Option<&Url>) -> (Option<Url>, 
     (current_base.cloned(), current_base.map(|u| u.to_string()))
 }
 
+/// Executes `collect_resource_dynamic_anchors` (collect resource dynamic anchors).
+///
+/// # Arguments
+/// * `node` - Input `node` parameter.
+/// * `base_str` - Input `base_str` parameter.
+/// * `is_root` - Input `is_root` parameter.
+/// * `anchors` - Input `anchors` parameter.
 fn collect_resource_dynamic_anchors(
     node: &JsonValue,
     base_str: Option<&str>,
@@ -776,12 +981,26 @@ fn collect_resource_dynamic_anchors(
     }
 }
 
+/// Executes `decode_anchor_name` (decode anchor name).
+///
+/// # Arguments
+/// * `fragment` - Input `fragment` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn decode_anchor_name(fragment: &str) -> String {
     percent_decode_str(fragment)
         .decode_utf8_lossy()
         .into_owned()
 }
 
+/// Executes `insert_anchor` (insert anchor).
+///
+/// # Arguments
+/// * `anchors` - Input `anchors` parameter.
+/// * `anchor` - Input `anchor` parameter.
+/// * `base` - Input `base` parameter.
+/// * `name` - Input `name` parameter.
 fn insert_anchor(
     anchors: &mut HashMap<String, String>,
     anchor: &str,
@@ -804,6 +1023,14 @@ fn insert_anchor(
 /// This traverses the full OpenAPI or schema-root document, indexing any schema object
 /// that declares an identifier or anchor. By default, component schema roots should
 /// be skipped and indexed via `collect_schema_ids` / `collect_schema_anchors`.
+///
+/// # Arguments
+/// * `root` - Input `root` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+/// * `skip_component_schemas` - Input `skip_component_schemas` parameter.
+///
+/// # Returns
+/// Resulting `InlineSchemaIndex` value.
 pub(crate) fn collect_inline_schema_index(
     root: &JsonValue,
     base_uri: Option<&Url>,
@@ -821,6 +1048,14 @@ pub(crate) fn collect_inline_schema_index(
     index
 }
 
+/// Executes `collect_inline_schema_index_inner` (collect inline schema index inner).
+///
+/// # Arguments
+/// * `node` - Input `node` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+/// * `skip_component_schemas` - Input `skip_component_schemas` parameter.
+/// * `path` - Input `path` parameter.
+/// * `index` - Input `index` parameter.
 fn collect_inline_schema_index_inner(
     node: &JsonValue,
     base_uri: Option<&Url>,
@@ -910,6 +1145,13 @@ fn collect_inline_schema_index_inner(
     }
 }
 
+/// Executes `parse_inline_schema` (parse inline schema).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `Option<Schema>` value.
 fn parse_inline_schema(value: &JsonValue) -> Option<Schema> {
     let mut normalized = value.clone();
     normalize_nullable_schemas(&mut normalized);
@@ -918,6 +1160,14 @@ fn parse_inline_schema(value: &JsonValue) -> Option<Schema> {
     serde_json::from_value::<Schema>(normalized).ok()
 }
 
+/// Executes `resolve_schema_id_key` (resolve schema id key).
+///
+/// # Arguments
+/// * `id` - Input `id` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn resolve_schema_id_key(id: &str, base_uri: Option<&Url>) -> String {
     if let Ok(url) = Url::parse(id) {
         return url.to_string();
@@ -931,6 +1181,14 @@ fn resolve_schema_id_key(id: &str, base_uri: Option<&Url>) -> String {
     id.to_string()
 }
 
+/// Executes `resolve_schema_base` (resolve schema base).
+///
+/// # Arguments
+/// * `id` - Input `id` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `Option<Url>` value.
 fn resolve_schema_base(id: &str, base_uri: Option<&Url>) -> Option<Url> {
     if let Ok(url) = Url::parse(id) {
         return Some(url);
@@ -939,6 +1197,13 @@ fn resolve_schema_base(id: &str, base_uri: Option<&Url>) -> Option<Url> {
     base.join(id).ok()
 }
 
+/// Executes `insert_anchor_schema` (insert anchor schema).
+///
+/// # Arguments
+/// * `anchors` - Input `anchors` parameter.
+/// * `anchor` - Input `anchor` parameter.
+/// * `base` - Input `base` parameter.
+/// * `schema` - Input `schema` parameter.
 fn insert_anchor_schema(
     anchors: &mut HashMap<String, Schema>,
     anchor: &str,
@@ -957,6 +1222,13 @@ fn insert_anchor_schema(
 }
 
 /// Internal helper to look up a Schema from a fragment string.
+///
+/// # Arguments
+/// * `fragment` - Input `fragment` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `Option<&'a Schema>` value.
 fn resolve_local_fragment<'a>(
     fragment: Option<&str>,
     components: &'a Components,
@@ -970,6 +1242,14 @@ fn resolve_local_fragment<'a>(
     }
 }
 
+/// Executes `same_document` (same document).
+///
+/// # Arguments
+/// * `left` - Input `left` parameter.
+/// * `right` - Input `right` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn same_document(left: &Url, right: &Url) -> bool {
     (left.scheme(), left.host(), left.port(), left.path())
         == (right.scheme(), right.host(), right.port(), right.path())
@@ -993,6 +1273,13 @@ pub fn compute_base_uri(retrieval_uri: &str, self_val: Option<&str>) -> String {
 /// Resolves a relative reference against a base URI utilizing **RFC 3986** logic.
 ///
 /// Replaces previous naive string slicing with strict `Url::join`.
+///
+/// # Arguments
+/// * `base_uri` - Input `base_uri` parameter.
+/// * `ref_uri` - Input `ref_uri` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn resolve_uri_reference(base_uri: &str, ref_uri: &str) -> String {
     let base_url = Url::parse(base_uri).ok().or_else(|| {
         let path = Path::new(base_uri);
@@ -1018,6 +1305,12 @@ pub fn resolve_uri_reference(base_uri: &str, ref_uri: &str) -> String {
 }
 
 /// Computes the directory of the given URI or Path.
+///
+/// # Arguments
+/// * `uri` - Input `uri` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn resolve_uri_directory(uri: &str) -> String {
     resolve_uri_reference(uri, ".")
 }

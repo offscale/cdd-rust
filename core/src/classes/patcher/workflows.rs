@@ -10,6 +10,15 @@ use ra_ap_syntax::ast::HasName;
 use ra_ap_syntax::{ast, AstNode, SourceFile};
 
 /// Scans the entire file for structs and injects `#[derive(ToSchema)]` and the necessary import.
+///
+/// # Arguments
+/// * `source` - Input `source` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<String>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn inject_openapi_attributes(source: &str) -> AppResult<String> {
     // 1. Add Import
     let mut current_source = add_import(source, "use utoipa::ToSchema;")?;

@@ -239,6 +239,9 @@ impl ConcreteUserDao {
     }
 
     /// Records a compiled Diesel PostgreSQL query statement.
+    ///
+    /// # Arguments
+    /// * `sql` - Input `sql` parameter.
     fn record_sql(&self, sql: String) {
         self.query_log.lock().expect("query_log").push(sql);
     }

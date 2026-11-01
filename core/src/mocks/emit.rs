@@ -79,6 +79,14 @@ pub fn generate_mock_routes(routes: &[ParsedRoute]) -> AppResult<String> {
     Ok(out)
 }
 
+/// Executes `sample_expr_for_type` (sample expr for type).
+///
+/// # Arguments
+/// * `ty` - Input `ty` parameter.
+/// * `field_name` - Input `field_name` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn sample_expr_for_type(ty: &str, field_name: &str) -> String {
     let trimmed = ty.trim();
     if trimmed.starts_with("Option<") {

@@ -14,6 +14,17 @@ use ra_ap_syntax::ast::{self, HasName};
 use ra_ap_syntax::{AstNode, SourceFile, SyntaxKind};
 
 /// Updates or creates a handler module source code.
+///
+/// # Arguments
+/// * `source` - Input `source` parameter.
+/// * `routes` - Input `routes` parameter.
+/// * `strategy` - Input `strategy` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<String>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn update_handler_module(
     source: &str,
     routes: &[ParsedRoute],
@@ -22,6 +33,18 @@ pub fn update_handler_module(
     update_handler_module_dyn(source, routes, strategy)
 }
 
+/// Executes `update_handler_module_dyn` (update handler module dyn).
+///
+/// # Arguments
+/// * `source` - Input `source` parameter.
+/// * `routes` - Input `routes` parameter.
+/// * `strategy` - Input `strategy` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<String>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn update_handler_module_dyn(
     source: &str,
     routes: &[ParsedRoute],
@@ -81,6 +104,10 @@ fn update_handler_module_dyn(
 }
 
 /// Injects generated unit test items into an existing `mod tests` CST node or appends a new `mod tests` block.
+///
+/// # Arguments
+/// * `source` - Input `source` parameter.
+/// * `tests_code` - Input `tests_code` parameter.
 fn inject_into_mod_tests(source: &mut String, tests_code: &str) {
     let parse = SourceFile::parse(source, Edition::Edition2021);
     let insert_pos = parse

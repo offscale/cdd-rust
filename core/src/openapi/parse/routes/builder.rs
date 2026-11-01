@@ -53,21 +53,46 @@ pub struct RouteBuildContext<'a> {
     pub base_uri: Option<&'a Url>,
 }
 
+/// Internal representation for `PathRouteSpec` (path route spec).
 struct PathRouteSpec<'a> {
+    /// Field `path` (path).
     path: &'a str,
+    /// Field `method` (method).
     method: &'a str,
+    /// Field `common_params` (common params).
     common_params: &'a [RouteParam],
+    /// Field `kind` (kind).
     kind: RouteKind,
+    /// Field `components` (components).
     components: Option<&'a ShimComponents>,
+    /// Field `base_uri` (base uri).
     base_uri: Option<&'a Url>,
+    /// Field `path_base_path` (path base path).
     path_base_path: Option<String>,
+    /// Field `path_servers` (path servers).
     path_servers: Option<Vec<ParsedServer>>,
+    /// Field `path_summary` (path summary).
     path_summary: Option<String>,
+    /// Field `path_description` (path description).
     path_description: Option<String>,
+    /// Field `path_extensions` (path extensions).
     path_extensions: BTreeMap<String, JsonValue>,
 }
 
 /// Helper to iterate methods in a ShimPathItem and extract all operations as Routes.
+///
+/// # Arguments
+/// * `routes` - Input `routes` parameter.
+/// * `path_or_name` - Input `path_or_name` parameter.
+/// * `path_item` - Input `path_item` parameter.
+/// * `kind` - Input `kind` parameter.
+/// * `ctx` - Input `ctx` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn parse_path_item(
     routes: &mut Vec<ParsedRoute>,
     path_or_name: &str,
@@ -175,6 +200,18 @@ pub fn parse_path_item(
     Ok(())
 }
 
+/// Executes `build_route` (build route).
+///
+/// # Arguments
+/// * `spec` - Input `spec` parameter.
+/// * `op` - Input `op` parameter.
+/// * `ctx` - Input `ctx` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<ParsedRoute>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn build_route(
     spec: PathRouteSpec<'_>,
     op: ShimOperation,
@@ -432,6 +469,13 @@ fn build_route(
     })
 }
 
+/// Executes `map_servers` (map servers).
+///
+/// # Arguments
+/// * `servers` - Input `servers` parameter.
+///
+/// # Returns
+/// Resulting `Option<Vec<ParsedServer>>` value.
 fn map_servers(servers: Option<&Vec<ShimServer>>) -> Option<Vec<ParsedServer>> {
     let servers = servers?;
     if servers.is_empty() {
@@ -440,6 +484,13 @@ fn map_servers(servers: Option<&Vec<ShimServer>>) -> Option<Vec<ParsedServer>> {
     Some(servers.iter().map(map_server).collect())
 }
 
+/// Executes `map_server` (map server).
+///
+/// # Arguments
+/// * `server` - Input `server` parameter.
+///
+/// # Returns
+/// Resulting `ParsedServer` value.
 fn map_server(server: &ShimServer) -> ParsedServer {
     ParsedServer {
         url: server.url.clone(),
@@ -457,6 +508,13 @@ fn map_server(server: &ShimServer) -> ParsedServer {
     }
 }
 
+/// Executes `map_server_variable` (map server variable).
+///
+/// # Arguments
+/// * `var` - Input `var` parameter.
+///
+/// # Returns
+/// Resulting `ParsedServerVariable` value.
 fn map_server_variable(var: &ShimServerVariable) -> ParsedServerVariable {
     ParsedServerVariable {
         enum_values: var.enum_values.clone(),
@@ -465,6 +523,17 @@ fn map_server_variable(var: &ShimServerVariable) -> ParsedServerVariable {
     }
 }
 
+/// Executes `validate_path_parameters` (validate path parameters).
+///
+/// # Arguments
+/// * `path` - Input `path` parameter.
+/// * `params` - Input `params` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_path_parameters(path: &str, params: &[RouteParam]) -> AppResult<()> {
     let re = Regex::new(r"\{([^}]+)}").expect("Invalid regex constant");
     let mut path_vars = Vec::new();
@@ -507,6 +576,13 @@ fn validate_path_parameters(path: &str, params: &[RouteParam]) -> AppResult<()> 
     Ok(())
 }
 
+/// Executes `is_reserved_method` (is reserved method).
+///
+/// # Arguments
+/// * `method` - Input `method` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_reserved_method(method: &str) -> bool {
     matches!(
         method.to_ascii_lowercase().as_str(),
@@ -514,10 +590,24 @@ fn is_reserved_method(method: &str) -> bool {
     )
 }
 
+/// Executes `is_http_token` (is http token).
+///
+/// # Arguments
+/// * `method` - Input `method` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_http_token(method: &str) -> bool {
     !method.is_empty() && method.chars().all(is_tchar)
 }
 
+/// Executes `is_tchar` (is tchar).
+///
+/// # Arguments
+/// * `c` - Input `c` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_tchar(c: char) -> bool {
     c.is_ascii_alphanumeric()
         || matches!(
@@ -539,6 +629,13 @@ fn is_tchar(c: char) -> bool {
         )
 }
 
+/// Executes `filter_extensions` (filter extensions).
+///
+/// # Arguments
+/// * `extensions` - Input `extensions` parameter.
+///
+/// # Returns
+/// Resulting `BTreeMap<String, JsonValue>` value.
 fn filter_extensions(extensions: &BTreeMap<String, JsonValue>) -> BTreeMap<String, JsonValue> {
     extensions
         .iter()
@@ -661,6 +758,16 @@ pub(crate) fn parse_security_requirements(
     security
 }
 
+/// Executes `resolve_security_scheme` (resolve security scheme).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `Option<SecuritySchemeInfo>` value.
 fn resolve_security_scheme(
     name: &str,
     components: Option<&ShimComponents>,
@@ -694,6 +801,16 @@ fn resolve_security_scheme(
     None
 }
 
+/// Executes `resolve_security_scheme_ref_or` (resolve security scheme ref or).
+///
+/// # Arguments
+/// * `ref_or` - Input `ref_or` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `Option<SecuritySchemeInfo>` value.
 fn resolve_security_scheme_ref_or(
     ref_or: &RefOr<ShimSecurityScheme>,
     components: &ShimComponents,
@@ -708,6 +825,13 @@ fn resolve_security_scheme_ref_or(
     }
 }
 
+/// Executes `build_security_scheme_info` (build security scheme info).
+///
+/// # Arguments
+/// * `shim` - Input `shim` parameter.
+///
+/// # Returns
+/// Resulting `SecuritySchemeInfo` value.
 fn build_security_scheme_info(shim: &ShimSecurityScheme) -> SecuritySchemeInfo {
     let kind = match shim {
         ShimSecurityScheme::ApiKey(k) => {
@@ -765,6 +889,13 @@ fn build_security_scheme_info(shim: &ShimSecurityScheme) -> SecuritySchemeInfo {
     }
 }
 
+/// Executes `map_oauth_flow` (map oauth flow).
+///
+/// # Arguments
+/// * `flow` - Input `flow` parameter.
+///
+/// # Returns
+/// Resulting `OAuthFlow` value.
 fn map_oauth_flow(flow: &ShimOAuthFlow) -> OAuthFlow {
     OAuthFlow {
         authorization_url: flow.authorization_url.clone(),
@@ -775,6 +906,13 @@ fn map_oauth_flow(flow: &ShimOAuthFlow) -> OAuthFlow {
     }
 }
 
+/// Executes `map_oauth_flows` (map oauth flows).
+///
+/// # Arguments
+/// * `shim` - Input `shim` parameter.
+///
+/// # Returns
+/// Resulting `OAuthFlows` value.
 fn map_oauth_flows(shim: &ShimOAuth2) -> OAuthFlows {
     if let Some(flows) = shim.flows.as_ref() {
         return OAuthFlows {
@@ -789,6 +927,13 @@ fn map_oauth_flows(shim: &ShimOAuth2) -> OAuthFlows {
     map_legacy_oauth_flows(shim)
 }
 
+/// Executes `map_legacy_oauth_flows` (map legacy oauth flows).
+///
+/// # Arguments
+/// * `shim` - Input `shim` parameter.
+///
+/// # Returns
+/// Resulting `OAuthFlows` value.
 fn map_legacy_oauth_flows(shim: &ShimOAuth2) -> OAuthFlows {
     let mut flows = OAuthFlows {
         implicit: None,

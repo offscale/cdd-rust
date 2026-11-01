@@ -69,6 +69,15 @@ pub struct JsonSchema {
 /// Trait for converting Rust type strings to JSON Schemas.
 pub trait TypeMapper {
     /// Maps a Rust type string (e.g., `Option<i32>`) to a JSON Schema.
+    ///
+    /// # Arguments
+    /// * `rust_type` - Input `rust_type` parameter.
+    ///
+    /// # Returns
+    /// Resulting `AppResult<JsonSchema>` value.
+    ///
+    /// # Errors
+    /// Returns an error if validation, parsing, or execution fails.
     fn map(&self, rust_type: &str) -> AppResult<JsonSchema>;
 }
 
@@ -100,6 +109,15 @@ impl TypeMapper for RustToJsonMapper {
 }
 
 /// Recursively maps an AST Type node to JsonSchema.
+///
+/// # Arguments
+/// * `ty` - Input `ty` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<JsonSchema>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn map_ast_type(ty: &ast::Type) -> AppResult<JsonSchema> {
     match ty {
         ast::Type::PathType(path_type) => {
@@ -201,6 +219,16 @@ fn map_ast_type(ty: &ast::Type) -> AppResult<JsonSchema> {
 }
 
 /// Helper to handle types like `Option<T>` or `Vec<T>`.
+///
+/// # Arguments
+/// * `segment` - Input `segment` parameter.
+/// * `wrap` - Input `wrap` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<JsonSchema> where F: FnOnce(JsonSchema) -> JsonSchema,` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn handle_generic_wrapper<F>(segment: ast::PathSegment, wrap: F) -> AppResult<JsonSchema>
 where
     F: FnOnce(JsonSchema) -> JsonSchema,
@@ -221,6 +249,15 @@ where
 }
 
 /// Helper to handle key-value map types like `HashMap<K, V>` and `BTreeMap<K, V>`.
+///
+/// # Arguments
+/// * `segment` - Input `segment` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<JsonSchema>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn handle_map_wrapper(segment: ast::PathSegment) -> AppResult<JsonSchema> {
     let mut args = segment
         .generic_arg_list()
@@ -309,6 +346,10 @@ pub fn map_base_type_to_openapi_schema(ty: &str) -> Value {
     }
 }
 
+/// Executes `binary_schema_value` (binary schema value).
+///
+/// # Returns
+/// Resulting `Value` value.
 fn binary_schema_value() -> Value {
     json!({
         "type": "string",
@@ -317,6 +358,13 @@ fn binary_schema_value() -> Value {
     })
 }
 
+/// Executes `make_nullable_schema` (make nullable schema).
+///
+/// # Arguments
+/// * `schema` - Input `schema` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn make_nullable_schema(schema: Value) -> Value {
     let obj = schema.as_object().expect("schema object");
     if let Some(Value::String(s)) = obj.get("type") {
@@ -328,11 +376,25 @@ fn make_nullable_schema(schema: Value) -> Value {
     json!({ "anyOf": [schema, { "type": "null" }] })
 }
 
+/// Executes `is_optional_type` (is optional type).
+///
+/// # Arguments
+/// * `ty` - Input `ty` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_optional_type(ty: &str) -> bool {
     let ty = ty.trim();
     ty.starts_with("Option<") && ty.ends_with('>')
 }
 
+/// Executes `is_binary_type` (is binary type).
+///
+/// # Arguments
+/// * `ty` - Input `ty` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_binary_type(ty: &str) -> bool {
     let ty = ty.trim();
     if is_optional_type(ty) {
@@ -348,23 +410,45 @@ fn is_binary_type(ty: &str) -> bool {
         || ["::Bytes", "::ByteBuf"].iter().any(|s| ty.ends_with(s))
 }
 
+/// Enumeration representing `TypeShape` (type shape).
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum TypeShape {
+    /// Variant `Base` (base).
     Base(String),
+    /// Variant `Vec` (vec).
     Vec(Box<TypeShape>),
+    /// Variant `Map` (map).
     Map(Box<TypeShape>),
 }
 
+/// Internal representation for `ParsedType` (parsed type).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ParsedType {
+    /// Field `shape` (shape).
     shape: TypeShape,
+    /// Field `is_optional` (is optional).
     is_optional: bool,
 }
 
+/// Executes `parse_rust_type` (parse rust type).
+///
+/// # Arguments
+/// * `ty` - Input `ty` parameter.
+///
+/// # Returns
+/// Resulting `ParsedType` value.
 fn parse_rust_type(ty: &str) -> ParsedType {
     parse_rust_type_inner(ty.trim(), true)
 }
 
+/// Executes `parse_rust_type_inner` (parse rust type inner).
+///
+/// # Arguments
+/// * `ty` - Input `ty` parameter.
+/// * `allow_optional` - Input `allow_optional` parameter.
+///
+/// # Returns
+/// Resulting `ParsedType` value.
 fn parse_rust_type_inner(ty: &str, allow_optional: bool) -> ParsedType {
     if allow_optional {
         if let Some(inner) = strip_generic(ty, "Option") {
@@ -398,6 +482,14 @@ fn parse_rust_type_inner(ty: &str, allow_optional: bool) -> ParsedType {
     }
 }
 
+/// Executes `strip_generic` (strip generic).
+///
+/// # Arguments
+/// * `ty` - Input `ty` parameter.
+/// * `target` - Input `target` parameter.
+///
+/// # Returns
+/// Resulting `Option<&'a str>` value.
 fn strip_generic<'a>(ty: &'a str, target: &str) -> Option<&'a str> {
     let (base, inner) = split_generic(ty)?;
     if base == target {
@@ -407,6 +499,13 @@ fn strip_generic<'a>(ty: &'a str, target: &str) -> Option<&'a str> {
     }
 }
 
+/// Executes `strip_map_generic` (strip map generic).
+///
+/// # Arguments
+/// * `ty` - Input `ty` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 fn strip_map_generic(ty: &str) -> Option<String> {
     let (base, inner) = split_generic(ty)?;
     if matches!(base, "HashMap" | "BTreeMap") {
@@ -418,6 +517,13 @@ fn strip_map_generic(ty: &str) -> Option<String> {
     None
 }
 
+/// Executes `split_generic` (split generic).
+///
+/// # Arguments
+/// * `ty` - Input `ty` parameter.
+///
+/// # Returns
+/// Resulting `Option<(&str, &str)>` value.
 fn split_generic(ty: &str) -> Option<(&str, &str)> {
     let start = ty.find('<')?;
     if !ty.ends_with('>') {
@@ -429,6 +535,13 @@ fn split_generic(ty: &str) -> Option<(&str, &str)> {
     Some((base, inner))
 }
 
+/// Executes `split_generic_args` (split generic args).
+///
+/// # Arguments
+/// * `inner` - Input `inner` parameter.
+///
+/// # Returns
+/// Resulting `Vec<String>` value.
 fn split_generic_args(inner: &str) -> Vec<String> {
     let mut args = Vec::new();
     let mut depth = 0usize;
@@ -459,6 +572,13 @@ fn split_generic_args(inner: &str) -> Vec<String> {
     args
 }
 
+/// Executes `shape_to_schema` (shape to schema).
+///
+/// # Arguments
+/// * `shape` - Input `shape` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn shape_to_schema(shape: &TypeShape) -> Value {
     match shape {
         TypeShape::Base(ty) => map_base_type_to_openapi_schema(ty),
@@ -474,6 +594,13 @@ fn shape_to_schema(shape: &TypeShape) -> Value {
 }
 
 // Helpers for cleaner construction
+/// Executes `simple` (simple).
+///
+/// # Arguments
+/// * `t` - Input `t` parameter.
+///
+/// # Returns
+/// Resulting `JsonSchema` value.
 fn simple(t: JsonType) -> JsonSchema {
     JsonSchema {
         type_: t,
@@ -484,6 +611,14 @@ fn simple(t: JsonType) -> JsonSchema {
     }
 }
 
+/// Executes `formatted` (formatted).
+///
+/// # Arguments
+/// * `t` - Input `t` parameter.
+/// * `fmt` - Input `fmt` parameter.
+///
+/// # Returns
+/// Resulting `JsonSchema` value.
 fn formatted(t: JsonType, fmt: &str) -> JsonSchema {
     JsonSchema {
         type_: t,
@@ -507,6 +642,12 @@ fn binary_schema() -> JsonSchema {
 }
 
 /// Checks via [`crate::openapi::parse::models::RustType`] whether `ty` represents `Vec<u8>`.
+///
+/// # Arguments
+/// * `ty` - Input `ty` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_u8_heuristic(ty: &ast::Type) -> bool {
     let text = ty.to_string();
     crate::openapi::parse::models::RustType::parse(&text)

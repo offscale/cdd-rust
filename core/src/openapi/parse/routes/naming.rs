@@ -6,6 +6,12 @@
 
 /// Converts a mixed-case string (CamelCase or camelCase) to snake_case.
 /// Used for converting `operationId` into valid Rust function names.
+///
+/// # Arguments
+/// * `s` - Input `s` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn to_snake_case(s: &str) -> String {
     let mut result = String::new();
     for (i, c) in s.chars().enumerate() {
@@ -26,6 +32,13 @@ pub fn to_snake_case(s: &str) -> String {
 /// Derives a handler name from the HTTP Method and URL path when `operationId` is missing.
 ///
 /// e.g. `GET /users/{id}` -> `get_users_id`
+///
+/// # Arguments
+/// * `method` - Input `method` parameter.
+/// * `path` - Input `path` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn derive_handler_name(method: &str, path: &str) -> String {
     let clean_path = path.replace(['{', '}'], "").replace('/', "_");
     format!(

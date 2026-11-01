@@ -30,6 +30,12 @@ use std::path::Path;
 use url::Url;
 
 /// Converts an identifier to PascalCase.
+///
+/// # Arguments
+/// * `s` - Input `s` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn to_pascal_case(s: &str) -> String {
     RustIdent::sanitize_pascal(s, "WorkflowModel").into_inner()
 }
@@ -118,6 +124,17 @@ pub fn parse_arazzo_document_with_registry(
     Ok(doc)
 }
 
+/// Executes `resolve_self_uri` (resolve self uri).
+///
+/// # Arguments
+/// * `s` - Input `s` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<String>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn resolve_self_uri(s: &str, base_uri: Option<&Url>) -> AppResult<String> {
     let parsed = match base_uri {
         Some(base) => base.join(s),
@@ -405,6 +422,17 @@ pub fn resolve_step_operation(
     }
 }
 
+/// Executes `topological_sort_graph` (topological sort graph).
+///
+/// # Arguments
+/// * `adj` - Input `adj` parameter.
+/// * `scope_name` - Input `scope_name` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<String>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn topological_sort_graph(
     adj: &IndexMap<String, Vec<String>>,
     scope_name: &str,
@@ -429,6 +457,21 @@ fn topological_sort_graph(
     Ok(order)
 }
 
+/// Executes `dfs_visit` (dfs visit).
+///
+/// # Arguments
+/// * `node` - Input `node` parameter.
+/// * `adj` - Input `adj` parameter.
+/// * `visited` - Input `visited` parameter.
+/// * `visiting` - Input `visiting` parameter.
+/// * `order` - Input `order` parameter.
+/// * `scope_name` - Input `scope_name` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn dfs_visit(
     node: &str,
     adj: &IndexMap<String, Vec<String>>,
@@ -459,6 +502,17 @@ fn dfs_visit(
     Ok(())
 }
 
+/// Executes `validate_step_components` (validate step components).
+///
+/// # Arguments
+/// * `step` - Input `step` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_step_components(
     step: &WorkflowStep,
     components: Option<&ArazzoComponents>,
@@ -475,6 +529,17 @@ fn validate_step_components(
     Ok(())
 }
 
+/// Executes `validate_param_or_reusable` (validate param or reusable).
+///
+/// # Arguments
+/// * `item` - Input `item` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_param_or_reusable(
     item: &ParameterOrReusable,
     components: Option<&ArazzoComponents>,
@@ -511,6 +576,17 @@ fn validate_param_or_reusable(
     Ok(())
 }
 
+/// Executes `validate_success_action_or_reusable` (validate success action or reusable).
+///
+/// # Arguments
+/// * `item` - Input `item` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_success_action_or_reusable(
     item: &ActionOrReusable<SuccessAction>,
     components: Option<&ArazzoComponents>,
@@ -554,6 +630,17 @@ fn validate_success_action_or_reusable(
     Ok(())
 }
 
+/// Executes `validate_failure_action_or_reusable` (validate failure action or reusable).
+///
+/// # Arguments
+/// * `item` - Input `item` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_failure_action_or_reusable(
     item: &ActionOrReusable<FailureAction>,
     components: Option<&ArazzoComponents>,
@@ -597,6 +684,16 @@ fn validate_failure_action_or_reusable(
     Ok(())
 }
 
+/// Executes `parse_arazzo_info` (parse arazzo info).
+///
+/// # Arguments
+/// * `val` - Input `val` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<ArazzoInfo>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_arazzo_info(val: &JsonValue) -> AppResult<ArazzoInfo> {
     let obj = expect_object(val, "/info", "'info' must be a mapping")?;
     let title = get_required_str(obj, "title", "Info")?.to_string();
@@ -620,6 +717,16 @@ fn parse_arazzo_info(val: &JsonValue) -> AppResult<ArazzoInfo> {
     })
 }
 
+/// Executes `parse_source_descriptions` (parse source descriptions).
+///
+/// # Arguments
+/// * `val` - Input `val` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<SourceDescription>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_source_descriptions(val: &JsonValue) -> AppResult<Vec<SourceDescription>> {
     let arr = expect_array(
         val,
@@ -650,6 +757,16 @@ fn parse_source_descriptions(val: &JsonValue) -> AppResult<Vec<SourceDescription
     Ok(out)
 }
 
+/// Executes `parse_components` (parse components).
+///
+/// # Arguments
+/// * `val` - Input `val` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<ArazzoComponents>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_components(val: &JsonValue) -> AppResult<ArazzoComponents> {
     let obj = expect_object(val, "/components", "'components' must be an object")?;
 
@@ -706,6 +823,17 @@ fn parse_components(val: &JsonValue) -> AppResult<ArazzoComponents> {
     })
 }
 
+/// Executes `parse_workflows` (parse workflows).
+///
+/// # Arguments
+/// * `val` - Input `val` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<Workflow>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_workflows(
     val: &JsonValue,
     components: Option<&ArazzoComponents>,
@@ -776,6 +904,18 @@ fn parse_workflows(
     Ok(out)
 }
 
+/// Executes `parse_input_schema` (parse input schema).
+///
+/// # Arguments
+/// * `struct_name` - Input `struct_name` parameter.
+/// * `schema_val` - Input `schema_val` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<ParsedSchema>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_input_schema(
     struct_name: &str,
     schema_val: &JsonValue,
@@ -867,6 +1007,13 @@ fn parse_input_schema(
     Ok(ParsedSchema::new(schema_val.clone(), input_struct))
 }
 
+/// Executes `json_schema_to_rust_type` (json schema to rust type).
+///
+/// # Arguments
+/// * `schema` - Input `schema` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn json_schema_to_rust_type(schema: &JsonValue) -> String {
     match schema.get("type").and_then(JsonValue::as_str) {
         Some("string") => match schema.get("format").and_then(JsonValue::as_str) {
@@ -895,6 +1042,17 @@ fn json_schema_to_rust_type(schema: &JsonValue) -> String {
     }
 }
 
+/// Executes `parse_steps` (parse steps).
+///
+/// # Arguments
+/// * `val` - Input `val` parameter.
+/// * `path` - Input `path` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<WorkflowStep>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_steps(val: &JsonValue, path: &str) -> AppResult<Vec<WorkflowStep>> {
     let arr = expect_array(val, path, "'steps' must be an array")?;
     let mut out = Vec::with_capacity(arr.len());
@@ -968,6 +1126,17 @@ fn parse_steps(val: &JsonValue, path: &str) -> AppResult<Vec<WorkflowStep>> {
     Ok(out)
 }
 
+/// Executes `parse_step_target` (parse step target).
+///
+/// # Arguments
+/// * `obj` - Input `obj` parameter.
+/// * `path` - Input `path` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<StepTarget>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_step_target(obj: &Map<String, JsonValue>, path: &str) -> AppResult<StepTarget> {
     let op_id = obj.get("operationId").and_then(JsonValue::as_str);
     let op_path = obj.get("operationPath").and_then(JsonValue::as_str);
@@ -1012,6 +1181,17 @@ fn parse_step_target(obj: &Map<String, JsonValue>, path: &str) -> AppResult<Step
     ))
 }
 
+/// Executes `parse_parameters_list` (parse parameters list).
+///
+/// # Arguments
+/// * `val` - Input `val` parameter.
+/// * `path` - Input `path` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<ParameterOrReusable>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_parameters_list(val: &JsonValue, path: &str) -> AppResult<Vec<ParameterOrReusable>> {
     let arr = expect_array(val, path, "'parameters' must be an array")?;
     let mut out = Vec::with_capacity(arr.len());
@@ -1031,6 +1211,17 @@ fn parse_parameters_list(val: &JsonValue, path: &str) -> AppResult<Vec<Parameter
     Ok(out)
 }
 
+/// Executes `parse_parameter_object` (parse parameter object).
+///
+/// # Arguments
+/// * `val` - Input `val` parameter.
+/// * `path` - Input `path` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<ArazzoParameter>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_parameter_object(val: &JsonValue, path: &str) -> AppResult<ArazzoParameter> {
     let obj = expect_object(val, path, "parameter must be an object")?;
     let name = get_required_str(obj, "name", "Parameter")?.to_string();
@@ -1050,6 +1241,16 @@ fn parse_parameter_object(val: &JsonValue, path: &str) -> AppResult<ArazzoParame
     })
 }
 
+/// Executes `parse_parameter_value` (parse parameter value).
+///
+/// # Arguments
+/// * `val` - Input `val` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<ParameterValue>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_parameter_value(val: &JsonValue) -> AppResult<ParameterValue> {
     if let Some(s) = val.as_str() {
         let expr = RuntimeExpression::parse(s)?;
@@ -1060,6 +1261,17 @@ fn parse_parameter_value(val: &JsonValue) -> AppResult<ParameterValue> {
     Ok(ParameterValue::Literal(val.clone()))
 }
 
+/// Executes `parse_reusable_object` (parse reusable object).
+///
+/// # Arguments
+/// * `obj` - Input `obj` parameter.
+/// * `path` - Input `path` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<ReusableObject>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_reusable_object(obj: &Map<String, JsonValue>, _path: &str) -> AppResult<ReusableObject> {
     let ref_str = get_required_str(obj, "reference", "ReusableObject")?;
     let reference = RuntimeExpression::parse_expression(ref_str)?;
@@ -1075,6 +1287,17 @@ fn parse_reusable_object(obj: &Map<String, JsonValue>, _path: &str) -> AppResult
     })
 }
 
+/// Executes `parse_request_body` (parse request body).
+///
+/// # Arguments
+/// * `val` - Input `val` parameter.
+/// * `path` - Input `path` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<ArazzoRequestBody>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_request_body(val: &JsonValue, path: &str) -> AppResult<ArazzoRequestBody> {
     let obj = expect_object(val, path, "'requestBody' must be an object")?;
     let content_type = obj
@@ -1124,6 +1347,17 @@ fn parse_request_body(val: &JsonValue, path: &str) -> AppResult<ArazzoRequestBod
     })
 }
 
+/// Executes `parse_criteria_list` (parse criteria list).
+///
+/// # Arguments
+/// * `val` - Input `val` parameter.
+/// * `path` - Input `path` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<Criterion>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_criteria_list(val: &JsonValue, path: &str) -> AppResult<Vec<Criterion>> {
     let arr = expect_array(val, path, "'criteria' must be an array")?;
     let mut out = Vec::with_capacity(arr.len());
@@ -1150,6 +1384,17 @@ fn parse_criteria_list(val: &JsonValue, path: &str) -> AppResult<Vec<Criterion>>
     Ok(out)
 }
 
+/// Executes `parse_criterion_type` (parse criterion type).
+///
+/// # Arguments
+/// * `val` - Input `val` parameter.
+/// * `path` - Input `path` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<CriterionType>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_criterion_type(val: &JsonValue, path: &str) -> AppResult<CriterionType> {
     if let Some(s) = val.as_str() {
         return CriterionType::from_type_str(s);
@@ -1172,6 +1417,17 @@ fn parse_criterion_type(val: &JsonValue, path: &str) -> AppResult<CriterionType>
     })
 }
 
+/// Executes `parse_success_actions_list` (parse success actions list).
+///
+/// # Arguments
+/// * `val` - Input `val` parameter.
+/// * `path` - Input `path` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<ActionOrReusable<SuccessAction>>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_success_actions_list(
     val: &JsonValue,
     path: &str,
@@ -1194,6 +1450,17 @@ fn parse_success_actions_list(
     Ok(out)
 }
 
+/// Executes `parse_success_action_object` (parse success action object).
+///
+/// # Arguments
+/// * `val` - Input `val` parameter.
+/// * `path` - Input `path` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<SuccessAction>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_success_action_object(val: &JsonValue, path: &str) -> AppResult<SuccessAction> {
     let obj = expect_object(val, path, "successAction must be an object")?;
     let name = get_required_str(obj, "name", "SuccessAction")?.to_string();
@@ -1226,6 +1493,17 @@ fn parse_success_action_object(val: &JsonValue, path: &str) -> AppResult<Success
     })
 }
 
+/// Executes `parse_failure_actions_list` (parse failure actions list).
+///
+/// # Arguments
+/// * `val` - Input `val` parameter.
+/// * `path` - Input `path` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<ActionOrReusable<FailureAction>>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_failure_actions_list(
     val: &JsonValue,
     path: &str,
@@ -1248,6 +1526,17 @@ fn parse_failure_actions_list(
     Ok(out)
 }
 
+/// Executes `parse_failure_action_object` (parse failure action object).
+///
+/// # Arguments
+/// * `val` - Input `val` parameter.
+/// * `path` - Input `path` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<FailureAction>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_failure_action_object(val: &JsonValue, path: &str) -> AppResult<FailureAction> {
     let obj = expect_object(val, path, "failureAction must be an object")?;
     let name = get_required_str(obj, "name", "FailureAction")?.to_string();
@@ -1295,6 +1584,17 @@ fn parse_failure_action_object(val: &JsonValue, path: &str) -> AppResult<Failure
     })
 }
 
+/// Executes `parse_action_target` (parse action target).
+///
+/// # Arguments
+/// * `obj` - Input `obj` parameter.
+/// * `path` - Input `path` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<ActionTarget>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_action_target(obj: &Map<String, JsonValue>, path: &str) -> AppResult<ActionTarget> {
     let wf_id = obj.get("workflowId").and_then(JsonValue::as_str);
     let st_id = obj.get("stepId").and_then(JsonValue::as_str);
@@ -1309,6 +1609,17 @@ fn parse_action_target(obj: &Map<String, JsonValue>, path: &str) -> AppResult<Ac
     }
 }
 
+/// Executes `parse_outputs_map` (parse outputs map).
+///
+/// # Arguments
+/// * `val` - Input `val` parameter.
+/// * `path` - Input `path` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<IndexMap<String, RuntimeExpressionOrSelector>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_outputs_map(
     val: &JsonValue,
     path: &str,
@@ -1349,6 +1660,17 @@ fn parse_outputs_map(
     Ok(out)
 }
 
+/// Executes `parse_string_list` (parse string list).
+///
+/// # Arguments
+/// * `val` - Input `val` parameter.
+/// * `path` - Input `path` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<String>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_string_list(val: Option<&JsonValue>, path: &str) -> AppResult<Vec<String>> {
     let Some(v) = val else {
         return Ok(Vec::new());
@@ -1367,6 +1689,18 @@ fn parse_string_list(val: Option<&JsonValue>, path: &str) -> AppResult<Vec<Strin
     Ok(out)
 }
 
+/// Executes `expect_object` (expect object).
+///
+/// # Arguments
+/// * `val` - Input `val` parameter.
+/// * `path` - Input `path` parameter.
+/// * `reason` - Input `reason` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<&'a Map<String, JsonValue>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn expect_object<'a>(
     val: &'a JsonValue,
     path: &str,
@@ -1378,6 +1712,18 @@ fn expect_object<'a>(
     })
 }
 
+/// Executes `expect_array` (expect array).
+///
+/// # Arguments
+/// * `val` - Input `val` parameter.
+/// * `path` - Input `path` parameter.
+/// * `reason` - Input `reason` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<&'a Vec<JsonValue>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn expect_array<'a>(val: &'a JsonValue, path: &str, reason: &str) -> AppResult<&'a Vec<JsonValue>> {
     val.as_array().ok_or_else(|| AppError::ArazzoValidation {
         path: path.to_string(),
@@ -1385,6 +1731,18 @@ fn expect_array<'a>(val: &'a JsonValue, path: &str, reason: &str) -> AppResult<&
     })
 }
 
+/// Executes `get_required_val` (get required val).
+///
+/// # Arguments
+/// * `obj` - Input `obj` parameter.
+/// * `field` - Input `field` parameter.
+/// * `container` - Input `container` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<&'a JsonValue>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn get_required_val<'a>(
     obj: &'a Map<String, JsonValue>,
     field: &str,
@@ -1399,6 +1757,18 @@ fn get_required_val<'a>(
     }
 }
 
+/// Executes `get_required_str` (get required str).
+///
+/// # Arguments
+/// * `obj` - Input `obj` parameter.
+/// * `field` - Input `field` parameter.
+/// * `container` - Input `container` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<&'a str>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn get_required_str<'a>(
     obj: &'a Map<String, JsonValue>,
     field: &str,
@@ -1413,6 +1783,13 @@ fn get_required_str<'a>(
     }
 }
 
+/// Executes `extract_extensions` (extract extensions).
+///
+/// # Arguments
+/// * `obj` - Input `obj` parameter.
+///
+/// # Returns
+/// Resulting `BTreeMap<String, JsonValue>` value.
 fn extract_extensions(obj: &Map<String, JsonValue>) -> BTreeMap<String, JsonValue> {
     let mut ext = BTreeMap::new();
     for (k, v) in obj {

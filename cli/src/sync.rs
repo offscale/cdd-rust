@@ -65,6 +65,15 @@ pub struct SyncArgs {
 }
 
 /// Helper to parse `"key=value"` arguments.
+///
+/// # Arguments
+/// * `s` - Input `s` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<(String, String)>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn parse_key_val(s: &str) -> AppResult<(String, String)> {
     let pos = s.find('=').ok_or_else(|| {
         AppError::ValidationError(format!("invalid KEY=value: no `=` found in `{}`", s))
@@ -134,6 +143,16 @@ pub fn run_sync(args: &SyncArgs, mapper: &impl ModelMapper) -> AppResult<()> {
 /// - Adds `#[derive(ToSchema)]`.
 /// - Adds `#[derive(Serialize, Deserialize)]`.
 /// - Patches field types if configured.
+///
+/// # Arguments
+/// * `model_dir` - Input `model_dir` parameter.
+/// * `type_overrides` - Input `type_overrides` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn process_models_for_openapi(
     model_dir: &Path,
     type_overrides: &HashMap<String, String>,
@@ -165,6 +184,16 @@ fn process_models_for_openapi(
 }
 
 /// Processes a single file to inject derives and patch types.
+///
+/// # Arguments
+/// * `path` - Input `path` parameter.
+/// * `type_overrides` - Input `type_overrides` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn process_file(path: &Path, type_overrides: &HashMap<String, String>) -> AppResult<()> {
     let content = fs::read_to_string(path)?;
 
@@ -213,6 +242,16 @@ pub struct SyncConfig {
 }
 
 /// Synchronize an OpenAPI specification with source code.
+///
+/// # Arguments
+/// * `config` - Input `config` parameter.
+/// * `mapper` - Input `mapper` parameter.
+///
+/// # Returns
+/// Resulting `cdd_core::AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn sync(
     config: &SyncConfig,
     mapper: &impl crate::generator::ModelMapper,

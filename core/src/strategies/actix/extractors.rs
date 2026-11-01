@@ -12,6 +12,12 @@ use crate::openapi::parse::models::{
 use crate::strategies::actix::utils::{to_pascal_case, to_snake_case};
 
 /// Generates the type string for path parameters.
+///
+/// # Arguments
+/// * `inner_types` - Input `inner_types` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn path_extractor(inner_types: &[String]) -> String {
     if inner_types.len() == 1 {
         format!("web::Path<{}>", inner_types[0])
@@ -27,6 +33,12 @@ pub fn query_extractor() -> String {
 }
 
 /// Generates the type string for strongly typed query extraction.
+///
+/// # Arguments
+/// * `inner_type` - Input `inner_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn typed_query_extractor(inner_type: &str) -> String {
     format!("web::Query<{}>", inner_type)
 }
@@ -35,6 +47,13 @@ pub fn typed_query_extractor(inner_type: &str) -> String {
 ///
 /// For non-form media types, Actix does not provide a native extractor, so we
 /// surface the raw query string for callers to parse explicitly.
+///
+/// # Arguments
+/// * `inner_type` - Input `inner_type` parameter.
+/// * `content_media_type` - Input `content_media_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn query_string_extractor(
     inner_type: &str,
     content_media_type: Option<&ContentMediaType>,
@@ -46,6 +65,12 @@ pub fn query_string_extractor(
 }
 
 /// Generates the type string for header extraction.
+///
+/// # Arguments
+/// * `inner_type` - Input `inner_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn header_extractor(_inner_type: &str) -> String {
     "actix_web::HttpRequest".to_string()
 }
@@ -56,11 +81,23 @@ pub fn cookie_extractor() -> String {
 }
 
 /// Generates the type string for JSON body extraction.
+///
+/// # Arguments
+/// * `body_type` - Input `body_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn body_extractor(body_type: &str) -> String {
     format!("web::Json<{}>", body_type)
 }
 
 /// Generates the type string for Form body extraction.
+///
+/// # Arguments
+/// * `body_type` - Input `body_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn form_extractor(body_type: &str) -> String {
     format!("web::Form<{}>", body_type)
 }
@@ -69,6 +106,12 @@ pub fn form_extractor(body_type: &str) -> String {
 ///
 /// If `body_type` is "Multipart" (default fallback for untyped schemas), returns valid generic `actix_multipart::Multipart`.
 /// Otherwise returns `actix_multipart::form::MultipartForm<T>` which requires a struct deriving `MultipartForm`.
+///
+/// # Arguments
+/// * `body_type` - Input `body_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn multipart_extractor(body_type: &str) -> String {
     if body_type == "Multipart" {
         "actix_multipart::Multipart".to_string()
@@ -78,11 +121,23 @@ pub fn multipart_extractor(body_type: &str) -> String {
 }
 
 /// Generates the type string for Text body extraction.
+///
+/// # Arguments
+/// * `body_type` - Input `body_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn text_extractor(_body_type: &str) -> String {
     "String".to_string()
 }
 
 /// Generates the type string for Binary body extraction.
+///
+/// # Arguments
+/// * `body_type` - Input `body_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn bytes_extractor(_body_type: &str) -> String {
     "web::Bytes".to_string()
 }
@@ -91,6 +146,12 @@ pub fn bytes_extractor(_body_type: &str) -> String {
 ///
 /// If any requirement group is anonymous (`{}`), no extractor is generated.
 /// Otherwise, the first scheme in the first non-empty group is used.
+///
+/// # Arguments
+/// * `requirements` - Input `requirements` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn security_extractor(requirements: &[SecurityRequirementGroup]) -> String {
     if requirements.is_empty() {
         return "".to_string();
@@ -152,6 +213,13 @@ pub fn security_extractor(requirements: &[SecurityRequirementGroup]) -> String {
 }
 
 /// Helper to generate `web::ReqData<security::TYPE<SCOPES>>`
+///
+/// # Arguments
+/// * `req` - Input `req` parameter.
+/// * `type_name` - Input `type_name` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn generate_typed_req_data(req: &SecurityRequirement, type_name: &str) -> String {
     let var_name = if type_name == "Authenticated" {
         "_auth".to_string()

@@ -55,6 +55,12 @@ pub fn add_import(source: &str, import_statement: &str) -> AppResult<String> {
 }
 
 /// Finds the byte offset after any leading inner attributes (`#![...]`) and module doc comments (`//!`).
+///
+/// # Arguments
+/// * `file` - Input `file` parameter.
+///
+/// # Returns
+/// Resulting `Option<usize>` value.
 fn find_module_header_end(file: &SourceFile) -> Option<usize> {
     let mut end_pos: Option<usize> = None;
 

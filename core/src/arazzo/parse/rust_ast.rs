@@ -196,6 +196,17 @@ pub fn extract_workflows_from_rust(code: &str) -> AppResult<Vec<Workflow>> {
     Ok(workflows)
 }
 
+/// Executes `extract_workflow_from_fn` (extract workflow from fn).
+///
+/// # Arguments
+/// * `func` - Input `func` parameter.
+/// * `struct_schemas` - Input `struct_schemas` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Option<Workflow>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn extract_workflow_from_fn(
     func: &ast::Fn,
     struct_schemas: &BTreeMap<String, ParsedSchema>,
@@ -286,6 +297,17 @@ fn extract_workflow_from_fn(
     }))
 }
 
+/// Executes `extract_steps_from_fn_body` (extract steps from fn body).
+///
+/// # Arguments
+/// * `fn_text` - Input `fn_text` parameter.
+/// * `workflow_id` - Input `workflow_id` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<WorkflowStep>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn extract_steps_from_fn_body(fn_text: &str, workflow_id: &str) -> AppResult<Vec<WorkflowStep>> {
     let mut steps = Vec::new();
     let mut current_step_id: Option<String> = None;
@@ -516,6 +538,13 @@ fn extract_steps_from_fn_body(fn_text: &str, workflow_id: &str) -> AppResult<Vec
     Ok(steps)
 }
 
+/// Executes `split_csv_non_empty` (split csv non empty).
+///
+/// # Arguments
+/// * `raw` - Input `raw` parameter.
+///
+/// # Returns
+/// Resulting `Vec<String>` value.
 fn split_csv_non_empty(raw: &str) -> Vec<String> {
     let mut out = Vec::new();
     for part in raw.split(',') {
@@ -527,6 +556,13 @@ fn split_csv_non_empty(raw: &str) -> Vec<String> {
     out
 }
 
+/// Executes `extract_callee_name` (extract callee name).
+///
+/// # Arguments
+/// * `rhs` - Input `rhs` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 fn extract_callee_name(rhs: &str) -> Option<String> {
     let before_paren = rhs.split('(').next().unwrap_or("").trim();
     let last_seg = before_paren.rsplit(['.', ':']).next().unwrap_or("").trim();
@@ -537,6 +573,13 @@ fn extract_callee_name(rhs: &str) -> Option<String> {
     }
 }
 
+/// Executes `extract_inline_call_params` (extract inline call params).
+///
+/// # Arguments
+/// * `rhs` - Input `rhs` parameter.
+///
+/// # Returns
+/// Resulting `Vec<ParameterOrReusable>` value.
 fn extract_inline_call_params(rhs: &str) -> Vec<ParameterOrReusable> {
     let mut params = Vec::new();
     if let Some((_, after_open)) = rhs.split_once('(') {
@@ -576,6 +619,13 @@ fn extract_inline_call_params(rhs: &str) -> Vec<ParameterOrReusable> {
     params
 }
 
+/// Executes `struct_to_json_schema` (struct to json schema).
+///
+/// # Arguments
+/// * `s` - Input `s` parameter.
+///
+/// # Returns
+/// Resulting `JsonValue` value.
 fn struct_to_json_schema(s: &ParsedStruct) -> JsonValue {
     let mut props = Map::new();
     let mut req = Vec::new();

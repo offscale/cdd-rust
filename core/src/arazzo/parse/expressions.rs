@@ -368,6 +368,13 @@ pub fn runtime_expression_to_rust(expr: &RuntimeExpression) -> AppResult<String>
     }
 }
 
+/// Executes `split_pointer` (split pointer).
+///
+/// # Arguments
+/// * `tail` - Input `tail` parameter.
+///
+/// # Returns
+/// Resulting `(String, Option<String>)` value.
 fn split_pointer(tail: &str) -> (String, Option<String>) {
     match tail.split_once('#') {
         Some((head, ptr)) => {
@@ -382,6 +389,13 @@ fn split_pointer(tail: &str) -> (String, Option<String>) {
     }
 }
 
+/// Executes `parse_http_source` (parse http source).
+///
+/// # Arguments
+/// * `rest` - Input `rest` parameter.
+///
+/// # Returns
+/// Resulting `HttpMessageSource` value.
 fn parse_http_source(rest: &str) -> HttpMessageSource {
     if let Some(h) = rest.strip_prefix("header.") {
         return HttpMessageSource::Header(h.to_string());
@@ -397,6 +411,13 @@ fn parse_http_source(rest: &str) -> HttpMessageSource {
     HttpMessageSource::Body(ptr)
 }
 
+/// Executes `parse_async_source` (parse async source).
+///
+/// # Arguments
+/// * `rest` - Input `rest` parameter.
+///
+/// # Returns
+/// Resulting `AsyncMessageSource` value.
 fn parse_async_source(rest: &str) -> AsyncMessageSource {
     if let Some(h) = rest.strip_prefix("header.") {
         return AsyncMessageSource::HeaderToken(h.to_string());

@@ -10,6 +10,12 @@ use crate::openapi::parse::models::{
 };
 
 /// Converts a string to PascalCase.
+///
+/// # Arguments
+/// * `s` - Input `s` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn to_pascal_case(s: &str) -> String {
     s.split(|c: char| !c.is_alphanumeric())
         .filter(|part| !part.is_empty())
@@ -22,6 +28,12 @@ pub fn to_pascal_case(s: &str) -> String {
 }
 
 /// Converts a string to snake_case.
+///
+/// # Arguments
+/// * `s` - Input `s` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn to_snake_case(s: &str) -> String {
     let mut result = String::new();
     let chars: Vec<char> = s.chars().collect();
@@ -62,6 +74,12 @@ pub fn to_snake_case(s: &str) -> String {
 ///
 /// Note: Constants (non-expressions) are converted to string literals.
 /// Templates with embedded `{...}` expressions are emitted as `format!` calls.
+///
+/// # Arguments
+/// * `expr_obj` - Input `expr_obj` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn resolve_runtime_expr(expr_obj: &RuntimeExpression) -> String {
     let expr = expr_obj.as_str();
 
@@ -101,6 +119,13 @@ pub fn resolve_runtime_expr(expr_obj: &RuntimeExpression) -> String {
     )
 }
 
+/// Executes `resolve_runtime_expr_inner` (resolve runtime expr inner).
+///
+/// # Arguments
+/// * `expr` - Input `expr` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn resolve_runtime_expr_inner(expr: &str) -> String {
     match expr {
         "$url" => return "req.uri().to_string()".to_string(),
@@ -112,6 +137,13 @@ fn resolve_runtime_expr_inner(expr: &str) -> String {
     resolve_compound_expression(expr)
 }
 
+/// Executes `resolve_compound_expression` (resolve compound expression).
+///
+/// # Arguments
+/// * `expr` - Input `expr` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn resolve_compound_expression(expr: &str) -> String {
     // $request. path | query | header | body
     if let Some(rest) = expr.strip_prefix("$request.") {
@@ -157,14 +189,35 @@ fn resolve_compound_expression(expr: &str) -> String {
     format!("/* Unresolved expr: {} */", expr)
 }
 
+/// Executes `escape_format_literal` (escape format literal).
+///
+/// # Arguments
+/// * `input` - Input `input` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn escape_format_literal(input: &str) -> String {
     input.replace('{', "{{").replace('}', "}}")
 }
 
+/// Executes `escape_rust_string` (escape rust string).
+///
+/// # Arguments
+/// * `input` - Input `input` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn escape_rust_string(input: &str) -> String {
     input.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+/// Executes `quote_rust_string` (quote rust string).
+///
+/// # Arguments
+/// * `input` - Input `input` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn quote_rust_string(input: &str) -> String {
     format!("\"{}\"", escape_rust_string(input))
 }
@@ -176,6 +229,13 @@ fn quote_rust_string(input: &str) -> String {
 /// - Numeric segments (`/0`) become array indices (`[0]`)
 /// - String segments (`/foo`) become fields (`.foo`) in snake_case
 /// - Escaped characters (`~1` -> `/`, `~0` -> `~`) are decoded.
+///
+/// # Arguments
+/// * `root_var` - Input `root_var` parameter.
+/// * `pointer` - Input `pointer` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn resolve_json_pointer(root_var: &str, pointer: &str) -> String {
     if pointer.is_empty() {
         return root_var.to_string();

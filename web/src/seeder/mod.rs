@@ -50,6 +50,15 @@ pub fn fake_user_factory() -> CreateUsers {
 ///
 /// Topologically generates records (e.g. Users) and caches their IDs in the EntityPool.
 /// Resolves dependencies (if any) before generating children.
+///
+/// # Arguments
+/// * `user_dao` - Input `user_dao` parameter.
+///
+/// # Returns
+/// Resulting `Result<EntityPool, ServerError>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub async fn seed_database(user_dao: Arc<dyn UserDao>) -> Result<EntityPool, ServerError> {
     let mut pool = EntityPool::new();
 

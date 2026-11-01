@@ -7,6 +7,13 @@
 use crate::openapi::parse::ParsedRoute;
 
 /// Generates the `.route(..., method(...))` segment for an Axum Router.
+///
+/// # Arguments
+/// * `route` - Input `route` parameter.
+/// * `handler_full_path` - Input `handler_full_path` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn route_registration_statement(route: &ParsedRoute, handler_full_path: &str) -> String {
     // Convert OpenAPI path format /path/{param} to Axum format /path/:param
     let mut axum_path = route.path.clone();

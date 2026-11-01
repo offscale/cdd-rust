@@ -85,6 +85,16 @@ pub fn run_to_arazzo(args: &ToArazzoArgs) -> AppResult<()> {
     Ok(())
 }
 
+/// Recursively scans a directory of Rust source files to extract an [`ArazzoDocument`].
+///
+/// # Arguments
+/// * `args` - CLI arguments specifying the input directory and document metadata overrides.
+///
+/// # Returns
+/// The extracted [`ArazzoDocument`].
+///
+/// # Errors
+/// Returns [`AppError`] if no workflows are found or if reading/parsing a source file fails.
 fn extract_arazzo_from_directory(args: &ToArazzoArgs) -> AppResult<ArazzoDocument> {
     let mut rust_files = Vec::new();
     for entry in WalkDir::new(&args.input).into_iter().flatten() {

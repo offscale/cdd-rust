@@ -59,6 +59,10 @@ pub fn extract_attributes(node: &SyntaxNode) -> AttrInfo {
 }
 
 /// Parses the non-trivia tokens of a `#[serde(...)]` or `#[oai(...)]` [`ast::TokenTree`].
+///
+/// # Arguments
+/// * `tt` - Input `tt` parameter.
+/// * `info` - Input `info` parameter.
 fn parse_attribute_token_tree(tt: &ast::TokenTree, info: &mut AttrInfo) {
     let tokens: Vec<SyntaxToken> = tt
         .syntax()
@@ -107,6 +111,13 @@ fn parse_attribute_token_tree(tt: &ast::TokenTree, info: &mut AttrInfo) {
 }
 
 /// Extracts the unquoted string literal from a `key = "value"` token sequence starting at `key_idx`.
+///
+/// # Arguments
+/// * `tokens` - Input `tokens` parameter.
+/// * `key_idx` - Input `key_idx` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 fn extract_assigned_string_literal(tokens: &[SyntaxToken], key_idx: usize) -> Option<String> {
     let eq_tok = tokens.get(key_idx + 1)?;
     let val_tok = tokens.get(key_idx + 2)?;

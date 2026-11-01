@@ -28,6 +28,12 @@ pub enum RenameRule {
 
 impl RenameRule {
     /// Parses a serde `rename_all` value into a known rule.
+    ///
+    /// # Arguments
+    /// * `raw` - Input `raw` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Option<Self>` value.
     pub fn parse(raw: &str) -> Option<Self> {
         let normalized = raw.trim().to_ascii_lowercase();
         match normalized.as_str() {
@@ -44,6 +50,12 @@ impl RenameRule {
     }
 
     /// Applies the rename rule to a Rust identifier.
+    ///
+    /// # Arguments
+    /// * `input` - Input `input` parameter.
+    ///
+    /// # Returns
+    /// Resulting `String` value.
     pub fn apply(&self, input: &str) -> String {
         match self {
             Self::Lowercase => input.to_ascii_lowercase(),
@@ -88,6 +100,13 @@ impl RenameRule {
     }
 }
 
+/// Executes `split_words` (split words).
+///
+/// # Arguments
+/// * `input` - Input `input` parameter.
+///
+/// # Returns
+/// Resulting `Vec<String>` value.
 fn split_words(input: &str) -> Vec<String> {
     let mut words = Vec::new();
     let mut current = String::new();
@@ -120,6 +139,13 @@ fn split_words(input: &str) -> Vec<String> {
     words
 }
 
+/// Executes `capitalize` (capitalize).
+///
+/// # Arguments
+/// * `word` - Input `word` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn capitalize(word: &str) -> String {
     let mut chars = word.chars();
     let Some(first) = chars.next() else {

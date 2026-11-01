@@ -37,6 +37,14 @@ pub struct ToOpenApiArgs {
 }
 
 /// Extracts `(name, version)` package metadata from a `Cargo.toml` file in `input` or its ancestor directory.
+///
+/// # Arguments
+/// * `input` - Input `input` parameter.
+/// * `title_override` - Input `title_override` parameter.
+/// * `version_override` - Input `version_override` parameter.
+///
+/// # Returns
+/// Resulting `(String, String)` value.
 fn resolve_package_metadata(
     input: &Path,
     title_override: Option<&str>,
@@ -77,6 +85,12 @@ fn resolve_package_metadata(
 }
 
 /// Parses `name` and `version` under `[package]` from `Cargo.toml` content.
+///
+/// # Arguments
+/// * `content` - Input `content` parameter.
+///
+/// # Returns
+/// Resulting `(Option<String>, Option<String>)` value.
 fn parse_cargo_toml_metadata(content: &str) -> (Option<String>, Option<String>) {
     let mut in_package = false;
     let mut name = None;
@@ -106,6 +120,16 @@ fn parse_cargo_toml_metadata(content: &str) -> (Option<String>, Option<String>) 
 
 /// Dispatches route extraction based on [`TargetMode`], falling back to scanning all
 /// supported route formats if the primary target parser returns no routes for a file.
+///
+/// # Arguments
+/// * `code` - Input `code` parameter.
+/// * `target` - Input `target` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<ParsedRoute>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn parse_routes_for_target(code: &str, target: &TargetMode) -> AppResult<Vec<ParsedRoute>> {
     let mut routes = match target {
         TargetMode::ServerActix => parse_actix_routes(code)?,
@@ -203,6 +227,16 @@ pub fn run_to_openapi(args: &ToOpenApiArgs, target: &TargetMode) -> AppResult<()
 }
 
 /// Serializes the OpenAPI document to JSON or YAML depending on extension.
+///
+/// # Arguments
+/// * `doc` - Input `doc` parameter.
+/// * `ext` - Input `ext` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<String>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn serialize_doc(doc: &serde_json::Value, ext: &str) -> AppResult<String> {
     if ext == "json" {
         Ok(serde_json::to_string_pretty(doc)?)

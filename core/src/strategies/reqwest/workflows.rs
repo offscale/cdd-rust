@@ -172,6 +172,10 @@ pub struct {} {{
 }
 
 /// Emits the standard Arazzo document metadata header comments (`@ARAZZO_VERSION`, `@ARAZZO_TITLE`, etc.).
+///
+/// # Arguments
+/// * `out` - Input `out` parameter.
+/// * `doc` - Input `doc` parameter.
 pub(crate) fn emit_arazzo_header_comments(out: &mut String, doc: &ArazzoDocument) {
     out.push_str(&format!("/// @ARAZZO_VERSION: {}\n", doc.arazzo));
     if let Some(self_uri) = &doc.self_uri {
@@ -323,6 +327,12 @@ pub fn emit_workflow_tests(doc: &ArazzoDocument, crate_name: &str) -> AppResult<
 }
 
 /// Formats a [`RuntimeExpressionOrSelector`] into its canonical runtime expression string.
+///
+/// # Arguments
+/// * `val` - Input `val` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub(crate) fn format_expr_or_selector(val: &RuntimeExpressionOrSelector) -> String {
     match val {
         RuntimeExpressionOrSelector::Expression(expr) => expr.as_str().to_string(),
@@ -333,6 +343,11 @@ pub(crate) fn format_expr_or_selector(val: &RuntimeExpressionOrSelector) -> Stri
 }
 
 /// Emits workflow-level doc annotations (`@ARAZZO_WORKFLOW_ID`, `@ARAZZO_DEPENDS_ON`, `@ARAZZO_WORKFLOW_OUTPUT`).
+///
+/// # Arguments
+/// * `out` - Input `out` parameter.
+/// * `wf` - Input `wf` parameter.
+/// * `indent` - Input `indent` parameter.
 pub(crate) fn emit_workflow_doc_annotations(out: &mut String, wf: &Workflow, indent: &str) {
     if let Some(summary) = &wf.summary {
         out.push_str(&format!("{indent}/// {summary}\n"));
@@ -362,6 +377,11 @@ pub(crate) fn emit_workflow_doc_annotations(out: &mut String, wf: &Workflow, ind
 }
 
 /// Emits step-level comment annotations (`@ARAZZO_STEP_ID`, `@ARAZZO_STEP_TARGET`, `@ARAZZO_STEP_PARAM`, `@ARAZZO_STEP_DEPENDS_ON`).
+///
+/// # Arguments
+/// * `out` - Input `out` parameter.
+/// * `step` - Input `step` parameter.
+/// * `indent` - Input `indent` parameter.
 pub(crate) fn emit_step_doc_annotations(out: &mut String, step: &WorkflowStep, indent: &str) {
     out.push_str(&format!("{indent}// @ARAZZO_STEP_ID: {}\n", step.step_id));
     match &step.target {
@@ -407,6 +427,12 @@ pub(crate) fn emit_step_doc_annotations(out: &mut String, step: &WorkflowStep, i
     }
 }
 
+/// Executes `emit_workflow_method` (emit workflow method).
+///
+/// # Arguments
+/// * `out` - Input `out` parameter.
+/// * `wf` - Input `wf` parameter.
+/// * `linked_specs` - Input `linked_specs` parameter.
 fn emit_workflow_method(
     out: &mut String,
     wf: &Workflow,
@@ -464,6 +490,13 @@ fn emit_workflow_method(
     out.push_str("    }\n\n");
 }
 
+/// Executes `emit_step_execution` (emit step execution).
+///
+/// # Arguments
+/// * `out` - Input `out` parameter.
+/// * `wf` - Input `wf` parameter.
+/// * `step` - Input `step` parameter.
+/// * `linked_specs` - Input `linked_specs` parameter.
 fn emit_step_execution(
     out: &mut String,
     wf: &Workflow,
@@ -803,6 +836,11 @@ fn emit_step_execution(
     }
 }
 
+/// Executes `emit_criterion_check` (emit criterion check).
+///
+/// # Arguments
+/// * `out` - Input `out` parameter.
+/// * `crit` - Input `crit` parameter.
 fn emit_criterion_check(out: &mut String, crit: &Criterion) {
     if let Some(ctx) = &crit.context {
         out.push_str(&format!(
@@ -829,6 +867,13 @@ fn emit_criterion_check(out: &mut String, crit: &Criterion) {
     }
 }
 
+/// Executes `emit_parsed_schema_struct` (emit parsed schema struct).
+///
+/// # Arguments
+/// * `out` - Input `out` parameter.
+/// * `fallback_name` - Input `fallback_name` parameter.
+/// * `s` - Input `s` parameter.
+/// * `comp_name` - Input `comp_name` parameter.
 fn emit_parsed_schema_struct(
     out: &mut String,
     fallback_name: &str,
@@ -854,6 +899,13 @@ fn emit_parsed_schema_struct(
     out.push_str("}\n\n");
 }
 
+/// Executes `map_model_field_type` (map model field type).
+///
+/// # Arguments
+/// * `ty` - Input `ty` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn map_model_field_type(ty: &str) -> String {
     ty.replace("Uuid", "String")
         .replace("DateTime<Utc>", "String")

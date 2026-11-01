@@ -8,6 +8,256 @@
 
 use serde_json::{json, Map, Value};
 
+/// Upgrades a Google Discovery REST description document (`discovery#restDescription`)
+/// into a canonical OpenAPI 3.2.0 document in-place.
+///
+/// # Arguments
+/// * `value` - Mutable JSON value representing the parsed specification document.
+pub(crate) fn upgrade_google_discovery_to_openapi3(value: &mut Value) {
+    let Some(root) = value.as_object_mut() else {
+        return;
+    };
+    let is_discovery = root.contains_key("discoveryVersion")
+        || root.get("kind").and_then(Value::as_str) == Some("discovery#restDescription");
+    if !is_discovery {
+        return;
+    }
+
+    let title = root
+        .remove("title")
+        .or_else(|| root.remove("name"))
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_else(|| "Discovery API".to_string());
+    let version = root
+        .remove("version")
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_else(|| "v1".to_string());
+    let description = root
+        .remove("description")
+        .and_then(|v| v.as_str().map(str::to_string));
+
+    let root_url = root
+        .remove("rootUrl")
+        .and_then(|v| v.as_str().map(str::to_string));
+    let service_path = root
+        .remove("servicePath")
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_default();
+
+    let schemas = root.remove("schemas");
+    let resources = root.remove("resources");
+    let top_methods = root.remove("methods");
+    root.remove("discoveryVersion");
+    root.remove("kind");
+    root.remove("name");
+    root.remove("id");
+    root.remove("protocol");
+    root.remove("baseUrl");
+    root.remove("basePath");
+    root.remove("batchPath");
+    root.remove("parameters");
+    root.remove("auth");
+
+    root.insert("openapi".to_string(), Value::String("3.2.0".to_string()));
+    let mut info = Map::new();
+    info.insert("title".to_string(), Value::String(title));
+    info.insert("version".to_string(), Value::String(version));
+    if let Some(desc) = description {
+        info.insert("description".to_string(), Value::String(desc));
+    }
+    root.insert("info".to_string(), Value::Object(info));
+
+    if let Some(r_url) = root_url {
+        let base = r_url.trim_end_matches('/');
+        let sp = service_path.trim_matches('/');
+        let full_url = if sp.is_empty() {
+            base.to_string()
+        } else {
+            format!("{base}/{sp}")
+        };
+        root.insert("servers".to_string(), json!([{ "url": full_url }]));
+    }
+
+    if let Some(mut s_val) = schemas {
+        rewrite_discovery_refs(&mut s_val);
+        root.insert("components".to_string(), json!({ "schemas": s_val }));
+    }
+
+    let mut paths: std::collections::BTreeMap<String, Map<String, Value>> =
+        std::collections::BTreeMap::new();
+    if let Some(Value::Object(m_map)) = top_methods {
+        collect_discovery_methods(&m_map, &mut paths);
+    }
+    if let Some(Value::Object(res_map)) = resources {
+        collect_discovery_resources(&res_map, &mut paths);
+    }
+    let paths_val: Map<String, Value> = paths
+        .into_iter()
+        .map(|(k, v)| (k, Value::Object(v)))
+        .collect();
+    root.insert("paths".to_string(), Value::Object(paths_val));
+}
+
+/// Recursively rewrites bare Google Discovery `$ref` identifiers into `#/components/schemas/<Name>`.
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+fn rewrite_discovery_refs(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            if let Some(Value::String(r)) = map.get_mut("$ref") {
+                if !r.starts_with('#') && !r.contains('/') {
+                    *r = format!("#/components/schemas/{r}");
+                }
+            }
+            for v in map.values_mut() {
+                rewrite_discovery_refs(v);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                rewrite_discovery_refs(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Recursively traverses Google Discovery `resources` blocks to extract operations into `paths`.
+///
+/// # Arguments
+/// * `res_map` - Input `res_map` parameter.
+/// * `paths` - Input `paths` parameter.
+fn collect_discovery_resources(
+    res_map: &Map<String, Value>,
+    paths: &mut std::collections::BTreeMap<String, Map<String, Value>>,
+) {
+    for res_val in res_map.values() {
+        if let Some(res_obj) = res_val.as_object() {
+            if let Some(Value::Object(methods)) = res_obj.get("methods") {
+                collect_discovery_methods(methods, paths);
+            }
+            if let Some(Value::Object(sub_res)) = res_obj.get("resources") {
+                collect_discovery_resources(sub_res, paths);
+            }
+        }
+    }
+}
+
+/// Converts a Google Discovery `methods` map into OpenAPI Path Item operations.
+///
+/// # Arguments
+/// * `methods` - Input `methods` parameter.
+/// * `paths` - Input `paths` parameter.
+fn collect_discovery_methods(
+    methods: &Map<String, Value>,
+    paths: &mut std::collections::BTreeMap<String, Map<String, Value>>,
+) {
+    for (method_key, method_val) in methods {
+        let Some(m_obj) = method_val.as_object() else {
+            continue;
+        };
+        let raw_path = m_obj
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or(method_key.as_str());
+        let path_key = format!("/{}", raw_path.trim_start_matches('/'));
+        let verb = m_obj
+            .get("httpMethod")
+            .and_then(Value::as_str)
+            .unwrap_or("GET")
+            .to_ascii_lowercase();
+        let op_id = m_obj
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or(method_key.as_str())
+            .replace('.', "_");
+
+        let mut op = Map::new();
+        op.insert("operationId".to_string(), Value::String(op_id));
+        if let Some(Value::String(desc)) = m_obj.get("description") {
+            op.insert("description".to_string(), Value::String(desc.clone()));
+        }
+
+        if let Some(Value::Object(params_map)) = m_obj.get("parameters") {
+            let mut params_arr = Vec::new();
+            for (p_name, p_val) in params_map {
+                if let Some(p_obj) = p_val.as_object() {
+                    let loc = p_obj
+                        .get("location")
+                        .and_then(Value::as_str)
+                        .unwrap_or("query");
+                    let required = loc == "path"
+                        || p_obj
+                            .get("required")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false);
+                    let p_type = p_obj
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .unwrap_or("string");
+                    params_arr.push(json!({
+                        "name": p_name,
+                        "in": loc,
+                        "required": required,
+                        "schema": { "type": p_type }
+                    }));
+                }
+            }
+            if !params_arr.is_empty() {
+                op.insert("parameters".to_string(), Value::Array(params_arr));
+            }
+        }
+
+        if let Some(req_ref) = m_obj
+            .get("request")
+            .and_then(|r| r.get("$ref"))
+            .and_then(Value::as_str)
+        {
+            op.insert(
+                "requestBody".to_string(),
+                json!({
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": { "$ref": format!("#/components/schemas/{req_ref}") }
+                        }
+                    }
+                }),
+            );
+        }
+
+        let resp_val = if let Some(resp_ref) = m_obj
+            .get("response")
+            .and_then(|r| r.get("$ref"))
+            .and_then(Value::as_str)
+        {
+            json!({
+                "200": {
+                    "description": "OK",
+                    "content": {
+                        "application/json": {
+                            "schema": { "$ref": format!("#/components/schemas/{resp_ref}") }
+                        }
+                    }
+                }
+            })
+        } else {
+            json!({
+                "200": {
+                    "description": "OK"
+                }
+            })
+        };
+        op.insert("responses".to_string(), resp_val);
+
+        paths
+            .entry(path_key)
+            .or_default()
+            .insert(verb, Value::Object(op));
+    }
+}
+
 /// Normalizes boolean schemas (`true` / `false`) into object schemas.
 ///
 /// OpenAPI 3.1+ permits boolean schemas anywhere a Schema Object is accepted.
@@ -16,6 +266,9 @@ use serde_json::{json, Map, Value};
 ///
 /// - `true` becomes `{}` (accepts any instance)
 /// - `false` becomes an unsatisfiable object schema
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
 pub(crate) fn normalize_boolean_schemas(value: &mut Value) {
     if let Some(components) = value.get_mut("components").and_then(|c| c.as_object_mut()) {
         if let Some(schemas) = components
@@ -38,6 +291,9 @@ pub(crate) fn normalize_boolean_schemas(value: &mut Value) {
 ///
 /// This helper rewrites `nullable` and `x-nullable` into a `type` union where possible,
 /// or wraps the schema in `anyOf` when no explicit `type` is present.
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
 pub(crate) fn normalize_nullable_schemas(value: &mut Value) {
     if let Value::Object(map) = value {
         if let Some(replacement) = apply_nullable_flag(map) {
@@ -64,6 +320,9 @@ pub(crate) fn normalize_nullable_schemas(value: &mut Value) {
 ///
 /// This is scoped to schema objects to preserve compatibility with parsers that
 /// do not yet recognize the `const` keyword.
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
 pub(crate) fn normalize_const_schemas(value: &mut Value) {
     match value {
         Value::Object(map) => {
@@ -93,6 +352,13 @@ pub(crate) fn normalize_const_schemas(value: &mut Value) {
     }
 }
 
+/// Infers a JSON Schema `type` string from a JSON literal value.
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `&'static str` value.
 fn infer_schema_type(value: &Value) -> &'static str {
     match value {
         Value::String(_) => "string",
@@ -110,6 +376,10 @@ fn infer_schema_type(value: &Value) -> &'static str {
     }
 }
 
+/// Traverses an OpenAPI JSON tree and normalizes boolean schemas inside `schema`, `itemSchema`, and `contentSchema` fields.
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
 fn normalize_schema_fields(value: &mut Value) {
     match value {
         Value::Object(map) => {
@@ -129,6 +399,10 @@ fn normalize_schema_fields(value: &mut Value) {
     }
 }
 
+/// Normalizes a single schema node (converting booleans to object schemas and recursing into subschemas).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
 fn normalize_schema_node(value: &mut Value) {
     match value {
         Value::Bool(flag) => {
@@ -218,6 +492,13 @@ fn normalize_schema_node(value: &mut Value) {
     }
 }
 
+/// Converts a boolean schema literal (`true` or `false`) into its equivalent object schema representation.
+///
+/// # Arguments
+/// * `flag` - Input `flag` parameter.
+///
+/// # Returns
+/// Resulting `Value` value.
 fn bool_schema_replacement(flag: bool) -> Value {
     if flag {
         Value::Object(Map::new())
@@ -230,6 +511,13 @@ fn bool_schema_replacement(flag: bool) -> Value {
     }
 }
 
+/// Rewrites `nullable: true` or `x-nullable: true` on a schema map into a `type` union or `anyOf` wrapper.
+///
+/// # Arguments
+/// * `map` - Input `map` parameter.
+///
+/// # Returns
+/// Resulting `Option<Value>` value.
 fn apply_nullable_flag(map: &mut Map<String, Value>) -> Option<Value> {
     let nullable = map
         .get("nullable")
@@ -420,5 +708,105 @@ mod tests {
         });
         normalize_nullable_schemas(&mut x_null);
         assert_eq!(x_null["type"], json!("null"));
+
+        let mut non_obj = json!("not an object");
+        upgrade_google_discovery_to_openapi3(&mut non_obj);
+        assert_eq!(non_obj, json!("not an object"));
+
+        let mut discovery = json!({
+            "discoveryVersion": "v1",
+            "kind": "discovery#restDescription",
+            "name": "petstore",
+            "version": "v1",
+            "title": "Petstore Discovery",
+            "description": "Google Discovery Petstore",
+            "rootUrl": "https://petstore.googleapis.com/",
+            "servicePath": "v1/",
+            "schemas": {
+                "Pet": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string" },
+                        "friend": { "$ref": "Pet" },
+                        "tags": { "type": "array", "items": [{ "$ref": "Pet" }, { "$ref": "#/components/schemas/Existing" }] }
+                    }
+                }
+            },
+            "methods": {
+                "ping": {
+                    "path": "ping",
+                    "httpMethod": "GET",
+                    "description": "Health ping"
+                },
+                "invalid": "not_an_object"
+            },
+            "resources": {
+                "pets": {
+                    "methods": {
+                        "create": {
+                            "id": "petstore.pets.create",
+                            "path": "/pets/{petId}",
+                            "httpMethod": "POST",
+                            "parameters": {
+                                "petId": { "type": "string", "location": "path", "required": true },
+                                "filter": { "type": "string", "location": "query" },
+                                "ignored": "not_an_object"
+                            },
+                            "request": { "$ref": "Pet" },
+                            "response": { "$ref": "Pet" }
+                        }
+                    },
+                    "resources": {
+                        "sub": {
+                            "methods": {
+                                "list": {}
+                            }
+                        },
+                        "empty_sub": {}
+                    }
+                },
+                "bad_res": "not_an_object"
+            }
+        });
+        upgrade_google_discovery_to_openapi3(&mut discovery);
+        assert_eq!(discovery["openapi"], json!("3.2.0"));
+        assert_eq!(discovery["info"]["title"], json!("Petstore Discovery"));
+        assert_eq!(
+            discovery["servers"][0]["url"],
+            json!("https://petstore.googleapis.com/v1")
+        );
+        assert_eq!(
+            discovery["components"]["schemas"]["Pet"]["properties"]["friend"]["$ref"],
+            json!("#/components/schemas/Pet")
+        );
+        assert!(discovery["paths"]["/pets/{petId}"]["post"].is_object());
+        assert!(discovery["paths"]["/ping"]["get"].is_object());
+
+        let mut discovery_min = json!({
+            "kind": "discovery#restDescription",
+            "rootUrl": "https://example.com/"
+        });
+        upgrade_google_discovery_to_openapi3(&mut discovery_min);
+        assert_eq!(discovery_min["info"]["title"], json!("Discovery API"));
+        assert_eq!(
+            discovery_min["servers"][0]["url"],
+            json!("https://example.com")
+        );
+
+        let mut discovery_name_only = json!({
+            "discoveryVersion": "v1",
+            "name": "my_service",
+            "schemas": {
+                "Ext": { "$ref": "folder/Schema" }
+            },
+            "methods": {
+                "empty_params": {
+                    "parameters": {}
+                }
+            }
+        });
+        upgrade_google_discovery_to_openapi3(&mut discovery_name_only);
+        assert_eq!(discovery_name_only["info"]["title"], json!("my_service"));
+        assert!(discovery_name_only.get("servers").is_none());
     }
 }

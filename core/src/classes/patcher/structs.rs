@@ -11,6 +11,17 @@ use ra_ap_syntax::{
 };
 
 /// Inserts a new field into an existing struct in the source code.
+///
+/// # Arguments
+/// * `source` - Input `source` parameter.
+/// * `struct_name` - Input `struct_name` parameter.
+/// * `field_node` - Input `field_node` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<String>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn add_struct_field(
     source: &str,
     struct_name: &str,
@@ -81,6 +92,18 @@ pub fn add_struct_field(
 }
 
 /// Modifies the type of an existing field in a struct.
+///
+/// # Arguments
+/// * `source` - Input `source` parameter.
+/// * `struct_name` - Input `struct_name` parameter.
+/// * `field_name` - Input `field_name` parameter.
+/// * `new_type` - Input `new_type` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<String>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn modify_struct_field_type(
     source: &str,
     struct_name: &str,
@@ -127,6 +150,17 @@ pub fn modify_struct_field_type(
 }
 
 /// Adds a trait to the derive attribute of a struct.
+///
+/// # Arguments
+/// * `source` - Input `source` parameter.
+/// * `struct_name` - Input `struct_name` parameter.
+/// * `derive_trait` - Input `derive_trait` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<String>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn add_derive(source: &str, struct_name: &str, derive_trait: &str) -> AppResult<String> {
     let parse = SourceFile::parse(source, Edition::Edition2021);
     let file = parse.tree();
@@ -187,6 +221,17 @@ pub fn add_derive(source: &str, struct_name: &str, derive_trait: &str) -> AppRes
 }
 
 /// Adds an attribute line (e.g., `#[serde(...)]`) to a struct.
+///
+/// # Arguments
+/// * `source` - Input `source` parameter.
+/// * `struct_name` - Input `struct_name` parameter.
+/// * `attribute` - Input `attribute` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<String>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn add_struct_attribute(source: &str, struct_name: &str, attribute: &str) -> AppResult<String> {
     let parse = SourceFile::parse(source, Edition::Edition2021);
     let file = parse.tree();

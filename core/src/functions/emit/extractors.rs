@@ -101,10 +101,24 @@ pub fn generate_query_struct(route: &ParsedRoute) -> Option<GeneratedQueryStruct
     })
 }
 
+/// Executes `query_struct_name` (query struct name).
+///
+/// # Arguments
+/// * `route` - Input `route` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn query_struct_name(route: &ParsedRoute) -> String {
     format!("{}Query", to_pascal_case(&route.handler_name))
 }
 
+/// Executes `sanitize_query_field_name` (sanitize query field name).
+///
+/// # Arguments
+/// * `raw` - Input `raw` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn sanitize_query_field_name(raw: &str) -> String {
     let mut out = String::new();
     let mut prev_underscore = false;
@@ -139,6 +153,14 @@ fn sanitize_query_field_name(raw: &str) -> String {
     out
 }
 
+/// Executes `dedupe_field_name` (dedupe field name).
+///
+/// # Arguments
+/// * `base` - Input `base` parameter.
+/// * `used` - Input `used` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn dedupe_field_name(base: String, used: &mut HashSet<String>) -> String {
     if used.insert(base.clone()) {
         return base;
@@ -153,14 +175,35 @@ fn dedupe_field_name(base: String, used: &mut HashSet<String>) -> String {
     }
 }
 
+/// Executes `escape_rust_string` (escape rust string).
+///
+/// # Arguments
+/// * `input` - Input `input` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn escape_rust_string(input: &str) -> String {
     input.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+/// Executes `is_rust_keyword` (is rust keyword).
+///
+/// # Arguments
+/// * `ident` - Input `ident` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_rust_keyword(ident: &str) -> bool {
     crate::openapi::parse::models::RustIdent::is_keyword(ident)
 }
 
+/// Executes `build_handler_docs` (build handler docs).
+///
+/// # Arguments
+/// * `route` - Input `route` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn build_handler_docs(route: &ParsedRoute) -> String {
     let mut docs = String::new();
 

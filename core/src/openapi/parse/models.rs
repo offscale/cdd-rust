@@ -736,6 +736,16 @@ pub struct ExampleValue {
 }
 
 impl ExampleValue {
+    /// Executes `new` (new).
+    ///
+    /// # Arguments
+    /// * `kind` - Input `kind` parameter.
+    /// * `value` - Input `value` parameter.
+    /// * `summary` - Input `summary` parameter.
+    /// * `description` - Input `description` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Self` value.
     fn new(
         kind: ExampleKind,
         value: JsonValue,
@@ -940,6 +950,13 @@ pub enum ParamSource {
     Body,
 }
 
+/// Executes `normalize_runtime_expression` (normalize runtime expression).
+///
+/// # Arguments
+/// * `raw` - Input `raw` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn normalize_runtime_expression(raw: &str) -> String {
     let trimmed = raw.trim();
     if let Some(inner) = trimmed.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
@@ -1010,12 +1027,29 @@ pub fn split_runtime_expression_template(raw: &str) -> Vec<RuntimeExpressionSegm
     segments
 }
 
+/// Executes `contains_runtime_expression` (contains runtime expression).
+///
+/// # Arguments
+/// * `raw` - Input `raw` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn contains_runtime_expression(raw: &str) -> bool {
     split_runtime_expression_template(raw)
         .iter()
         .any(|seg| matches!(seg, RuntimeExpressionSegment::Expression(_)))
 }
 
+/// Executes `validate_runtime_expression` (validate runtime expression).
+///
+/// # Arguments
+/// * `expr` - Input `expr` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_runtime_expression(expr: &str) -> AppResult<()> {
     match expr {
         "$url" | "$method" | "$statusCode" | "$self" => return Ok(()),
@@ -1059,6 +1093,16 @@ fn validate_runtime_expression(expr: &str) -> AppResult<()> {
     )))
 }
 
+/// Executes `validate_message_source` (validate message source).
+///
+/// # Arguments
+/// * `source` - Input `source` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_message_source(source: &str) -> AppResult<()> {
     if let Some(tail) = source.strip_prefix("header.") {
         return validate_header_token(tail);
@@ -1075,6 +1119,17 @@ fn validate_message_source(source: &str) -> AppResult<()> {
     )))
 }
 
+/// Executes `validate_named_pointer_tail` (validate named pointer tail).
+///
+/// # Arguments
+/// * `tail` - Input `tail` parameter.
+/// * `kind` - Input `kind` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_named_pointer_tail(tail: &str, kind: &str) -> AppResult<()> {
     let (head, ptr_opt) = match tail.split_once('#') {
         Some((h, p)) => (h, Some(p)),
@@ -1092,6 +1147,16 @@ fn validate_named_pointer_tail(tail: &str, kind: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// Executes `validate_scoped_expression_tail` (validate scoped expression tail).
+///
+/// # Arguments
+/// * `tail` - Input `tail` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_scoped_expression_tail(tail: &str) -> AppResult<()> {
     let (scope_id, rest) = tail.split_once('.').ok_or_else(|| {
         AppError::General(format!(
@@ -1107,6 +1172,16 @@ fn validate_scoped_expression_tail(tail: &str) -> AppResult<()> {
     validate_named_pointer_tail(rest, "scoped member")
 }
 
+/// Executes `validate_components_tail` (validate components tail).
+///
+/// # Arguments
+/// * `tail` - Input `tail` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_components_tail(tail: &str) -> AppResult<()> {
     let (section, name) = tail.split_once('.').ok_or_else(|| {
         AppError::General(format!(
@@ -1128,6 +1203,16 @@ fn validate_components_tail(tail: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// Executes `validate_runtime_source` (validate runtime source).
+///
+/// # Arguments
+/// * `source` - Input `source` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_runtime_source(source: &str) -> AppResult<()> {
     if let Some(header) = source.strip_prefix("header.") {
         return validate_header_token(header);
@@ -1148,6 +1233,16 @@ fn validate_runtime_source(source: &str) -> AppResult<()> {
     )))
 }
 
+/// Executes `validate_header_token` (validate header token).
+///
+/// # Arguments
+/// * `token` - Input `token` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_header_token(token: &str) -> AppResult<()> {
     if token.is_empty() {
         return Err(AppError::General(
@@ -1165,6 +1260,17 @@ fn validate_header_token(token: &str) -> AppResult<()> {
     }
 }
 
+/// Executes `validate_name` (validate name).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+/// * `kind` - Input `kind` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_name(name: &str, kind: &str) -> AppResult<()> {
     if name.is_empty() {
         Err(AppError::General(format!(
@@ -1176,6 +1282,16 @@ fn validate_name(name: &str, kind: &str) -> AppResult<()> {
     }
 }
 
+/// Executes `validate_body_reference` (validate body reference).
+///
+/// # Arguments
+/// * `tail` - Input `tail` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_body_reference(tail: &str) -> AppResult<()> {
     if tail.is_empty() {
         return Ok(());
@@ -1191,6 +1307,16 @@ fn validate_body_reference(tail: &str) -> AppResult<()> {
     )))
 }
 
+/// Executes `validate_json_pointer` (validate json pointer).
+///
+/// # Arguments
+/// * `ptr` - Input `ptr` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_json_pointer(ptr: &str) -> AppResult<()> {
     if ptr.is_empty() {
         return Ok(());
@@ -1215,6 +1341,13 @@ fn validate_json_pointer(ptr: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// Executes `validate_pointer_segment` (validate pointer segment).
+///
+/// # Arguments
+/// * `segment` - Input `segment` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn validate_pointer_segment(segment: &str) -> bool {
     let mut chars = segment.chars().peekable();
     while let Some(ch) = chars.next() {
@@ -1228,6 +1361,13 @@ fn validate_pointer_segment(segment: &str) -> bool {
     true
 }
 
+/// Executes `is_tchar` (is tchar).
+///
+/// # Arguments
+/// * `c` - Input `c` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_tchar(c: char) -> bool {
     c.is_ascii_alphanumeric()
         || matches!(

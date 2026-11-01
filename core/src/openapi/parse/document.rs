@@ -43,11 +43,31 @@ pub struct ParsedOpenApi {
 /// - `tags` (including metadata)
 /// - top-level `externalDocs`
 /// - Paths/Webhooks `x-` extensions
+///
+/// # Arguments
+/// * `yaml_content` - Input `yaml_content` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<ParsedOpenApi>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn parse_openapi_document(yaml_content: &str) -> AppResult<ParsedOpenApi> {
     parse_openapi_document_with_registry(yaml_content, None, None)
 }
 
 /// Parses an OpenAPI document into routes and metadata with optional external reference support.
+///
+/// # Arguments
+/// * `yaml_content` - Input `yaml_content` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `retrieval_uri` - Input `retrieval_uri` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<ParsedOpenApi>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn parse_openapi_document_with_registry(
     yaml_content: &str,
     registry: Option<&DocumentRegistry>,
@@ -57,6 +77,7 @@ pub fn parse_openapi_document_with_registry(
         .map_err(|e| AppError::General(format!("Failed to parse OpenAPI YAML: {}", e)))?;
 
     // Normalize BEFORE parsing the shim
+    crate::openapi::parse::normalization::upgrade_google_discovery_to_openapi3(&mut raw_value);
     crate::openapi::parse::routes::coerce_version_strings(&mut raw_value);
     crate::openapi::parse::normalization::normalize_nullable_schemas(&mut raw_value);
     crate::openapi::parse::normalization::normalize_boolean_schemas(&mut raw_value);
@@ -92,6 +113,16 @@ pub fn parse_openapi_document_with_registry(
     })
 }
 
+/// Executes `build_openapi_info` (build openapi info).
+///
+/// # Arguments
+/// * `shim` - Input `shim` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<OpenApiInfo>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn build_openapi_info(shim: &ShimOpenApi) -> AppResult<OpenApiInfo> {
     let info = shim.info.as_ref().ok_or_else(|| {
         AppError::General("OpenAPI document missing required 'info' object".into())
@@ -148,6 +179,14 @@ fn build_openapi_info(shim: &ShimOpenApi) -> AppResult<OpenApiInfo> {
     Ok(out)
 }
 
+/// Executes `resolve_entry_base_uri` (resolve entry base uri).
+///
+/// # Arguments
+/// * `shim` - Input `shim` parameter.
+/// * `retrieval_uri` - Input `retrieval_uri` parameter.
+///
+/// # Returns
+/// Resulting `Option<Url>` value.
 fn resolve_entry_base_uri(shim: &ShimOpenApi, retrieval_uri: Option<&str>) -> Option<Url> {
     let base_str = match (retrieval_uri, shim.self_uri.as_deref()) {
         (Some(retrieval), Some(self_val)) => compute_base_uri(retrieval, Some(self_val)),
@@ -163,6 +202,13 @@ fn resolve_entry_base_uri(shim: &ShimOpenApi, retrieval_uri: Option<&str>) -> Op
     dummy.join(&base_str).ok()
 }
 
+/// Executes `map_server` (map server).
+///
+/// # Arguments
+/// * `server` - Input `server` parameter.
+///
+/// # Returns
+/// Resulting `OpenApiServer` value.
 fn map_server(server: &ShimServer) -> OpenApiServer {
     let mut out = OpenApiServer::new(server.url.clone());
     out.description = server.description.clone();
@@ -176,6 +222,13 @@ fn map_server(server: &ShimServer) -> OpenApiServer {
     out
 }
 
+/// Executes `map_server_var` (map server var).
+///
+/// # Arguments
+/// * `var` - Input `var` parameter.
+///
+/// # Returns
+/// Resulting `OpenApiServerVariable` value.
 fn map_server_var(var: &ShimServerVariable) -> OpenApiServerVariable {
     OpenApiServerVariable {
         enum_values: var.enum_values.clone(),
@@ -184,6 +237,13 @@ fn map_server_var(var: &ShimServerVariable) -> OpenApiServerVariable {
     }
 }
 
+/// Executes `map_tag` (map tag).
+///
+/// # Arguments
+/// * `tag` - Input `tag` parameter.
+///
+/// # Returns
+/// Resulting `OpenApiTag` value.
 fn map_tag(tag: &ShimTag) -> OpenApiTag {
     let mut out = OpenApiTag::new(tag.name.clone());
     out.summary = tag.summary.clone();
@@ -197,6 +257,13 @@ fn map_tag(tag: &ShimTag) -> OpenApiTag {
     out
 }
 
+/// Executes `filter_extensions` (filter extensions).
+///
+/// # Arguments
+/// * `extensions` - Input `extensions` parameter.
+///
+/// # Returns
+/// Resulting `BTreeMap<String, serde_json::Value>` value.
 fn filter_extensions(
     extensions: &BTreeMap<String, serde_json::Value>,
 ) -> BTreeMap<String, serde_json::Value> {

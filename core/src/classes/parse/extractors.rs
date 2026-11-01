@@ -15,6 +15,15 @@ use ra_ap_syntax::ast::{self, HasName};
 use ra_ap_syntax::{AstNode, SourceFile};
 
 /// Extracts the names of all structs and enums defined in the provided Rust source code.
+///
+/// # Arguments
+/// * `code` - Input `code` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<String>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn extract_struct_names(code: &str) -> AppResult<Vec<String>> {
     let parse = SourceFile::parse(code, Edition::Edition2021);
     let file = parse.tree();
@@ -33,6 +42,16 @@ pub fn extract_struct_names(code: &str) -> AppResult<Vec<String>> {
 
 /// Parses a Rust source file to extract a struct definition.
 /// Backward compatibility wrapper for `extract_model`.
+///
+/// # Arguments
+/// * `code` - Input `code` parameter.
+/// * `struct_name` - Input `struct_name` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<ParsedStruct>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn extract_struct(code: &str, struct_name: &str) -> AppResult<ParsedStruct> {
     match extract_model(code, struct_name)? {
         ParsedModel::Struct(s) => Ok(s),
@@ -44,12 +63,32 @@ pub fn extract_struct(code: &str, struct_name: &str) -> AppResult<ParsedStruct> 
 }
 
 /// Helper to extract only fields without full struct parsing if needed.
+///
+/// # Arguments
+/// * `code` - Input `code` parameter.
+/// * `struct_name` - Input `struct_name` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<ParsedField>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn extract_struct_fields(code: &str, struct_name: &str) -> AppResult<Vec<ParsedField>> {
     let s = extract_struct(code, struct_name)?;
     Ok(s.fields)
 }
 
 /// Parsing function to extract a full model definition (struct or enum).
+///
+/// # Arguments
+/// * `code` - Input `code` parameter.
+/// * `name` - Input `name` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<ParsedModel>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn extract_model(code: &str, name: &str) -> AppResult<ParsedModel> {
     let parse = SourceFile::parse(code, Edition::Edition2021);
     let file = parse.tree();
@@ -71,6 +110,17 @@ pub fn extract_model(code: &str, name: &str) -> AppResult<ParsedModel> {
     Err(AppError::General(format!("Model '{}' not found", name)))
 }
 
+/// Executes `parse_struct_node` (parse struct node).
+///
+/// # Arguments
+/// * `struct_def` - Input `struct_def` parameter.
+/// * `name` - Input `name` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<ParsedStruct>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_struct_node(struct_def: ast::Struct, name: &str) -> AppResult<ParsedStruct> {
     let struct_desc = extract_doc_comment(&struct_def);
     let struct_attrs = extract_attributes(struct_def.syntax());
@@ -146,6 +196,17 @@ fn parse_struct_node(struct_def: ast::Struct, name: &str) -> AppResult<ParsedStr
     })
 }
 
+/// Executes `parse_enum_node` (parse enum node).
+///
+/// # Arguments
+/// * `enum_def` - Input `enum_def` parameter.
+/// * `name` - Input `name` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<ParsedEnum>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_enum_node(enum_def: ast::Enum, name: &str) -> AppResult<ParsedEnum> {
     let desc = extract_doc_comment(&enum_def);
     let attrs = extract_attributes(enum_def.syntax());

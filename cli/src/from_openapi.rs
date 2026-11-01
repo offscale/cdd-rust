@@ -90,7 +90,7 @@ pub enum FromOpenApiCommands {
 }
 
 /// Common arguments used for generation commands.
-#[derive(Args, Debug, Clone)]
+#[derive(Args, Debug, Default, Clone)]
 pub struct GenerateArgs {
     /// Path or URL to the OpenAPI specification.
     #[clap(
@@ -129,6 +129,18 @@ pub struct GenerateArgs {
     /// Generate Model Context Protocol (MCP) server and adapter.
     #[clap(short = 'm', long, env = "CDD_MCP")]
     pub mcp: bool,
+
+    /// GitHub organization or user name for repository metadata.
+    #[clap(long, env = "GITHUB_ORG_NAME")]
+    pub github_org: Option<String>,
+
+    /// Repository name for repository metadata (defaults to `<github-org>-sdk` in monorepo mode or `<github-org>-sdk-rust` in polyrepo mode).
+    #[clap(long, env = "REPO_NAME")]
+    pub repo_name: Option<String>,
+
+    /// Use monorepo naming convention (`<github-org>-sdk` instead of `<github-org>-sdk-rust`) when `--repo-name` is omitted.
+    #[clap(long, env = "CDD_MONOREPO")]
+    pub monorepo: bool,
 }
 
 impl GenerateArgs {
@@ -326,6 +338,16 @@ pub fn generate_server(args: &GenerateArgs, framework: ServerFramework) -> AppRe
 
 /// Appends an `src/mcp/` module and registers `pub mod mcp;` in `src/lib.rs` without
 /// overwriting existing `src/handlers/` or `src/client/` modules.
+///
+/// # Arguments
+/// * `args` - Input `args` parameter.
+/// * `strategy` - Input `strategy` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn append_mcp_module(args: &GenerateArgs, strategy: &impl BackendStrategy) -> AppResult<()> {
     let inputs = args.get_input_files();
     let out_dir = args.get_output_dir();
@@ -349,6 +371,16 @@ fn append_mcp_module(args: &GenerateArgs, strategy: &impl BackendStrategy) -> Ap
 }
 
 /// Ensures a module declaration line is present in `lib.rs`.
+///
+/// # Arguments
+/// * `lib_rs_path` - Input `lib_rs_path` parameter.
+/// * `mod_decl` - Input `mod_decl` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn ensure_lib_mod(lib_rs_path: &Path, mod_decl: &str) -> AppResult<()> {
     let existing = if lib_rs_path.exists() {
         fs::read_to_string(lib_rs_path)?
@@ -363,20 +395,29 @@ fn ensure_lib_mod(lib_rs_path: &Path, mod_decl: &str) -> AppResult<()> {
 }
 
 /// Writes `mod.rs` listing all `.rs` sibling modules in `dir`.
+///
+/// # Arguments
+/// * `dir` - Input `dir` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<String>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn write_mod_rs(dir: &Path) -> AppResult<Vec<String>> {
     let mut mods = Vec::new();
     let mut mod_names = Vec::new();
     for entry in fs::read_dir(dir)?.flatten() {
         let path = entry.path();
-        if path.file_name().is_some_and(|name| name != "mod.rs")
-            && path.extension().is_some_and(|ext| ext == "rs")
+        if let Some(mod_name) = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.strip_suffix(".rs"))
         {
-            let mod_name = path
-                .file_stem()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_default();
-            mods.push(format!("pub mod {};\n", mod_name));
-            mod_names.push(mod_name);
+            if mod_name != "mod" {
+                mods.push(format!("pub mod {};\n", mod_name));
+                mod_names.push(mod_name.to_string());
+            }
         }
     }
     mods.sort();
@@ -385,12 +426,63 @@ fn write_mod_rs(dir: &Path) -> AppResult<Vec<String>> {
     Ok(mod_names)
 }
 
-/// Writes the `Cargo.toml` and `.github/workflows/ci.yml` skeleton files into `out_dir`.
-pub(crate) fn write_package_skeleton_files(
+/// Resolves the GitHub organization and repository name according to Monorepo vs. Polyrepo conventions.
+///
+/// # Arguments
+/// * `github_org` - Optional GitHub organization name (defaults to `"offscale"`).
+/// * `repo_name` - Optional explicit repository name.
+/// * `monorepo` - Whether to default to `<org>-sdk` (`true`) or `<org>-sdk-rust` (`false`).
+///
+/// # Returns
+/// A tuple `(org, repo)` with resolved non-empty identifiers.
+pub fn resolve_repo_metadata(
+    github_org: Option<&str>,
+    repo_name: Option<&str>,
+    monorepo: bool,
+) -> (String, String) {
+    let org = github_org
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("offscale")
+        .to_string();
+    let repo = repo_name
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            if monorepo {
+                format!("{org}-sdk")
+            } else {
+                format!("{org}-sdk-rust")
+            }
+        });
+    (org, repo)
+}
+
+/// Writes the `Cargo.toml` and `.github/workflows/ci.yml` skeleton files into `out_dir` with explicit GitHub org and repo metadata.
+///
+/// # Arguments
+/// * `out_dir` - Input `out_dir` parameter.
+/// * `no_installable_package` - Input `no_installable_package` parameter.
+/// * `no_github_actions` - Input `no_github_actions` parameter.
+/// * `dependencies` - Input `dependencies` parameter.
+/// * `github_org` - Input `github_org` parameter.
+/// * `repo_name` - Input `repo_name` parameter.
+/// * `monorepo` - Input `monorepo` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
+pub(crate) fn write_package_skeleton_files_with_repo(
     out_dir: &Path,
     no_installable_package: bool,
     no_github_actions: bool,
     dependencies: &str,
+    github_org: Option<&str>,
+    repo_name: Option<&str>,
+    monorepo: bool,
 ) -> AppResult<()> {
     fs::create_dir_all(out_dir)?;
 
@@ -401,19 +493,34 @@ pub(crate) fn write_package_skeleton_files(
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| "generated_package".to_string());
+            let (org, repo) = resolve_repo_metadata(github_org, repo_name, monorepo);
+            let repo_url = format!("https://github.com/{org}/{repo}");
+            let docs_url = format!("https://docs.rs/{pkg_name}");
 
             let cargo_toml = format!(
                 r#"[package]
-name = "{}"
-version = "{}"
+name = "{pkg_name}"
+version = "{version}"
 edition = "2021"
+description = "Generated Rust SDK and server scaffolding for {pkg_name}"
+license = "Apache-2.0 OR MIT"
+readme = "README.md"
+repository = "{repo_url}"
+homepage = "{repo_url}"
+documentation = "{docs_url}"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-{}
+{dependencies}
 "#,
-                pkg_name,
-                env!("CARGO_PKG_VERSION"),
-                dependencies
+                pkg_name = pkg_name,
+                version = env!("CARGO_PKG_VERSION"),
+                repo_url = repo_url,
+                docs_url = docs_url,
+                dependencies = dependencies
             );
             fs::write(cargo_toml_path, cargo_toml)?;
         }
@@ -428,6 +535,7 @@ edition = "2021"
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
 
@@ -440,6 +548,25 @@ jobs:
         run: cargo build --verbose
       - name: Run tests
         run: cargo test --verbose
+      - name: Build docs
+        run: cargo doc --no-deps
+      - name: Deploy docs to gh-pages
+        if: github.ref == 'refs/heads/main'
+        run: echo "Deploying target/doc to gh-pages"
+      - name: Sign release archive with GPG (.asc)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          cargo package --allow-dirty
+          for crate_file in target/package/*.crate; do
+            if [ -n "${GPG_PRIVATE_KEY:-}" ]; then
+              gpg --batch --yes --detach-sign --armor "$crate_file"
+            fi
+          done
+      - name: Publish to crates.io
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: cargo publish --allow-dirty
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 "#;
             fs::write(ci_yml_path, ci_yml)?;
         }
@@ -448,6 +575,18 @@ jobs:
     Ok(())
 }
 
+/// Prepares the `Cargo.toml` and `.github/workflows/ci.yml` skeleton files for an OpenAPI generation target.
+///
+/// # Arguments
+/// * `args` - Input `args` parameter.
+/// * `out_dir` - Input `out_dir` parameter.
+/// * `extra_deps` - Input `extra_deps` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn prepare_package_skeleton(
     args: &GenerateArgs,
     out_dir: &Path,
@@ -467,14 +606,30 @@ uuid = { version = "1.8", features = ["serde", "v4"] }
 "#,
     );
     dependencies.push_str(extra_deps);
-    write_package_skeleton_files(
+    write_package_skeleton_files_with_repo(
         out_dir,
         args.no_installable_package,
         args.no_github_actions,
         &dependencies,
+        args.github_org.as_deref(),
+        args.repo_name.as_deref(),
+        args.monorepo,
     )
 }
 
+/// Parses models from `input`, writes `src/models/`, and prepares `src/<module_subdir>/` and `src/lib.rs`.
+///
+/// # Arguments
+/// * `out_dir` - Input `out_dir` parameter.
+/// * `input` - Input `input` parameter.
+/// * `module_subdir` - Input `module_subdir` parameter.
+/// * `strategy` - Input `strategy` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<(PathBuf, PathBuf, PathBuf)>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn prepare_models_and_handlers_dir(
     out_dir: &Path,
     input: &Path,
@@ -550,6 +705,17 @@ pub mod scopes {
 }
 
 /// Runs the generation using the specified strategy and target module subdirectory name.
+///
+/// # Arguments
+/// * `args` - Input `args` parameter.
+/// * `strategy` - Input `strategy` parameter.
+/// * `module_subdir` - Input `module_subdir` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn run_generation_with_subdir(
     args: &GenerateArgs,
     strategy: &impl BackendStrategy,
@@ -590,6 +756,19 @@ fn run_generation_with_subdir(
     Ok(())
 }
 
+/// Writes `src/main.rs` when `is_cli` is `true`.
+///
+/// # Arguments
+/// * `is_cli` - Input `is_cli` parameter.
+/// * `src_dir` - Input `src_dir` parameter.
+/// * `module_subdir` - Input `module_subdir` parameter.
+/// * `mod_names` - Input `mod_names` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn maybe_write_cli_main(
     is_cli: bool,
     src_dir: &Path,
@@ -603,6 +782,19 @@ fn maybe_write_cli_main(
     Ok(())
 }
 
+/// Generates `tests/api_contracts.rs` when `enable_tests` is `true`.
+///
+/// # Arguments
+/// * `enable_tests` - Input `enable_tests` parameter.
+/// * `out_dir` - Input `out_dir` parameter.
+/// * `input` - Input `input` parameter.
+/// * `strategy` - Input `strategy` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn maybe_generate_tests(
     enable_tests: bool,
     out_dir: &Path,
@@ -648,6 +840,12 @@ pub struct FromOpenApiConfig {
     pub mcp: bool,
     /// The server framework to use.
     pub framework: ServerFramework,
+    /// Optional GitHub organization or user name.
+    pub github_org: Option<String>,
+    /// Optional repository name.
+    pub repo_name: Option<String>,
+    /// Whether to use monorepo default naming (`<org>-sdk`) instead of polyrepo (`<org>-sdk-rust`).
+    pub monorepo: bool,
 }
 
 /// Generate code from an OpenAPI specification.
@@ -669,6 +867,9 @@ pub fn from_openapi(config: &FromOpenApiConfig) -> AppResult<()> {
         no_installable_package: config.no_installable_package,
         tests: config.tests,
         mcp: config.mcp,
+        github_org: config.github_org.clone(),
+        repo_name: config.repo_name.clone(),
+        monorepo: config.monorepo,
     };
 
     match config.subcommand {
@@ -733,15 +934,7 @@ mod tests {
 
     #[test]
     fn test_get_output_dir_default() {
-        let args = GenerateArgs {
-            input: None,
-            input_dir: None,
-            output_dir: None,
-            no_github_actions: false,
-            no_installable_package: false,
-            tests: false,
-            mcp: false,
-        };
+        let args = GenerateArgs::default();
         let dir = args.get_output_dir();
         assert_eq!(dir, PathBuf::from("."));
     }
@@ -750,13 +943,8 @@ mod tests {
     fn test_get_output_dir_provided() {
         let path = PathBuf::from("/tmp/out");
         let args = GenerateArgs {
-            input: None,
-            input_dir: None,
             output_dir: Some(path.clone()),
-            no_github_actions: false,
-            no_installable_package: false,
-            tests: false,
-            mcp: false,
+            ..Default::default()
         };
         assert_eq!(args.get_output_dir(), path);
     }
@@ -766,12 +954,7 @@ mod tests {
         let path = PathBuf::from("spec.yaml");
         let args = GenerateArgs {
             input: Some(path.clone()),
-            input_dir: None,
-            output_dir: None,
-            no_github_actions: false,
-            no_installable_package: false,
-            tests: false,
-            mcp: false,
+            ..Default::default()
         };
         assert_eq!(args.get_input_files(), vec![path]);
     }
@@ -793,13 +976,8 @@ mod tests {
         fs::create_dir_all(&sub_dir).expect("mkdir");
 
         let args = GenerateArgs {
-            input: None,
             input_dir: Some(dir.path().to_path_buf()),
-            output_dir: None,
-            no_github_actions: false,
-            no_installable_package: false,
-            tests: false,
-            mcp: false,
+            ..Default::default()
         };
         let mut files = args.get_input_files();
         files.sort();
@@ -816,15 +994,7 @@ mod tests {
 
     #[test]
     fn test_get_input_files_none() {
-        let args = GenerateArgs {
-            input: None,
-            input_dir: None,
-            output_dir: None,
-            no_github_actions: false,
-            no_installable_package: false,
-            tests: false,
-            mcp: false,
-        };
+        let args = GenerateArgs::default();
         assert!(args.get_input_files().is_empty());
     }
 
@@ -860,12 +1030,11 @@ components:
         let args_mcp = FromOpenApiArgs {
             command: FromOpenApiCommands::SdkCli(GenerateArgs {
                 input: Some(input_file.clone()),
-                input_dir: None,
                 output_dir: Some(out_sdk_cli_mcp.clone()),
-                no_github_actions: false,
-                no_installable_package: false,
-                tests: false,
                 mcp: true,
+                github_org: Some("acme".to_string()),
+                monorepo: true,
+                ..Default::default()
             }),
         };
         assert!(run_from_openapi(&args_mcp).is_ok());
@@ -873,17 +1042,19 @@ components:
         assert!(out_sdk_cli_mcp.join("src/handlers/mod.rs").exists());
         assert!(out_sdk_cli_mcp.join("src/mcp/mod.rs").exists());
         assert!(out_sdk_cli_mcp.join("src/main.rs").exists());
+        let cargo_toml_content =
+            fs::read_to_string(out_sdk_cli_mcp.join("Cargo.toml")).expect("read Cargo.toml");
+        assert!(cargo_toml_content.contains("https://github.com/acme/acme-sdk"));
 
         // Test SdkCli without mcp
         let args_cli_no_mcp = FromOpenApiArgs {
             command: FromOpenApiCommands::SdkCli(GenerateArgs {
                 input: Some(input_file.clone()),
-                input_dir: None,
                 output_dir: Some(dir.path().join("out1_no_mcp")),
                 no_github_actions: true,
                 no_installable_package: true,
                 tests: true,
-                mcp: false,
+                ..Default::default()
             }),
         };
         assert!(run_from_openapi(&args_cli_no_mcp).is_ok());
@@ -893,17 +1064,19 @@ components:
         let args = FromOpenApiArgs {
             command: FromOpenApiCommands::Sdk(GenerateArgs {
                 input: Some(input_file.clone()),
-                input_dir: None,
                 output_dir: Some(out_sdk.clone()),
-                no_github_actions: false,
-                no_installable_package: false,
-                tests: false,
                 mcp: true,
+                github_org: Some("acme".to_string()),
+                repo_name: Some("custom-repo".to_string()),
+                ..Default::default()
             }),
         };
         assert!(run_from_openapi(&args).is_ok());
         assert!(out_sdk.join("src/handlers/mod.rs").exists());
         assert!(out_sdk.join("src/mcp/mod.rs").exists());
+        let sdk_cargo_toml =
+            fs::read_to_string(out_sdk.join("Cargo.toml")).expect("read sdk Cargo.toml");
+        assert!(sdk_cargo_toml.contains("https://github.com/acme/custom-repo"));
 
         // Test Server with ActixWeb and mcp - verifies handlers/ and mcp/ coexist
         let out_srv = dir.path().join("out3");
@@ -915,12 +1088,9 @@ components:
             command: FromOpenApiCommands::Server {
                 args: GenerateArgs {
                     input: Some(input_file.clone()),
-                    input_dir: None,
                     output_dir: Some(out_srv.clone()),
-                    no_github_actions: false,
-                    no_installable_package: false,
-                    tests: false,
                     mcp: true,
+                    ..Default::default()
                 },
                 framework: ServerFramework::ActixWeb,
             },
@@ -936,12 +1106,8 @@ components:
             command: FromOpenApiCommands::Server {
                 args: GenerateArgs {
                     input: Some(input_file.clone()),
-                    input_dir: None,
                     output_dir: Some(dir.path().join("out4")),
-                    no_github_actions: false,
-                    no_installable_package: false,
-                    tests: false,
-                    mcp: false,
+                    ..Default::default()
                 },
                 framework: ServerFramework::Axum,
             },
@@ -951,15 +1117,7 @@ components:
 
     #[test]
     fn test_run_generation_no_inputs() {
-        let args = GenerateArgs {
-            input: None,
-            input_dir: None,
-            output_dir: None,
-            no_github_actions: false,
-            no_installable_package: false,
-            tests: false,
-            mcp: false,
-        };
+        let args = GenerateArgs::default();
         assert!(run_generation_with_subdir(&args, &ActixStrategy, "handlers").is_err());
         assert!(run_generation_with_subdir(&args, &AxumStrategy, "handlers").is_err());
         assert!(run_generation_with_subdir(&args, &ReqwestStrategy, "client").is_err());
@@ -971,12 +1129,9 @@ components:
         let dir = tempdir().expect("tempdir");
         let args = GenerateArgs {
             input: Some(PathBuf::from("/does/not/exist.yaml")),
-            input_dir: None,
             output_dir: Some(dir.path().join("..")),
             no_github_actions: true,
-            no_installable_package: false,
-            tests: false,
-            mcp: false,
+            ..Default::default()
         };
         let result = run_generation_with_subdir(&args, &ActixStrategy, "handlers");
         assert!(result.is_err());
@@ -993,12 +1148,11 @@ components:
         .expect("write");
         let args = GenerateArgs {
             input: Some(input),
-            input_dir: None,
             output_dir: Some(dir.path().join("my_out_app")),
             no_github_actions: true,
             no_installable_package: true,
             tests: true,
-            mcp: false,
+            ..Default::default()
         };
         let res = run_generation_with_subdir(&args, &ActixStrategy, "handlers");
         assert!(res.is_ok());
@@ -1012,12 +1166,9 @@ components:
         // Error propagation in generate_sdk, generate_sdk_cli, generate_server, append_mcp_module
         let bad_args = GenerateArgs {
             input: Some(dir.path().join("nonexistent.yaml")),
-            input_dir: None,
             output_dir: Some(PathBuf::from("/")),
-            no_github_actions: false,
-            no_installable_package: false,
-            tests: false,
             mcp: true,
+            ..Default::default()
         };
         assert!(generate_sdk(&bad_args).is_err());
         assert!(generate_sdk_cli(&bad_args).is_err());

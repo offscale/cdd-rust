@@ -28,11 +28,31 @@ use utoipa::openapi::RefOr;
 ///
 /// This function verifies the presence of a valid `openapi` (3.x) or `swagger` (2.0) version field
 /// before processing the routes.
+///
+/// # Arguments
+/// * `yaml_content` - Input `yaml_content` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<ParsedRoute>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn parse_openapi_routes(yaml_content: &str) -> AppResult<Vec<ParsedRoute>> {
     parse_openapi_routes_with_registry(yaml_content, None, None)
 }
 
 /// Parses routes with an optional document registry for external references.
+///
+/// # Arguments
+/// * `yaml_content` - Input `yaml_content` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `retrieval_uri` - Input `retrieval_uri` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<ParsedRoute>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn parse_openapi_routes_with_registry(
     yaml_content: &str,
     registry: Option<&DocumentRegistry>,
@@ -43,11 +63,24 @@ pub fn parse_openapi_routes_with_registry(
     parse_openapi_routes_from_value(&mut json_val, registry, retrieval_uri)
 }
 
+/// Executes `parse_openapi_routes_from_value` (parse openapi routes from value).
+///
+/// # Arguments
+/// * `json_val` - Input `json_val` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `retrieval_uri` - Input `retrieval_uri` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Vec<ParsedRoute>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 pub(crate) fn parse_openapi_routes_from_value(
     json_val: &mut serde_json::Value,
     registry: Option<&DocumentRegistry>,
     retrieval_uri: Option<&str>,
 ) -> AppResult<Vec<ParsedRoute>> {
+    crate::openapi::parse::normalization::upgrade_google_discovery_to_openapi3(json_val);
     coerce_version_strings(json_val);
     upgrade_swagger2_to_openapi3(json_val);
     normalize_link_objects(json_val);
@@ -186,6 +219,14 @@ pub(crate) fn parse_openapi_routes_from_value(
     Ok(routes)
 }
 
+/// Executes `resolve_entry_base_uri` (resolve entry base uri).
+///
+/// # Arguments
+/// * `openapi` - Input `openapi` parameter.
+/// * `retrieval_uri` - Input `retrieval_uri` parameter.
+///
+/// # Returns
+/// Resulting `Option<Url>` value.
 fn resolve_entry_base_uri(openapi: &ShimOpenApi, retrieval_uri: Option<&str>) -> Option<Url> {
     let base_str = match (retrieval_uri, openapi.self_uri.as_deref()) {
         (Some(retrieval), Some(self_val)) => compute_base_uri(retrieval, Some(self_val)),
@@ -204,15 +245,33 @@ fn resolve_entry_base_uri(openapi: &ShimOpenApi, retrieval_uri: Option<&str>) ->
 
 /// Shared document context for resolving operation links and references across paths and webhooks.
 struct OperationParseContext<'a> {
+    /// Field `operation_index` (operation index).
     operation_index: &'a HashMap<String, String>,
+    /// Field `self_uri` (self uri).
     self_uri: Option<&'a str>,
+    /// Field `paths` (paths).
     paths: &'a BTreeMap<String, ShimPathItem>,
+    /// Field `webhooks` (webhooks).
     webhooks: Option<&'a BTreeMap<String, RefOr<ShimPathItem>>>,
+    /// Field `components` (components).
     components: Option<&'a ShimComponents>,
+    /// Field `registry` (registry).
     registry: Option<&'a DocumentRegistry>,
+    /// Field `base_uri` (base uri).
     base_uri: Option<&'a Url>,
 }
 
+/// Executes `resolve_response_link_targets` (resolve response link targets).
+///
+/// # Arguments
+/// * `routes` - Input `routes` parameter.
+/// * `ctx` - Input `ctx` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn resolve_response_link_targets(
     routes: &mut [ParsedRoute],
     ctx: &OperationParseContext<'_>,
@@ -253,6 +312,16 @@ fn resolve_response_link_targets(
     Ok(())
 }
 
+/// Executes `validate_link_operation_ids` (validate link operation ids).
+///
+/// # Arguments
+/// * `routes` - Input `routes` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_link_operation_ids(routes: &[ParsedRoute]) -> AppResult<()> {
     for link in routes
         .iter()
@@ -271,10 +340,30 @@ fn validate_link_operation_ids(routes: &[ParsedRoute]) -> AppResult<()> {
     Ok(())
 }
 
+/// Executes `is_absolute_uri` (is absolute uri).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_absolute_uri(value: &str) -> bool {
     Url::parse(value).is_ok()
 }
 
+/// Executes `resolve_operation_ref_to_path` (resolve operation ref to path).
+///
+/// # Arguments
+/// * `operation_ref` - Input `operation_ref` parameter.
+/// * `self_uri` - Input `self_uri` parameter.
+/// * `paths` - Input `paths` parameter.
+/// * `webhooks` - Input `webhooks` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 fn resolve_operation_ref_to_path(
     operation_ref: &str,
     self_uri: Option<&str>,
@@ -348,6 +437,16 @@ fn resolve_operation_ref_to_path(
     Some(key)
 }
 
+/// Executes `resolve_component_path_item_target` (resolve component path item target).
+///
+/// # Arguments
+/// * `target_name` - Input `target_name` parameter.
+/// * `self_uri` - Input `self_uri` parameter.
+/// * `paths` - Input `paths` parameter.
+/// * `webhooks` - Input `webhooks` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 fn resolve_component_path_item_target(
     target_name: &str,
     self_uri: Option<&str>,
@@ -381,6 +480,15 @@ fn resolve_component_path_item_target(
     }
 }
 
+/// Executes `path_item_ref_matches` (path item ref matches).
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+/// * `self_uri` - Input `self_uri` parameter.
+/// * `target_name` - Input `target_name` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn path_item_ref_matches(ref_str: &str, self_uri: Option<&str>, target_name: &str) -> bool {
     let Some(local) = normalize_ref_to_local(ref_str, self_uri) else {
         return false;
@@ -403,6 +511,14 @@ fn path_item_ref_matches(ref_str: &str, self_uri: Option<&str>, target_name: &st
     crate::openapi::parse::ref_utils::decode_pointer_segment(name_seg) == target_name
 }
 
+/// Executes `path_item_supports_method` (path item supports method).
+///
+/// # Arguments
+/// * `path_item` - Input `path_item` parameter.
+/// * `method` - Input `method` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn path_item_supports_method(path_item: &ShimPathItem, method: &str) -> bool {
     match method.to_ascii_lowercase().as_str() {
         "get" => path_item.get.is_some(),
@@ -422,6 +538,13 @@ fn path_item_supports_method(path_item: &ShimPathItem, method: &str) -> bool {
     }
 }
 
+/// Executes `is_sequential_media_type` (is sequential media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_sequential_media_type(media_type: &str) -> bool {
     let mt = crate::openapi::parse::models::MediaType::parse(media_type);
     mt.is_sequential_json()
@@ -432,6 +555,10 @@ fn is_sequential_media_type(media_type: &str) -> bool {
         )
 }
 
+/// Executes `normalize_link_objects` (normalize link objects).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
 fn normalize_link_objects(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(map) => {
@@ -451,6 +578,10 @@ fn normalize_link_objects(value: &mut serde_json::Value) {
     }
 }
 
+/// Executes `normalize_example_objects` (normalize example objects).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
 fn normalize_example_objects(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(map) => {
@@ -476,6 +607,16 @@ fn normalize_example_objects(value: &mut serde_json::Value) {
     }
 }
 
+/// Executes `normalize_component_refs` (normalize component refs).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn normalize_component_refs(value: &mut serde_json::Value) -> AppResult<()> {
     let self_uri = value
         .get("$self")
@@ -502,14 +643,29 @@ fn normalize_component_refs(value: &mut serde_json::Value) -> AppResult<()> {
     resolver.walk(value)
 }
 
+/// Internal representation for `ComponentRefResolver` (component ref resolver).
 struct ComponentRefResolver {
+    /// Field `self_uri` (self uri).
     self_uri: Option<String>,
+    /// Field `headers` (headers).
     headers: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Field `media_types` (media types).
     media_types: Option<serde_json::Map<String, serde_json::Value>>,
+    /// Field `is_oas3` (is oas3).
     is_oas3: bool,
 }
 
 impl ComponentRefResolver {
+    /// Executes `walk` (walk).
+    ///
+    /// # Arguments
+    /// * `value` - Input `value` parameter.
+    ///
+    /// # Returns
+    /// Resulting `AppResult<()>` value.
+    ///
+    /// # Errors
+    /// Returns an error if validation, parsing, or processing fails.
     fn walk(&mut self, value: &mut serde_json::Value) -> AppResult<()> {
         match value {
             serde_json::Value::Object(map) => {
@@ -533,6 +689,16 @@ impl ComponentRefResolver {
         Ok(())
     }
 
+    /// Executes `resolve_header_map` (resolve header map).
+    ///
+    /// # Arguments
+    /// * `headers_val` - Input `headers_val` parameter.
+    ///
+    /// # Returns
+    /// Resulting `AppResult<()>` value.
+    ///
+    /// # Errors
+    /// Returns an error if validation, parsing, or processing fails.
     fn resolve_header_map(&self, headers_val: &mut serde_json::Value) -> AppResult<()> {
         let serde_json::Value::Object(headers_map) = headers_val else {
             return Ok(());
@@ -554,6 +720,16 @@ impl ComponentRefResolver {
         Ok(())
     }
 
+    /// Executes `resolve_media_type_map` (resolve media type map).
+    ///
+    /// # Arguments
+    /// * `content_val` - Input `content_val` parameter.
+    ///
+    /// # Returns
+    /// Resulting `AppResult<()>` value.
+    ///
+    /// # Errors
+    /// Returns an error if validation, parsing, or processing fails.
     fn resolve_media_type_map(&self, content_val: &mut serde_json::Value) -> AppResult<()> {
         let serde_json::Value::Object(content_map) = content_val else {
             return Ok(());
@@ -575,6 +751,17 @@ impl ComponentRefResolver {
         Ok(())
     }
 
+    /// Executes `normalize_header_content_value` (normalize header content value).
+    ///
+    /// # Arguments
+    /// * `header_name` - Input `header_name` parameter.
+    /// * `value` - Input `value` parameter.
+    ///
+    /// # Returns
+    /// Resulting `AppResult<()>` value.
+    ///
+    /// # Errors
+    /// Returns an error if validation, parsing, or processing fails.
     fn normalize_header_content_value(
         &self,
         header_name: &str,
@@ -622,6 +809,17 @@ impl ComponentRefResolver {
         Ok(())
     }
 
+    /// Executes `normalize_media_type_item_schema` (normalize media type item schema).
+    ///
+    /// # Arguments
+    /// * `media_type` - Input `media_type` parameter.
+    /// * `value` - Input `value` parameter.
+    ///
+    /// # Returns
+    /// Resulting `AppResult<()>` value.
+    ///
+    /// # Errors
+    /// Returns an error if validation, parsing, or processing fails.
     fn normalize_media_type_item_schema(
         &self,
         media_type: &str,
@@ -654,6 +852,16 @@ impl ComponentRefResolver {
         Ok(())
     }
 
+    /// Executes `resolve_header_value` (resolve header value).
+    ///
+    /// # Arguments
+    /// * `value` - Input `value` parameter.
+    ///
+    /// # Returns
+    /// Resulting `AppResult<Option<serde_json::Value>>` value.
+    ///
+    /// # Errors
+    /// Returns an error if validation, parsing, or processing fails.
     fn resolve_header_value(
         &self,
         value: &serde_json::Value,
@@ -679,6 +887,16 @@ impl ComponentRefResolver {
         Ok(Some(resolved))
     }
 
+    /// Executes `resolve_media_type_value` (resolve media type value).
+    ///
+    /// # Arguments
+    /// * `value` - Input `value` parameter.
+    ///
+    /// # Returns
+    /// Resulting `AppResult<Option<serde_json::Value>>` value.
+    ///
+    /// # Errors
+    /// Returns an error if validation, parsing, or processing fails.
     fn resolve_media_type_value(
         &self,
         value: &serde_json::Value,
@@ -699,6 +917,18 @@ impl ComponentRefResolver {
         Ok(Some(resolved))
     }
 
+    /// Executes `resolve_component_ref` (resolve component ref).
+    ///
+    /// # Arguments
+    /// * `section` - Input `section` parameter.
+    /// * `ref_str` - Input `ref_str` parameter.
+    /// * `visiting` - Input `visiting` parameter.
+    ///
+    /// # Returns
+    /// Resulting `AppResult<serde_json::Value>` value.
+    ///
+    /// # Errors
+    /// Returns an error if validation, parsing, or processing fails.
     fn resolve_component_ref(
         &self,
         section: &str,
@@ -714,6 +944,18 @@ impl ComponentRefResolver {
         self.resolve_component_by_name(section, &name, visiting)
     }
 
+    /// Executes `resolve_component_by_name` (resolve component by name).
+    ///
+    /// # Arguments
+    /// * `section` - Input `section` parameter.
+    /// * `name` - Input `name` parameter.
+    /// * `visiting` - Input `visiting` parameter.
+    ///
+    /// # Returns
+    /// Resulting `AppResult<serde_json::Value>` value.
+    ///
+    /// # Errors
+    /// Returns an error if validation, parsing, or processing fails.
     fn resolve_component_by_name(
         &self,
         section: &str,
@@ -756,6 +998,10 @@ impl ComponentRefResolver {
     }
 }
 
+/// Executes `coerce_version_strings` (coerce version strings).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
 pub(crate) fn coerce_version_strings(value: &mut serde_json::Value) {
     let serde_json::Value::Object(map) = value else {
         return;
@@ -769,6 +1015,11 @@ pub(crate) fn coerce_version_strings(value: &mut serde_json::Value) {
     }
 }
 
+/// Executes `coerce_string_field` (coerce string field).
+///
+/// # Arguments
+/// * `map` - Input `map` parameter.
+/// * `key` - Input `key` parameter.
 fn coerce_string_field(map: &mut serde_json::Map<String, serde_json::Value>, key: &str) {
     let Some(val) = map.get_mut(key) else {
         return;
@@ -785,6 +1036,10 @@ fn coerce_string_field(map: &mut serde_json::Map<String, serde_json::Value>, key
     }
 }
 
+/// Executes `normalize_link_map` (normalize link map).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
 fn normalize_link_map(value: &mut serde_json::Value) {
     let serde_json::Value::Object(link_map) = value else {
         return;
@@ -815,6 +1070,13 @@ fn normalize_link_map(value: &mut serde_json::Value) {
 /// - Resolves variables with `default` values.
 /// - Resolves relative URLs against the retrieval URI (when available).
 /// - Extracts the path component.
+///
+/// # Arguments
+/// * `openapi` - Input `openapi` parameter.
+/// * `retrieval_uri` - Input `retrieval_uri` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 fn resolve_base_path(openapi: &ShimOpenApi, retrieval_uri: Option<&str>) -> Option<String> {
     // 1. Swagger 2.0 basePath
     if let Some(norm) = openapi.base_path.as_deref().and_then(normalize_base_path) {
@@ -826,6 +1088,13 @@ fn resolve_base_path(openapi: &ShimOpenApi, retrieval_uri: Option<&str>) -> Opti
 }
 
 /// Resolves a base path from an OAS `servers` array.
+///
+/// # Arguments
+/// * `servers` - Input `servers` parameter.
+/// * `retrieval_uri` - Input `retrieval_uri` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 fn resolve_base_path_from_servers(
     servers: Option<&Vec<ShimServer>>,
     retrieval_uri: Option<&str>,
@@ -845,6 +1114,14 @@ fn resolve_base_path_from_servers(
     extract_base_path_from_url(&url, retrieval_uri)
 }
 
+/// Executes `extract_base_path_from_url` (extract base path from url).
+///
+/// # Arguments
+/// * `url` - Input `url` parameter.
+/// * `retrieval_uri` - Input `retrieval_uri` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 fn extract_base_path_from_url(url: &str, retrieval_uri: Option<&str>) -> Option<String> {
     let trimmed = url.trim();
     if trimmed.is_empty() {
@@ -872,6 +1149,13 @@ fn extract_base_path_from_url(url: &str, retrieval_uri: Option<&str>) -> Option<
     normalize_base_path(trimmed)
 }
 
+/// Executes `normalize_base_path` (normalize base path).
+///
+/// # Arguments
+/// * `path` - Input `path` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 fn normalize_base_path(path: &str) -> Option<String> {
     let without_trailing = path.trim().trim_end_matches('/');
     if without_trailing.is_empty() {
@@ -881,6 +1165,19 @@ fn normalize_base_path(path: &str) -> Option<String> {
 }
 
 /// Resolves a `$ref` pointing to a Path Item from components or local paths.
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+/// * `components` - Input `components` parameter.
+/// * `paths` - Input `paths` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<ShimPathItem>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub(crate) fn resolve_path_item_ref(
     ref_str: &str,
     components: Option<&ShimComponents>,
@@ -900,6 +1197,20 @@ pub(crate) fn resolve_path_item_ref(
     Ok(item)
 }
 
+/// Executes `resolve_path_item_ref_with_context` (resolve path item ref with context).
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+/// * `components` - Input `components` parameter.
+/// * `paths` - Input `paths` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<(ShimPathItem, Option<ShimComponents>, Option<Url>)>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 pub(crate) fn resolve_path_item_ref_with_context(
     ref_str: &str,
     components: Option<&ShimComponents>,
@@ -918,6 +1229,21 @@ pub(crate) fn resolve_path_item_ref_with_context(
     )
 }
 
+/// Executes `resolve_path_item_ref_with_context_inner` (resolve path item ref with context inner).
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+/// * `components` - Input `components` parameter.
+/// * `paths` - Input `paths` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+/// * `visited` - Input `visited` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<(ShimPathItem, Option<ShimComponents>, Option<Url>)>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn resolve_path_item_ref_with_context_inner(
     ref_str: &str,
     components: Option<&ShimComponents>,
@@ -1044,6 +1370,10 @@ fn resolve_path_item_ref_with_context_inner(
     )))
 }
 
+/// Executes `upgrade_swagger2_to_openapi3` (upgrade swagger2 to openapi3).
+///
+/// # Arguments
+/// * `json_val` - Input `json_val` parameter.
 fn upgrade_swagger2_to_openapi3(json_val: &mut serde_json::Value) {
     if json_val.get("swagger").is_none() {
         return;

@@ -15,6 +15,9 @@ use url::Url;
 /// A tuple containing:
 /// 1. The Rust code block generating the variable.
 /// 2. The name of the variable holding the URI string.
+///
+/// # Arguments
+/// * `link` - Input `link` parameter.
 pub fn generate_link_construction(link: &ParsedLink) -> (String, String) {
     let var_name = format!("link_{}", to_snake_case(&link.name));
     let mut code = String::new();
@@ -72,6 +75,13 @@ pub fn generate_link_construction(link: &ParsedLink) -> (String, String) {
     (code, var_name)
 }
 
+/// Executes `resolve_link_template` (resolve link template).
+///
+/// # Arguments
+/// * `link` - Input `link` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn resolve_link_template(link: &ParsedLink) -> String {
     let op_ref = link
         .resolved_operation_ref
@@ -100,6 +110,12 @@ fn resolve_link_template(link: &ParsedLink) -> String {
 }
 
 /// Normalizes qualified link parameter keys (e.g. `path.id`) to the unqualified name (`id`).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+///
+/// # Returns
+/// Resulting `&str` value.
 fn normalize_link_param_key(name: &str) -> &str {
     for prefix in ["path.", "query.", "header.", "cookie.", "querystring."] {
         if let Some(stripped) = name.strip_prefix(prefix) {
@@ -109,10 +125,25 @@ fn normalize_link_param_key(name: &str) -> &str {
     name
 }
 
+/// Executes `is_absolute_url` (is absolute url).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_absolute_url(value: &str) -> bool {
     Url::parse(value).map(|u| u.has_host()).unwrap_or(false)
 }
 
+/// Executes `join_server_and_path` (join server and path).
+///
+/// # Arguments
+/// * `server` - Input `server` parameter.
+/// * `path` - Input `path` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn join_server_and_path(server: &str, path: &str) -> String {
     let server = server.trim_end_matches('/');
     let path = path.trim_start_matches('/');
@@ -127,6 +158,13 @@ fn join_server_and_path(server: &str, path: &str) -> String {
     format!("{}/{}", server, path)
 }
 
+/// Executes `literal_to_rust_expr` (literal to rust expr).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn literal_to_rust_expr(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::String(s) => format!("\"{}\"", escape_rust_string(s)),
@@ -137,6 +175,13 @@ fn literal_to_rust_expr(value: &serde_json::Value) -> String {
     }
 }
 
+/// Executes `escape_rust_string` (escape rust string).
+///
+/// # Arguments
+/// * `input` - Input `input` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn escape_rust_string(input: &str) -> String {
     input.replace('\\', "\\\\").replace('"', "\\\"")
 }

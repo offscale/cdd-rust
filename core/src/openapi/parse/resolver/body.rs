@@ -30,9 +30,13 @@ use utoipa::openapi::example::Example;
 use utoipa::openapi::path::ParameterStyle;
 use utoipa::openapi::{schema::Schema, RefOr, Required};
 
+/// Internal representation for `ResolvedRequestBody` (resolved request body).
 struct ResolvedRequestBody {
+    /// Field `body` (body).
     body: ShimRequestBody,
+    /// Field `components` (components).
     components: Option<ShimComponents>,
+    /// Field `base_uri` (base uri).
     base_uri: Option<Url>,
 }
 
@@ -40,6 +44,16 @@ struct ResolvedRequestBody {
 ///
 /// Resolves `$ref` values against `components.requestBodies` when available, including
 /// OAS 3.2 `$self`-qualified absolute references.
+///
+/// # Arguments
+/// * `body` - Input `body` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Option<RequestBodyDefinition>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn extract_request_body_type(
     body: &RefOr<ShimRequestBody>,
     components: Option<&ShimComponents>,
@@ -48,6 +62,18 @@ pub fn extract_request_body_type(
 }
 
 /// Extracts the request body type and format, allowing external reference resolution.
+///
+/// # Arguments
+/// * `body` - Input `body` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Option<RequestBodyDefinition>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn extract_request_body_type_with_registry(
     body: &RefOr<ShimRequestBody>,
     components: Option<&ShimComponents>,
@@ -182,6 +208,13 @@ pub fn extract_request_body_type_with_registry(
 ///
 /// Returns the full `requestBody` object (including all media types and examples)
 /// when it can be resolved from either inline content or `components.requestBodies`.
+///
+/// # Arguments
+/// * `body` - Input `body` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `Option<serde_json::Value>` value.
 pub fn extract_request_body_raw(
     body: &RefOr<ShimRequestBody>,
     components: Option<&ShimComponents>,
@@ -190,6 +223,15 @@ pub fn extract_request_body_raw(
 }
 
 /// Extracts raw request bodies with external reference resolution.
+///
+/// # Arguments
+/// * `body` - Input `body` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `Option<serde_json::Value>` value.
 pub fn extract_request_body_raw_with_registry(
     body: &RefOr<ShimRequestBody>,
     components: Option<&ShimComponents>,
@@ -203,16 +245,34 @@ pub fn extract_request_body_raw_with_registry(
     }
 }
 
+/// Executes `is_body_required` (is body required).
+///
+/// # Arguments
+/// * `body` - Input `body` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_body_required(body: &ShimRequestBody) -> bool {
     matches!(body.inner.required, Some(Required::True))
 }
 
+/// Executes `empty_content` (empty content).
+///
+/// # Returns
+/// Resulting `&'static utoipa::openapi::Content` value.
 fn empty_content() -> &'static utoipa::openapi::Content {
     static EMPTY: std::sync::LazyLock<utoipa::openapi::Content> =
         std::sync::LazyLock::new(utoipa::openapi::Content::default);
     &EMPTY
 }
 
+/// Executes `select_request_media` (select request media).
+///
+/// # Arguments
+/// * `content` - Input `content` parameter.
+///
+/// # Returns
+/// Resulting `Option<(BodyFormat, &str, &utoipa::openapi::Content)>` value.
 fn select_request_media(
     content: &BTreeMap<String, RefOr<utoipa::openapi::Content>>,
 ) -> Option<(BodyFormat, &str, &utoipa::openapi::Content)> {
@@ -271,6 +331,15 @@ fn select_request_media(
     })
 }
 
+/// Executes `select_best_media` (select best media).
+///
+/// # Arguments
+/// * `content` - Input `content` parameter.
+/// * `predicate` - Input `predicate` parameter.
+/// * `preferred` - Input `preferred` parameter.
+///
+/// # Returns
+/// Resulting `Option<(&'a str, &'a utoipa::openapi::Content)> where F: Fn(&str) -> bool,` value.
 fn select_best_media<'a, F>(
     content: &'a BTreeMap<String, RefOr<utoipa::openapi::Content>>,
     predicate: F,
@@ -288,6 +357,14 @@ where
     Some((k.as_str(), media))
 }
 
+/// Executes `media_specificity_score` (media specificity score).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+/// * `preferred` - Input `preferred` parameter.
+///
+/// # Returns
+/// Resulting `(i32, i32, usize)` value.
 fn media_specificity_score(media_type: &str, preferred: Option<&str>) -> (i32, i32, usize) {
     let normalized = normalize_media_type(media_type);
     let preferred_bonus = preferred
@@ -303,22 +380,57 @@ fn media_specificity_score(media_type: &str, preferred: Option<&str>) -> (i32, i
     (preferred_bonus, wildcard_score, normalized.len())
 }
 
+/// Executes `is_json_media_type` (is json media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_json_media_type(media_type: &str) -> bool {
     crate::openapi::parse::models::MediaType::parse(media_type).is_json()
 }
 
+/// Executes `is_form_media_type` (is form media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_form_media_type(media_type: &str) -> bool {
     crate::openapi::parse::models::MediaType::parse(media_type).is_form_urlencoded()
 }
 
+/// Executes `is_multipart_media_type` (is multipart media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_multipart_media_type(media_type: &str) -> bool {
     crate::openapi::parse::models::MediaType::parse(media_type).is_multipart()
 }
 
+/// Executes `is_text_media_type` (is text media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_text_media_type(media_type: &str) -> bool {
     crate::openapi::parse::models::MediaType::parse(media_type).is_text()
 }
 
+/// Executes `is_binary_media_type` (is binary media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_binary_media_type(media_type: &str) -> bool {
     let normalized = normalize_media_type(media_type);
     normalized == "application/octet-stream"
@@ -328,14 +440,35 @@ fn is_binary_media_type(media_type: &str) -> bool {
         || normalized.starts_with("video/")
 }
 
+/// Executes `normalize_media_type` (normalize media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn normalize_media_type(media_type: &str) -> String {
     crate::openapi::parse::models::MediaType::normalize(media_type)
 }
 
+/// Executes `is_sequential_json_media_type` (is sequential json media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_sequential_json_media_type(media_type: &str) -> bool {
     crate::openapi::parse::models::MediaType::parse(media_type).is_sequential_json()
 }
 
+/// Executes `is_sequential_media_type` (is sequential media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_sequential_media_type(media_type: &str) -> bool {
     let normalized = normalize_media_type(media_type);
     if is_sequential_json_media_type(&normalized) {
@@ -348,6 +481,14 @@ fn is_sequential_media_type(media_type: &str) -> bool {
     )
 }
 
+/// Executes `default_body_type` (default body type).
+///
+/// # Arguments
+/// * `format` - Input `format` parameter.
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn default_body_type(format: BodyFormat, media_type: &str) -> String {
     match format {
         BodyFormat::Json => {
@@ -364,6 +505,13 @@ fn default_body_type(format: BodyFormat, media_type: &str) -> String {
     }
 }
 
+/// Executes `infer_binary_type` (infer binary type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn infer_binary_type(media_type: &str) -> String {
     let normalized = normalize_media_type(media_type);
     if normalized.starts_with("text/") {
@@ -373,6 +521,16 @@ fn infer_binary_type(media_type: &str) -> String {
     "Vec<u8>".to_string()
 }
 
+/// Executes `resolve_request_body_from_components` (resolve request body from components).
+///
+/// # Arguments
+/// * `r` - Input `r` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `Option<ResolvedRequestBody>` value.
 fn resolve_request_body_from_components(
     r: &utoipa::openapi::Ref,
     components: Option<&ShimComponents>,
@@ -409,6 +567,17 @@ fn resolve_request_body_from_components(
 }
 
 /// Extracts a single example value for a media type, respecting OAS 3.2 example fields.
+///
+/// # Arguments
+/// * `media` - Input `media` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+/// * `raw_media` - Input `raw_media` parameter.
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `Option<ExampleValue>` value.
 pub(crate) fn extract_media_example(
     media: &utoipa::openapi::Content,
     components: Option<&ShimComponents>,
@@ -453,6 +622,13 @@ pub(crate) fn extract_media_example(
     None
 }
 
+/// Executes `extract_example_from_utoipa` (extract example from utoipa).
+///
+/// # Arguments
+/// * `example` - Input `example` parameter.
+///
+/// # Returns
+/// Resulting `Option<ExampleValue>` value.
 fn extract_example_from_utoipa(example: &Example) -> Option<ExampleValue> {
     let summary = (!example.summary.is_empty()).then(|| example.summary.clone());
     let description = (!example.description.is_empty()).then(|| example.description.clone());
@@ -469,6 +645,14 @@ fn extract_example_from_utoipa(example: &Example) -> Option<ExampleValue> {
     None
 }
 
+/// Executes `extract_example_from_ref_or` (extract example from ref or).
+///
+/// # Arguments
+/// * `example_ref` - Input `example_ref` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `Option<ExampleValue>` value.
 fn extract_example_from_ref_or(
     example_ref: &RefOr<Example>,
     components: Option<&ShimComponents>,
@@ -485,6 +669,15 @@ fn extract_example_from_ref_or(
 }
 
 /// Extracts an Example Object value (data/serialized/external), resolving `$ref` when present.
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+/// * `components` - Input `components` parameter.
+/// * `media_type` - Input `media_type` parameter.
+/// * `visiting` - Input `visiting` parameter.
+///
+/// # Returns
+/// Resulting `Option<ExampleValue>` value.
 pub(crate) fn extract_example_value(
     value: &serde_json::Value,
     components: Option<&ShimComponents>,
@@ -542,6 +735,16 @@ pub(crate) fn extract_example_value(
     None
 }
 
+/// Executes `resolve_example_ref` (resolve example ref).
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+/// * `components` - Input `components` parameter.
+/// * `media_type` - Input `media_type` parameter.
+/// * `visiting` - Input `visiting` parameter.
+///
+/// # Returns
+/// Resulting `Option<ExampleValue>` value.
 fn resolve_example_ref(
     ref_str: &str,
     components: Option<&ShimComponents>,
@@ -558,6 +761,13 @@ fn resolve_example_ref(
     extract_example_value(example_json, components, media_type, visiting)
 }
 
+/// Executes `example_meta_from_obj` (example meta from obj).
+///
+/// # Arguments
+/// * `obj` - Input `obj` parameter.
+///
+/// # Returns
+/// Resulting `(Option<String>, Option<String>)` value.
 fn example_meta_from_obj(
     obj: &serde_json::Map<String, serde_json::Value>,
 ) -> (Option<String>, Option<String>) {
@@ -572,6 +782,14 @@ fn example_meta_from_obj(
     (summary, description)
 }
 
+/// Executes `resolve_example_from_components` (resolve example from components).
+///
+/// # Arguments
+/// * `r` - Input `r` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `Option<ExampleValue>` value.
 fn resolve_example_from_components(
     r: &utoipa::openapi::Ref,
     components: Option<&ShimComponents>,
@@ -583,6 +801,14 @@ fn resolve_example_from_components(
     extract_example_from_utoipa(&example)
 }
 
+/// Executes `extract_schema_example` (extract schema example).
+///
+/// # Arguments
+/// * `schema_ref` - Input `schema_ref` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `Option<serde_json::Value>` value.
 fn extract_schema_example(
     schema_ref: &RefOr<Schema>,
     components: Option<&ShimComponents>,
@@ -593,6 +819,13 @@ fn extract_schema_example(
     }
 }
 
+/// Executes `extract_example_from_schema` (extract example from schema).
+///
+/// # Arguments
+/// * `schema` - Input `schema` parameter.
+///
+/// # Returns
+/// Resulting `Option<serde_json::Value>` value.
 fn extract_example_from_schema(schema: &Schema) -> Option<serde_json::Value> {
     let (example, examples) = match schema {
         Schema::Object(obj) => (&obj.example, &obj.examples),
@@ -604,6 +837,14 @@ fn extract_example_from_schema(schema: &Schema) -> Option<serde_json::Value> {
     example.clone().or_else(|| examples.first().cloned())
 }
 
+/// Executes `resolve_schema_example_ref` (resolve schema example ref).
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `Option<serde_json::Value>` value.
 fn resolve_schema_example_ref(
     ref_str: &str,
     components: Option<&ShimComponents>,
@@ -614,6 +855,17 @@ fn resolve_schema_example_ref(
     extract_schema_example_from_value(schema_json)
 }
 
+/// Executes `raw_media_for_type` (raw media for type).
+///
+/// # Arguments
+/// * `raw_body` - Input `raw_body` parameter.
+/// * `media_type` - Input `media_type` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `Option<serde_json::Value>` value.
 fn raw_media_for_type(
     raw_body: &serde_json::Value,
     media_type: &str,
@@ -626,6 +878,17 @@ fn raw_media_for_type(
         .or_else(|| media.as_object().map(|_| media.clone()))
 }
 
+/// Executes `resolve_media_type_ref` (resolve media type ref).
+///
+/// # Arguments
+/// * `raw_media` - Input `raw_media` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+/// * `visiting` - Input `visiting` parameter.
+///
+/// # Returns
+/// Resulting `Option<serde_json::Value>` value.
 fn resolve_media_type_ref(
     raw_media: &serde_json::Value,
     components: Option<&ShimComponents>,
@@ -664,16 +927,38 @@ fn resolve_media_type_ref(
     None
 }
 
+/// Executes `extract_item_schema` (extract item schema).
+///
+/// # Arguments
+/// * `raw_media` - Input `raw_media` parameter.
+///
+/// # Returns
+/// Resulting `Option<Schema>` value.
 fn extract_item_schema(raw_media: &serde_json::Value) -> Option<Schema> {
     let item_schema = raw_media.get("itemSchema")?;
     serde_json::from_value::<Schema>(item_schema.clone()).ok()
 }
 
+/// Executes `extract_media_schema` (extract media schema).
+///
+/// # Arguments
+/// * `raw_media` - Input `raw_media` parameter.
+///
+/// # Returns
+/// Resulting `Option<RefOr<Schema>>` value.
 fn extract_media_schema(raw_media: &serde_json::Value) -> Option<RefOr<Schema>> {
     let schema_val = raw_media.get("schema")?;
     serde_json::from_value::<RefOr<Schema>>(schema_val.clone()).ok()
 }
 
+/// Executes `raw_schema_is_false` (raw schema is false).
+///
+/// # Arguments
+/// * `raw_media` - Input `raw_media` parameter.
+/// * `key` - Input `key` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn raw_schema_is_false(raw_media: Option<&serde_json::Value>, key: &str) -> bool {
     matches!(
         raw_media
@@ -683,6 +968,13 @@ fn raw_schema_is_false(raw_media: Option<&serde_json::Value>, key: &str) -> bool
     )
 }
 
+/// Executes `extract_schema_example_from_value` (extract schema example from value).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `Option<serde_json::Value>` value.
 fn extract_schema_example_from_value(value: &serde_json::Value) -> Option<serde_json::Value> {
     let obj = value.as_object()?;
     if let Some(example) = obj.get("example") {
@@ -693,6 +985,19 @@ fn extract_schema_example_from_value(value: &serde_json::Value) -> Option<serde_
         .and_then(|arr| arr.first().cloned())
 }
 
+/// Executes `extract_positional_encoding` (extract positional encoding).
+///
+/// # Arguments
+/// * `raw_media` - Input `raw_media` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<(Option<Vec<EncodingInfo>>, Option<EncodingInfo>)>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn extract_positional_encoding(
     raw_media: Option<&serde_json::Value>,
     components: Option<&ShimComponents>,
@@ -728,6 +1033,19 @@ fn extract_positional_encoding(
     Ok((prefix_encoding, item_encoding))
 }
 
+/// Executes `parse_encoding_value` (parse encoding value).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<EncodingInfo>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn parse_encoding_value(
     value: &serde_json::Value,
     components: Option<&ShimComponents>,
@@ -799,6 +1117,20 @@ fn parse_encoding_value(
     Ok(info)
 }
 
+/// Executes `extract_encoding_map_with_raw` (extract encoding map with raw).
+///
+/// # Arguments
+/// * `encoding` - Input `encoding` parameter.
+/// * `raw_media` - Input `raw_media` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<Option<HashMap<String, EncodingInfo>>>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn extract_encoding_map_with_raw(
     encoding: &std::collections::BTreeMap<String, Encoding>,
     raw_media: Option<&serde_json::Value>,
@@ -832,6 +1164,19 @@ fn extract_encoding_map_with_raw(
     Ok(Some(map))
 }
 
+/// Executes `resolve_encoding_header_type` (resolve encoding header type).
+///
+/// # Arguments
+/// * `header_val` - Input `header_val` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<String>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn resolve_encoding_header_type(
     header_val: &serde_json::Value,
     components: Option<&ShimComponents>,
@@ -920,6 +1265,20 @@ fn resolve_encoding_header_type(
     Ok("String".to_string())
 }
 
+/// Executes `resolve_header_value_for_encoding` (resolve header value for encoding).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+/// * `components` - Input `components` parameter.
+/// * `registry` - Input `registry` parameter.
+/// * `base_uri` - Input `base_uri` parameter.
+/// * `visited` - Input `visited` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<serde_json::Value>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn resolve_header_value_for_encoding(
     value: &serde_json::Value,
     components: Option<&ShimComponents>,
@@ -974,6 +1333,16 @@ fn resolve_header_value_for_encoding(
     )))
 }
 
+/// Executes `encoding_to_info` (encoding to info).
+///
+/// # Arguments
+/// * `enc` - Input `enc` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<EncodingInfo>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn encoding_to_info(enc: &Encoding) -> AppResult<EncodingInfo> {
     let mut headers = HashMap::new();
     for (h_name, h_ref) in &enc.headers {
@@ -1001,6 +1370,13 @@ fn encoding_to_info(enc: &Encoding) -> AppResult<EncodingInfo> {
     })
 }
 
+/// Executes `map_param_style` (map param style).
+///
+/// # Arguments
+/// * `style` - Input `style` parameter.
+///
+/// # Returns
+/// Resulting `Option<ParamStyle>` value.
 fn map_param_style(style: Option<&ParameterStyle>) -> Option<ParamStyle> {
     match style {
         Some(ParameterStyle::Matrix) => Some(ParamStyle::Matrix),

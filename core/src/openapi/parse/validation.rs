@@ -26,10 +26,13 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use url::Url;
 use utoipa::openapi::RefOr;
 
+/// Constant `COMPONENT_KEY_PATTERN` (component key pattern).
 const COMPONENT_KEY_PATTERN: &str = r"^[a-zA-Z0-9._-]+$";
+/// Constant `RESERVED_PATH_METHODS` (reserved path methods).
 const RESERVED_PATH_METHODS: [&str; 9] = [
     "get", "post", "put", "delete", "patch", "options", "head", "trace", "query",
 ];
+/// Constant `COMPONENT_SECTIONS` (component sections).
 const COMPONENT_SECTIONS: [&str; 11] = [
     "schemas",
     "responses",
@@ -45,6 +48,15 @@ const COMPONENT_SECTIONS: [&str; 11] = [
 ];
 
 /// Validates required root-level fields for an OpenAPI document.
+///
+/// # Arguments
+/// * `openapi` - Input `openapi` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub(crate) fn validate_openapi_root(openapi: &ShimOpenApi) -> AppResult<()> {
     if openapi.info.is_none() {
         return Err(AppError::General(
@@ -100,6 +112,16 @@ pub(crate) fn validate_openapi_root(openapi: &ShimOpenApi) -> AppResult<()> {
     Ok(())
 }
 
+/// Executes `validate_parameters` (validate parameters).
+///
+/// # Arguments
+/// * `openapi` - Input `openapi` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_parameters(openapi: &ShimOpenApi) -> AppResult<()> {
     let components = openapi.components.as_ref();
     let is_oas3 = openapi.openapi.is_some();
@@ -144,6 +166,17 @@ fn validate_parameters(openapi: &ShimOpenApi) -> AppResult<()> {
     Ok(())
 }
 
+/// Executes `for_each_operation` (for each operation).
+///
+/// # Arguments
+/// * `path_item` - Input `path_item` parameter.
+/// * `f` - Input `f` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()> where F: FnMut(&str, &crate::openapi::parse::routes::shims::ShimOperation) -> AppResult<()>,` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn for_each_operation<F>(path_item: &ShimPathItem, mut f: F) -> AppResult<()>
 where
     F: FnMut(&str, &crate::openapi::parse::routes::shims::ShimOperation) -> AppResult<()>,
@@ -173,6 +206,19 @@ where
     Ok(())
 }
 
+/// Executes `validate_path_item_parameters` (validate path item parameters).
+///
+/// # Arguments
+/// * `path_item` - Input `path_item` parameter.
+/// * `context` - Input `context` parameter.
+/// * `components` - Input `components` parameter.
+/// * `is_oas3` - Input `is_oas3` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_path_item_parameters(
     path_item: &ShimPathItem,
     context: &str,
@@ -205,6 +251,17 @@ fn validate_path_item_parameters(
     })
 }
 
+/// Executes `validate_additional_operations` (validate additional operations).
+///
+/// # Arguments
+/// * `path_item` - Input `path_item` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_additional_operations(path_item: &ShimPathItem, context: &str) -> AppResult<()> {
     let Some(additional) = &path_item.additional_operations else {
         return Ok(());
@@ -226,6 +283,13 @@ fn validate_additional_operations(path_item: &ShimPathItem, context: &str) -> Ap
 }
 
 /// Resolves parameters for validation, following `$ref` when possible.
+///
+/// # Arguments
+/// * `params` - Input `params` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `Vec<ShimParameter>` value.
 fn resolve_parameters_for_validation(
     params: Option<&[RefOr<ShimParameter>]>,
     components: Option<&ShimComponents>,
@@ -243,6 +307,19 @@ fn resolve_parameters_for_validation(
         .collect()
 }
 
+/// Executes `validate_parameter_list` (validate parameter list).
+///
+/// # Arguments
+/// * `params` - Input `params` parameter.
+/// * `context` - Input `context` parameter.
+/// * `components` - Input `components` parameter.
+/// * `is_oas3` - Input `is_oas3` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_parameter_list(
     params: Option<&[RefOr<ShimParameter>]>,
     context: &str,
@@ -272,6 +349,16 @@ fn validate_parameter_list(
 }
 
 /// Validates that a parameter list does not contain duplicate name+location pairs.
+///
+/// # Arguments
+/// * `params` - Input `params` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn validate_parameter_duplicates(params: &[ShimParameter], context: &str) -> AppResult<()> {
     let mut seen = HashSet::new();
     for param in params {
@@ -287,6 +374,17 @@ fn validate_parameter_duplicates(params: &[ShimParameter], context: &str) -> App
 }
 
 /// Validates Parameter Object rules that are independent of serialization details.
+///
+/// # Arguments
+/// * `param` - Input `param` parameter.
+/// * `context` - Input `context` parameter.
+/// * `is_oas3` - Input `is_oas3` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn validate_parameter_rules(param: &ShimParameter, context: &str, is_oas3: bool) -> AppResult<()> {
     let location = param.parameter_in.as_str();
 
@@ -333,6 +431,18 @@ fn validate_parameter_rules(param: &ShimParameter, context: &str, is_oas3: bool)
     Ok(())
 }
 
+/// Executes `validate_parameter_content` (validate parameter content).
+///
+/// # Arguments
+/// * `param` - Input `param` parameter.
+/// * `context` - Input `context` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_parameter_content(
     param: &ShimParameter,
     context: &str,
@@ -359,6 +469,16 @@ fn validate_parameter_content(
 }
 
 /// Validates querystring parameter constraints for a combined parameter list.
+///
+/// # Arguments
+/// * `params` - Input `params` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn validate_querystring_rules(params: &[ShimParameter], context: &str) -> AppResult<()> {
     let mut querystring_count = 0;
     let mut query_count = 0;
@@ -389,6 +509,15 @@ fn validate_querystring_rules(params: &[ShimParameter], context: &str) -> AppRes
 }
 
 /// Validates that tag names are unique when tags are provided.
+///
+/// # Arguments
+/// * `openapi` - Input `openapi` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub(crate) fn validate_tags_unique(openapi: &ShimOpenApi) -> AppResult<()> {
     let Some(tags) = &openapi.tags else {
         return Ok(());
@@ -408,6 +537,15 @@ pub(crate) fn validate_tags_unique(openapi: &ShimOpenApi) -> AppResult<()> {
 }
 
 /// Validates tag parent references and prevents circular tag hierarchies.
+///
+/// # Arguments
+/// * `openapi` - Input `openapi` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub(crate) fn validate_tag_hierarchy(openapi: &ShimOpenApi) -> AppResult<()> {
     let Some(tags) = &openapi.tags else {
         return Ok(());
@@ -438,6 +576,19 @@ pub(crate) fn validate_tag_hierarchy(openapi: &ShimOpenApi) -> AppResult<()> {
     Ok(())
 }
 
+/// Executes `validate_tag_chain` (validate tag chain).
+///
+/// # Arguments
+/// * `tag` - Input `tag` parameter.
+/// * `parents` - Input `parents` parameter.
+/// * `visiting` - Input `visiting` parameter.
+/// * `visited` - Input `visited` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_tag_chain(
     tag: &str,
     parents: &HashMap<String, Option<String>>,
@@ -464,6 +615,15 @@ fn validate_tag_chain(
 }
 
 /// Validates Server Objects for URL correctness and variable rules.
+///
+/// # Arguments
+/// * `openapi` - Input `openapi` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub(crate) fn validate_servers(openapi: &ShimOpenApi) -> AppResult<()> {
     // Swagger 2.0 does not define `servers`.
     if openapi.openapi.is_none() {
@@ -491,6 +651,16 @@ pub(crate) fn validate_servers(openapi: &ShimOpenApi) -> AppResult<()> {
     Ok(())
 }
 
+/// Executes `validate_info_fields` (validate info fields).
+///
+/// # Arguments
+/// * `openapi` - Input `openapi` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_info_fields(openapi: &ShimOpenApi) -> AppResult<()> {
     let info = openapi
         .info
@@ -524,6 +694,16 @@ fn validate_info_fields(openapi: &ShimOpenApi) -> AppResult<()> {
     Ok(())
 }
 
+/// Executes `validate_contact` (validate contact).
+///
+/// # Arguments
+/// * `contact` - Input `contact` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_contact(contact: &crate::openapi::parse::routes::shims::ShimContact) -> AppResult<()> {
     if let Some(url) = &contact.url {
         validate_uri_reference(url, "info.contact.url")?;
@@ -541,6 +721,16 @@ fn validate_contact(contact: &crate::openapi::parse::routes::shims::ShimContact)
     Ok(())
 }
 
+/// Executes `validate_license` (validate license).
+///
+/// # Arguments
+/// * `license` - Input `license` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_license(license: &crate::openapi::parse::routes::shims::ShimLicense) -> AppResult<()> {
     if license.name.trim().is_empty() {
         return Err(AppError::General(
@@ -561,6 +751,16 @@ fn validate_license(license: &crate::openapi::parse::routes::shims::ShimLicense)
     Ok(())
 }
 
+/// Executes `validate_external_docs` (validate external docs).
+///
+/// # Arguments
+/// * `openapi` - Input `openapi` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_external_docs(openapi: &ShimOpenApi) -> AppResult<()> {
     let components = openapi.components.as_ref();
     if let Some(external) = &openapi.external_docs {
@@ -597,6 +797,18 @@ fn validate_external_docs(openapi: &ShimOpenApi) -> AppResult<()> {
     Ok(())
 }
 
+/// Executes `validate_path_item_external_docs` (validate path item external docs).
+///
+/// # Arguments
+/// * `path_item` - Input `path_item` parameter.
+/// * `context` - Input `context` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_path_item_external_docs(
     path_item: &ShimPathItem,
     context: &str,
@@ -615,6 +827,18 @@ fn validate_path_item_external_docs(
     })
 }
 
+/// Executes `validate_callbacks_external_docs` (validate callbacks external docs).
+///
+/// # Arguments
+/// * `callbacks` - Input `callbacks` parameter.
+/// * `context` - Input `context` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_callbacks_external_docs(
     callbacks: &std::collections::BTreeMap<
         String,
@@ -639,10 +863,31 @@ fn validate_callbacks_external_docs(
     Ok(())
 }
 
+/// Executes `validate_external_docs_reference` (validate external docs reference).
+///
+/// # Arguments
+/// * `context` - Input `context` parameter.
+/// * `external` - Input `external` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_external_docs_reference(context: &str, external: &ShimExternalDocs) -> AppResult<()> {
     validate_uri_reference(&external.url, context)
 }
 
+/// Executes `validate_security_schemes` (validate security schemes).
+///
+/// # Arguments
+/// * `openapi` - Input `openapi` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_security_schemes(openapi: &ShimOpenApi) -> AppResult<()> {
     let is_oas3 = openapi.openapi.is_some();
 
@@ -679,6 +924,18 @@ fn validate_security_schemes(openapi: &ShimOpenApi) -> AppResult<()> {
     Ok(())
 }
 
+/// Executes `validate_security_scheme` (validate security scheme).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+/// * `scheme` - Input `scheme` parameter.
+/// * `is_oas3` - Input `is_oas3` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_security_scheme(
     name: &str,
     scheme: &ShimSecurityScheme,
@@ -751,6 +1008,17 @@ fn validate_security_scheme(
     Ok(())
 }
 
+/// Executes `validate_oauth_flows` (validate oauth flows).
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+/// * `flows` - Input `flows` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_oauth_flows(
     name: &str,
     flows: &crate::openapi::parse::routes::shims::ShimOAuthFlows,
@@ -774,6 +1042,21 @@ fn validate_oauth_flows(
     Ok(())
 }
 
+/// Executes `validate_oauth_flow` (validate oauth flow).
+///
+/// # Arguments
+/// * `scheme_name` - Input `scheme_name` parameter.
+/// * `flow_name` - Input `flow_name` parameter.
+/// * `flow` - Input `flow` parameter.
+/// * `require_auth_url` - Input `require_auth_url` parameter.
+/// * `require_token_url` - Input `require_token_url` parameter.
+/// * `require_device_url` - Input `require_device_url` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_oauth_flow(
     scheme_name: &str,
     flow_name: &str,
@@ -843,6 +1126,17 @@ fn validate_oauth_flow(
     Ok(())
 }
 
+/// Executes `validate_oauth2_legacy` (validate oauth2 legacy).
+///
+/// # Arguments
+/// * `scheme_name` - Input `scheme_name` parameter.
+/// * `oauth` - Input `oauth` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_oauth2_legacy(
     scheme_name: &str,
     oauth: &crate::openapi::parse::routes::shims::ShimOAuth2,
@@ -912,6 +1206,16 @@ fn validate_oauth2_legacy(
     Ok(())
 }
 
+/// Executes `validate_security_requirements` (validate security requirements).
+///
+/// # Arguments
+/// * `openapi` - Input `openapi` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_security_requirements(openapi: &ShimOpenApi) -> AppResult<()> {
     let mut known = HashSet::new();
     if let Some(components) = &openapi.components {
@@ -944,6 +1248,18 @@ fn validate_security_requirements(openapi: &ShimOpenApi) -> AppResult<()> {
     Ok(())
 }
 
+/// Executes `validate_path_item_security` (validate path item security).
+///
+/// # Arguments
+/// * `path_item` - Input `path_item` parameter.
+/// * `context` - Input `context` parameter.
+/// * `known_schemes` - Input `known_schemes` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_path_item_security(
     path_item: &ShimPathItem,
     context: &str,
@@ -958,6 +1274,18 @@ fn validate_path_item_security(
     })
 }
 
+/// Executes `validate_security_requirement_list` (validate security requirement list).
+///
+/// # Arguments
+/// * `requirements` - Input `requirements` parameter.
+/// * `known` - Input `known` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_security_requirement_list(
     requirements: &[serde_json::Value],
     known: &HashSet<String>,
@@ -992,6 +1320,17 @@ fn validate_security_requirement_list(
     Ok(())
 }
 
+/// Executes `validate_uri_reference` (validate uri reference).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_uri_reference(value: &str, context: &str) -> AppResult<()> {
     if is_valid_uri_reference(value) {
         return Ok(());
@@ -1003,6 +1342,17 @@ fn validate_uri_reference(value: &str, context: &str) -> AppResult<()> {
     )))
 }
 
+/// Executes `validate_https_url` (validate https url).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_https_url(value: &str, context: &str) -> AppResult<()> {
     let parsed = Url::parse(value).map_err(|_| {
         AppError::General(format!(
@@ -1021,6 +1371,13 @@ fn validate_https_url(value: &str, context: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// Executes `is_valid_uri_reference` (is valid uri reference).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_valid_uri_reference(value: &str) -> bool {
     if value.trim().is_empty() {
         return false;
@@ -1037,6 +1394,13 @@ fn is_valid_uri_reference(value: &str) -> bool {
     Url::options().base_url(Some(&base)).parse(value).is_ok()
 }
 
+/// Executes `looks_like_uri_reference` (looks like uri reference).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn looks_like_uri_reference(value: &str) -> bool {
     value.contains(':')
         || value.starts_with('/')
@@ -1045,6 +1409,13 @@ fn looks_like_uri_reference(value: &str) -> bool {
         || value.starts_with('#')
 }
 
+/// Executes `is_valid_email` (is valid email).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_valid_email(value: &str) -> bool {
     let trimmed = value.trim();
     if trimmed.contains(char::is_whitespace) {
@@ -1060,6 +1431,17 @@ fn is_valid_email(value: &str) -> bool {
     .all(|b| b)
 }
 
+/// Executes `validate_path_item_servers` (validate path item servers).
+///
+/// # Arguments
+/// * `path_item` - Input `path_item` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_path_item_servers(path_item: &ShimPathItem, context: &str) -> AppResult<()> {
     if let Some(servers) = &path_item.servers {
         validate_server_list(servers, &format!("{}.servers", context))?;
@@ -1073,6 +1455,16 @@ fn validate_path_item_servers(path_item: &ShimPathItem, context: &str) -> AppRes
     })
 }
 
+/// Executes `validate_responses` (validate responses).
+///
+/// # Arguments
+/// * `openapi` - Input `openapi` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_responses(openapi: &ShimOpenApi) -> AppResult<()> {
     let components = openapi.components.as_ref();
     if let Some(paths) = &openapi.paths {
@@ -1092,6 +1484,16 @@ fn validate_responses(openapi: &ShimOpenApi) -> AppResult<()> {
     Ok(())
 }
 
+/// Executes `validate_request_bodies` (validate request bodies).
+///
+/// # Arguments
+/// * `openapi` - Input `openapi` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_request_bodies(openapi: &ShimOpenApi) -> AppResult<()> {
     if openapi.openapi.is_none() {
         return Ok(());
@@ -1134,6 +1536,18 @@ fn validate_request_bodies(openapi: &ShimOpenApi) -> AppResult<()> {
     Ok(())
 }
 
+/// Executes `validate_path_item_request_bodies` (validate path item request bodies).
+///
+/// # Arguments
+/// * `path_item` - Input `path_item` parameter.
+/// * `context` - Input `context` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_path_item_request_bodies(
     path_item: &ShimPathItem,
     context: &str,
@@ -1151,6 +1565,18 @@ fn validate_path_item_request_bodies(
     })
 }
 
+/// Executes `validate_request_body_ref_or` (validate request body ref or).
+///
+/// # Arguments
+/// * `body` - Input `body` parameter.
+/// * `context` - Input `context` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_request_body_ref_or(
     body: &utoipa::openapi::RefOr<ShimRequestBody>,
     context: &str,
@@ -1171,6 +1597,18 @@ fn validate_request_body_ref_or(
     }
 }
 
+/// Executes `validate_request_body_content` (validate request body content).
+///
+/// # Arguments
+/// * `body` - Input `body` parameter.
+/// * `context` - Input `context` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_request_body_content(
     body: &ShimRequestBody,
     context: &str,
@@ -1188,6 +1626,18 @@ fn validate_request_body_content(
     validate_media_type_encodings(map, &format!("{}.content", context), components)
 }
 
+/// Executes `validate_media_type_encodings` (validate media type encodings).
+///
+/// # Arguments
+/// * `content` - Input `content` parameter.
+/// * `context` - Input `context` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_media_type_encodings(
     content: &serde_json::Map<String, JsonValue>,
     context: &str,
@@ -1252,6 +1702,18 @@ fn validate_media_type_encodings(
     Ok(())
 }
 
+/// Executes `validate_encoding_headers` (validate encoding headers).
+///
+/// # Arguments
+/// * `encoding_val` - Input `encoding_val` parameter.
+/// * `context` - Input `context` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_encoding_headers(
     encoding_val: &serde_json::Value,
     context: &str,
@@ -1277,6 +1739,18 @@ fn validate_encoding_headers(
     validate_nested_encoding(obj, context, components)
 }
 
+/// Executes `validate_nested_encoding` (validate nested encoding).
+///
+/// # Arguments
+/// * `obj` - Input `obj` parameter.
+/// * `context` - Input `context` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_nested_encoding(
     obj: &serde_json::Map<String, serde_json::Value>,
     context: &str,
@@ -1304,6 +1778,13 @@ fn validate_nested_encoding(
     Ok(())
 }
 
+/// Executes `normalize_media_type` (normalize media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn normalize_media_type(media_type: &str) -> String {
     media_type
         .split(';')
@@ -1313,6 +1794,13 @@ fn normalize_media_type(media_type: &str) -> String {
         .to_ascii_lowercase()
 }
 
+/// Executes `is_sequential_media_type` (is sequential media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_sequential_media_type(media_type: &str) -> bool {
     matches!(
         media_type,
@@ -1327,6 +1815,16 @@ fn is_sequential_media_type(media_type: &str) -> bool {
             .any(|s| media_type.ends_with(s))
 }
 
+/// Executes `validate_headers` (validate headers).
+///
+/// # Arguments
+/// * `openapi` - Input `openapi` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_headers(openapi: &ShimOpenApi) -> AppResult<()> {
     // Swagger 2.0 does not define Header Objects with OAS 3.x rules.
     if openapi.openapi.is_none() {
@@ -1359,6 +1857,18 @@ fn validate_headers(openapi: &ShimOpenApi) -> AppResult<()> {
     Ok(())
 }
 
+/// Executes `validate_path_item_headers` (validate path item headers).
+///
+/// # Arguments
+/// * `path_item` - Input `path_item` parameter.
+/// * `context` - Input `context` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_path_item_headers(
     path_item: &ShimPathItem,
     context: &str,
@@ -1373,6 +1883,18 @@ fn validate_path_item_headers(
     })
 }
 
+/// Executes `validate_response_headers` (validate response headers).
+///
+/// # Arguments
+/// * `responses` - Input `responses` parameter.
+/// * `context` - Input `context` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_response_headers(
     responses: &crate::openapi::parse::routes::shims::ShimResponses,
     context: &str,
@@ -1400,6 +1922,18 @@ fn validate_response_headers(
     Ok(())
 }
 
+/// Executes `validate_header_entries` (validate header entries).
+///
+/// # Arguments
+/// * `headers` - Input `headers` parameter.
+/// * `context` - Input `context` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_header_entries(
     headers: &serde_json::Map<String, serde_json::Value>,
     context: &str,
@@ -1420,6 +1954,19 @@ fn validate_header_entries(
     Ok(())
 }
 
+/// Executes `validate_header_value` (validate header value).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+/// * `context` - Input `context` parameter.
+/// * `components` - Input `components` parameter.
+/// * `visited` - Input `visited` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_header_value(
     value: &serde_json::Value,
     context: &str,
@@ -1497,6 +2044,17 @@ fn validate_header_value(
     Ok(())
 }
 
+/// Executes `validate_media_type_examples` (validate media type examples).
+///
+/// # Arguments
+/// * `content` - Input `content` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_media_type_examples(content: &serde_json::Value, context: &str) -> AppResult<()> {
     let map = content.as_object().expect("content is object");
     for (media_type, media_obj) in map {
@@ -1528,6 +2086,15 @@ fn validate_media_type_examples(content: &serde_json::Value, context: &str) -> A
 }
 
 /// Validates Example Objects under `components.examples`.
+///
+/// # Arguments
+/// * `openapi` - Input `openapi` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 fn validate_component_examples(openapi: &ShimOpenApi) -> AppResult<()> {
     if openapi.openapi.is_none() {
         return Ok(());
@@ -1551,6 +2118,16 @@ fn validate_component_examples(openapi: &ShimOpenApi) -> AppResult<()> {
     Ok(())
 }
 
+/// Executes `validate_component_media_types` (validate component media types).
+///
+/// # Arguments
+/// * `openapi` - Input `openapi` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_component_media_types(openapi: &ShimOpenApi) -> AppResult<()> {
     if openapi.openapi.is_none() {
         return Ok(());
@@ -1570,6 +2147,17 @@ fn validate_component_media_types(openapi: &ShimOpenApi) -> AppResult<()> {
     Ok(())
 }
 
+/// Executes `validate_media_type_object` (validate media type object).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_media_type_object(value: &serde_json::Value, context: &str) -> AppResult<()> {
     let Some(obj) = value.as_object() else {
         return Err(AppError::General(format!(
@@ -1614,6 +2202,16 @@ fn validate_media_type_object(value: &serde_json::Value, context: &str) -> AppRe
 }
 
 /// Validates field exclusivity rules for an Example Object.
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub(crate) fn validate_example_object_value(
     value: &serde_json::Value,
     context: &str,
@@ -1654,6 +2252,15 @@ pub(crate) fn validate_example_object_value(
     Ok(())
 }
 
+/// Executes `resolve_header_raw_from_components` (resolve header raw from components).
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+/// * `components` - Input `components` parameter.
+/// * `visited` - Input `visited` parameter.
+///
+/// # Returns
+/// Resulting `Option<serde_json::Value>` value.
 fn resolve_header_raw_from_components(
     ref_str: &str,
     components: Option<&ShimComponents>,
@@ -1672,6 +2279,15 @@ fn resolve_header_raw_from_components(
     Some(header_json.clone())
 }
 
+/// Executes `resolve_request_body_from_components` (resolve request body from components).
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+/// * `components` - Input `components` parameter.
+/// * `visited` - Input `visited` parameter.
+///
+/// # Returns
+/// Resulting `Option<ShimRequestBody>` value.
 fn resolve_request_body_from_components(
     ref_str: &str,
     components: Option<&ShimComponents>,
@@ -1698,6 +2314,16 @@ fn resolve_request_body_from_components(
         })
 }
 
+/// Executes `validate_path_item_refs` (validate path item refs).
+///
+/// # Arguments
+/// * `openapi` - Input `openapi` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_path_item_refs(openapi: &ShimOpenApi) -> AppResult<()> {
     if let Some(paths) = &openapi.paths {
         for (path, path_item) in &paths.items {
@@ -1732,6 +2358,17 @@ fn validate_path_item_refs(openapi: &ShimOpenApi) -> AppResult<()> {
     Ok(())
 }
 
+/// Executes `validate_path_item_ref` (validate path item ref).
+///
+/// # Arguments
+/// * `path_item` - Input `path_item` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_path_item_ref(path_item: &ShimPathItem, context: &str) -> AppResult<()> {
     if path_item.ref_path.is_none() {
         return Ok(());
@@ -1757,6 +2394,18 @@ fn validate_path_item_ref(path_item: &ShimPathItem, context: &str) -> AppResult<
     Ok(())
 }
 
+/// Executes `validate_path_item_responses` (validate path item responses).
+///
+/// # Arguments
+/// * `path_item` - Input `path_item` parameter.
+/// * `context` - Input `context` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_path_item_responses(
     path_item: &ShimPathItem,
     context: &str,
@@ -1771,6 +2420,18 @@ fn validate_path_item_responses(
     })
 }
 
+/// Executes `validate_response_map` (validate response map).
+///
+/// # Arguments
+/// * `responses` - Input `responses` parameter.
+/// * `context` - Input `context` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_response_map(
     responses: &crate::openapi::parse::routes::shims::ShimResponses,
     context: &str,
@@ -1837,6 +2498,18 @@ fn validate_response_map(
     Ok(())
 }
 
+/// Executes `validate_response_links` (validate response links).
+///
+/// # Arguments
+/// * `raw_response` - Input `raw_response` parameter.
+/// * `context` - Input `context` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_response_links(
     raw_response: &serde_json::Value,
     context: &str,
@@ -1863,6 +2536,19 @@ fn validate_response_links(
     Ok(())
 }
 
+/// Executes `validate_link_value` (validate link value).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+/// * `context` - Input `context` parameter.
+/// * `components` - Input `components` parameter.
+/// * `visited` - Input `visited` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_link_value(
     value: &serde_json::Value,
     context: &str,
@@ -1932,6 +2618,17 @@ fn validate_link_value(
     Ok(())
 }
 
+/// Executes `validate_response_description` (validate response description).
+///
+/// # Arguments
+/// * `response` - Input `response` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_response_description(
     response: &utoipa::openapi::Response,
     context: &str,
@@ -1945,6 +2642,15 @@ fn validate_response_description(
     Ok(())
 }
 
+/// Executes `resolve_response_from_components` (resolve response from components).
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+/// * `components` - Input `components` parameter.
+/// * `visited` - Input `visited` parameter.
+///
+/// # Returns
+/// Resulting `Option<utoipa::openapi::Response>` value.
 fn resolve_response_from_components(
     ref_str: &str,
     components: Option<&ShimComponents>,
@@ -1954,6 +2660,15 @@ fn resolve_response_from_components(
     serde_json::from_value::<utoipa::openapi::Response>(raw).ok()
 }
 
+/// Executes `resolve_response_raw_from_components` (resolve response raw from components).
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+/// * `components` - Input `components` parameter.
+/// * `visited` - Input `visited` parameter.
+///
+/// # Returns
+/// Resulting `Option<serde_json::Value>` value.
 fn resolve_response_raw_from_components(
     ref_str: &str,
     components: Option<&ShimComponents>,
@@ -1972,6 +2687,14 @@ fn resolve_response_raw_from_components(
     Some(resp_json.clone())
 }
 
+/// Executes `resolve_link_raw_from_components` (resolve link raw from components).
+///
+/// # Arguments
+/// * `ref_str` - Input `ref_str` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `Option<serde_json::Value>` value.
 fn resolve_link_raw_from_components(
     ref_str: &str,
     components: Option<&ShimComponents>,
@@ -1985,6 +2708,17 @@ fn resolve_link_raw_from_components(
         .cloned()
 }
 
+/// Executes `validate_server_list` (validate server list).
+///
+/// # Arguments
+/// * `servers` - Input `servers` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_server_list(servers: &[ShimServer], context: &str) -> AppResult<()> {
     let mut seen_names = HashSet::new();
     for (idx, server) in servers.iter().enumerate() {
@@ -2002,6 +2736,17 @@ fn validate_server_list(servers: &[ShimServer], context: &str) -> AppResult<()> 
     Ok(())
 }
 
+/// Executes `validate_server` (validate server).
+///
+/// # Arguments
+/// * `server` - Input `server` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_server(server: &ShimServer, context: &str) -> AppResult<()> {
     validate_server_url(&server.url, context)?;
 
@@ -2028,6 +2773,17 @@ fn validate_server(server: &ShimServer, context: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// Executes `validate_server_url` (validate server url).
+///
+/// # Arguments
+/// * `url` - Input `url` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_server_url(url: &str, context: &str) -> AppResult<()> {
     if ['?', '#'].iter().any(|c| url.contains(*c)) {
         return Err(AppError::General(format!(
@@ -2059,11 +2815,30 @@ fn validate_server_url(url: &str, context: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// Executes `normalize_server_url_for_parse` (normalize server url for parse).
+///
+/// # Arguments
+/// * `url` - Input `url` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn normalize_server_url_for_parse(url: &str) -> String {
     let placeholder_re = Regex::new(r"\{[^}]+}").expect("Invalid regex constant");
     placeholder_re.replace_all(url, "placeholder").to_string()
 }
 
+/// Executes `validate_server_variables` (validate server variables).
+///
+/// # Arguments
+/// * `url` - Input `url` parameter.
+/// * `vars` - Input `vars` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_server_variables(
     url: &str,
     vars: &BTreeMap<String, crate::openapi::parse::routes::shims::ShimServerVariable>,
@@ -2118,6 +2893,15 @@ fn validate_server_variables(
 }
 
 /// Validates that component keys match the required naming pattern.
+///
+/// # Arguments
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub(crate) fn validate_component_keys(components: &ShimComponents) -> AppResult<()> {
     let re = Regex::new(COMPONENT_KEY_PATTERN).expect("Invalid regex constant");
 
@@ -2150,6 +2934,18 @@ pub(crate) fn validate_component_keys(components: &ShimComponents) -> AppResult<
     Ok(())
 }
 
+/// Executes `validate_component_key` (validate component key).
+///
+/// # Arguments
+/// * `re` - Input `re` parameter.
+/// * `section` - Input `section` parameter.
+/// * `key` - Input `key` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_component_key(re: &Regex, section: &str, key: &str) -> AppResult<()> {
     if re.is_match(key) {
         Ok(())
@@ -2162,6 +2958,16 @@ fn validate_component_key(re: &Regex, section: &str, key: &str) -> AppResult<()>
 }
 
 /// Validates path keys, template uniqueness, and template parameter coverage.
+///
+/// # Arguments
+/// * `paths` - Input `paths` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub(crate) fn validate_paths(
     paths: &BTreeMap<String, ShimPathItem>,
     components: Option<&ShimComponents>,
@@ -2217,6 +3023,13 @@ pub(crate) fn validate_paths(
     Ok(())
 }
 
+/// Executes `extract_path_templates` (extract path templates).
+///
+/// # Arguments
+/// * `path` - Input `path` parameter.
+///
+/// # Returns
+/// Resulting `Vec<String>` value.
 fn extract_path_templates(path: &str) -> Vec<String> {
     let template_re = Regex::new(r"\{([^}]+)}").expect("Invalid regex constant");
     template_re
@@ -2225,6 +3038,13 @@ fn extract_path_templates(path: &str) -> Vec<String> {
         .collect()
 }
 
+/// Executes `first_duplicate_template` (first duplicate template).
+///
+/// # Arguments
+/// * `templates` - Input `templates` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 fn first_duplicate_template(templates: &[String]) -> Option<String> {
     let mut seen = HashSet::new();
     for name in templates {
@@ -2235,6 +3055,13 @@ fn first_duplicate_template(templates: &[String]) -> Option<String> {
     None
 }
 
+/// Executes `path_item_has_operations` (path item has operations).
+///
+/// # Arguments
+/// * `item` - Input `item` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn path_item_has_operations(item: &ShimPathItem) -> bool {
     [
         item.get.is_some(),
@@ -2254,6 +3081,19 @@ fn path_item_has_operations(item: &ShimPathItem) -> bool {
     .any(|b| b)
 }
 
+/// Executes `validate_path_template_params` (validate path template params).
+///
+/// # Arguments
+/// * `path` - Input `path` parameter.
+/// * `templates` - Input `templates` parameter.
+/// * `path_item` - Input `path_item` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_path_template_params(
     path: &str,
     templates: &[String],
@@ -2280,6 +3120,14 @@ fn validate_path_template_params(
     })
 }
 
+/// Executes `collect_path_param_names` (collect path param names).
+///
+/// # Arguments
+/// * `params` - Input `params` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `HashSet<String>` value.
 fn collect_path_param_names(
     params: Option<&[RefOr<ShimParameter>]>,
     components: Option<&ShimComponents>,
@@ -2291,6 +3139,14 @@ fn collect_path_param_names(
         .collect()
 }
 
+/// Executes `resolve_parameter_ref_for_validation` (resolve parameter ref for validation).
+///
+/// # Arguments
+/// * `r` - Input `r` parameter.
+/// * `components` - Input `components` parameter.
+///
+/// # Returns
+/// Resulting `Option<ShimParameter>` value.
 fn resolve_parameter_ref_for_validation(
     r: &utoipa::openapi::Ref,
     components: Option<&ShimComponents>,
@@ -2304,6 +3160,16 @@ fn resolve_parameter_ref_for_validation(
         .and_then(|param_json| serde_json::from_value::<ShimParameter>(param_json.clone()).ok())
 }
 
+/// Executes `validate_schema_discriminators` (validate schema discriminators).
+///
+/// # Arguments
+/// * `openapi` - Input `openapi` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_schema_discriminators(openapi: &ShimOpenApi) -> AppResult<()> {
     if openapi.openapi.is_none() {
         return Ok(());
@@ -2330,6 +3196,17 @@ fn validate_schema_discriminators(openapi: &ShimOpenApi) -> AppResult<()> {
     Ok(())
 }
 
+/// Executes `validate_schema_metadata_node` (validate schema metadata node).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_schema_metadata_node(value: &JsonValue, context: &str) -> AppResult<()> {
     if let Some(arr) = value.as_array() {
         for (idx, item) in arr.iter().enumerate() {
@@ -2362,6 +3239,17 @@ fn validate_schema_metadata_node(value: &JsonValue, context: &str) -> AppResult<
     Ok(())
 }
 
+/// Executes `validate_schema_external_docs` (validate schema external docs).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_schema_external_docs(value: &JsonValue, context: &str) -> AppResult<()> {
     let Some(obj) = value.as_object() else {
         return Err(AppError::General(format!("{} must be an object", context)));
@@ -2377,6 +3265,17 @@ fn validate_schema_external_docs(value: &JsonValue, context: &str) -> AppResult<
     Ok(())
 }
 
+/// Executes `validate_schema_xml_object` (validate schema xml object).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_schema_xml_object(value: &JsonValue, context: &str) -> AppResult<()> {
     let Some(obj) = value.as_object() else {
         return Err(AppError::General(format!("{} must be an object", context)));
@@ -2429,6 +3328,17 @@ fn validate_schema_xml_object(value: &JsonValue, context: &str) -> AppResult<()>
 
     Ok(())
 }
+/// Executes `validate_discriminator_in_schema` (validate discriminator in schema).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
+/// * `context` - Input `context` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<()>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or processing fails.
 fn validate_discriminator_in_schema(value: &JsonValue, context: &str) -> AppResult<()> {
     if let Some(arr) = value.as_array() {
         for (idx, item) in arr.iter().enumerate() {

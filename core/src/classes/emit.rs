@@ -19,6 +19,18 @@ use ra_ap_syntax::{ast, AstNode, SourceFile};
 use std::collections::BTreeSet;
 
 /// Creates a new AST `RecordField` node from strings.
+///
+/// # Arguments
+/// * `name` - Input `name` parameter.
+/// * `ty` - Input `ty` parameter.
+/// * `pub_vis` - Input `pub_vis` parameter.
+/// * `indent_size` - Input `indent_size` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<ast::RecordField>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn make_record_field(
     name: &str,
     ty: &str,
@@ -54,6 +66,12 @@ pub fn make_record_field(
 ///
 /// This function aggregates all necessary imports for the set of models
 /// and writes them sequentially into a single string.
+///
+/// # Arguments
+/// * `models` - Input `models` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn generate_dtos(models: &[ParsedModel]) -> String {
     let mut code = String::new();
     let mut imports = BTreeSet::new();
@@ -88,6 +106,12 @@ pub fn generate_dtos(models: &[ParsedModel]) -> String {
 }
 
 /// Generates a Rust source string for a single struct, including imports.
+///
+/// # Arguments
+/// * `dto` - Input `dto` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn generate_dto(dto: &ParsedStruct) -> String {
     generate_dtos(&[ParsedModel::Struct(dto.clone())])
 }
@@ -170,6 +194,14 @@ pub fn update_model_file(existing_source: &str, models: &[ParsedModel]) -> AppRe
 }
 
 /// Helper to generate documentation string with optional external docs link.
+///
+/// # Arguments
+/// * `description` - Input `description` parameter.
+/// * `external` - Input `external` parameter.
+/// * `indent` - Input `indent` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn generate_doc_comment(
     description: Option<&String>,
     external: Option<&ParsedExternalDocs>,
@@ -193,6 +225,12 @@ fn generate_doc_comment(
 }
 
 /// Helper to generate the body of a single struct (without file-level imports).
+///
+/// # Arguments
+/// * `dto` - Input `dto` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn generate_dto_body(dto: &ParsedStruct) -> String {
     let mut code = String::new();
 
@@ -271,6 +309,12 @@ fn generate_dto_body(dto: &ParsedStruct) -> String {
 }
 
 /// Helper to generate the body of a single enum.
+///
+/// # Arguments
+/// * `en` - Input `en` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn generate_enum_body(en: &ParsedEnum) -> String {
     let mut code = String::new();
 
@@ -352,6 +396,10 @@ fn generate_enum_body(en: &ParsedEnum) -> String {
 
 /// Analyzes a model's fields to determine required imports.
 /// This handles flattened composition structs by checking all fields contained within.
+///
+/// # Arguments
+/// * `model` - Input `model` parameter.
+/// * `imports` - Input `imports` parameter.
 fn collect_imports(model: &ParsedModel, imports: &mut BTreeSet<String>) {
     let types: Vec<&String> = match model {
         ParsedModel::Struct(s) => s.fields.iter().map(|f| &f.ty).collect(),

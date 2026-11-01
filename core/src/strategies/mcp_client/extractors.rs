@@ -8,6 +8,12 @@
 use crate::openapi::parse::models::{ContentMediaType, SecurityRequirementGroup};
 
 /// Generates the type string for path parameters.
+///
+/// # Arguments
+/// * `inner_types` - Input `inner_types` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn path_extractor(inner_types: &[String]) -> String {
     if inner_types.len() == 1 {
         inner_types[0].clone()
@@ -23,11 +29,24 @@ pub fn query_extractor() -> String {
 }
 
 /// Generates the type string for strongly typed query extraction.
+///
+/// # Arguments
+/// * `inner_type` - Input `inner_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn typed_query_extractor(inner_type: &str) -> String {
     inner_type.to_string()
 }
 
 /// Generates the type string for raw query string extraction.
+///
+/// # Arguments
+/// * `inner_type` - Input `inner_type` parameter.
+/// * `content_media_type` - Input `content_media_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn query_string_extractor(
     _inner_type: &str,
     _content_media_type: Option<&ContentMediaType>,
@@ -36,6 +55,12 @@ pub fn query_string_extractor(
 }
 
 /// Generates the type string for header extraction.
+///
+/// # Arguments
+/// * `inner_type` - Input `inner_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn header_extractor(_inner_type: &str) -> String {
     "String".to_string()
 }
@@ -46,31 +71,67 @@ pub fn cookie_extractor() -> String {
 }
 
 /// Generates the type string for JSON body extraction.
+///
+/// # Arguments
+/// * `body_type` - Input `body_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn body_extractor(body_type: &str) -> String {
     body_type.to_string()
 }
 
 /// Generates the type string for Form body extraction.
+///
+/// # Arguments
+/// * `body_type` - Input `body_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn form_extractor(body_type: &str) -> String {
     body_type.to_string()
 }
 
 /// Generates the type string for Multipart extraction.
+///
+/// # Arguments
+/// * `body_type` - Input `body_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn multipart_extractor(body_type: &str) -> String {
     body_type.to_string()
 }
 
 /// Generates the type string for Text body extraction.
+///
+/// # Arguments
+/// * `body_type` - Input `body_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn text_extractor(_body_type: &str) -> String {
     "String".to_string()
 }
 
 /// Generates the type string for Binary body extraction.
+///
+/// # Arguments
+/// * `body_type` - Input `body_type` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn bytes_extractor(_body_type: &str) -> String {
     "Vec<u8>".to_string()
 }
 
 /// Generates the type string for Security extraction.
+///
+/// # Arguments
+/// * `requirements` - Input `requirements` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn security_extractor(_requirements: &[SecurityRequirementGroup]) -> String {
     "".to_string()
 }

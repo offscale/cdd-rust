@@ -17,6 +17,13 @@ pub fn handler_imports() -> String {
 }
 
 /// Generates the client function signature and body scaffold.
+///
+/// # Arguments
+/// * `route` - Input `route` parameter.
+/// * `args` - Input `args` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn handler_signature(route: &crate::openapi::parse::ParsedRoute, args: &[String]) -> String {
     let func_name = &route.handler_name;
     let response_headers = &route.response_headers;

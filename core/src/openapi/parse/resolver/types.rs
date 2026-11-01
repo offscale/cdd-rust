@@ -113,6 +113,17 @@ pub fn map_schema_to_rust_type(schema: &RefOr<Schema>, is_required: bool) -> App
 ///
 /// This is used when we still have access to the raw schema JSON, which may include
 /// OpenAPI 3.2 keywords (`contentSchema`) not modeled by `utoipa::openapi::Schema`.
+///
+/// # Arguments
+/// * `schema` - Input `schema` parameter.
+/// * `is_required` - Input `is_required` parameter.
+/// * `raw_schema` - Input `raw_schema` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<String>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub fn map_schema_to_rust_type_with_raw(
     schema: &RefOr<Schema>,
     is_required: bool,
@@ -129,11 +140,25 @@ pub fn map_schema_to_rust_type_with_raw(
     map_schema_to_rust_type(schema, is_required)
 }
 
+/// Executes `content_schema_from_raw` (content schema from raw).
+///
+/// # Arguments
+/// * `raw` - Input `raw` parameter.
+///
+/// # Returns
+/// Resulting `Option<RefOr<Schema>>` value.
 fn content_schema_from_raw(raw: &JsonValue) -> Option<RefOr<Schema>> {
     let content_schema = raw.get("contentSchema")?;
     serde_json::from_value::<RefOr<Schema>>(content_schema.clone()).ok()
 }
 
+/// Executes `should_use_content_schema` (should use content schema).
+///
+/// # Arguments
+/// * `raw` - Input `raw` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn should_use_content_schema(raw: &JsonValue) -> bool {
     let obj = match raw.as_object() {
         Some(obj) => obj,
@@ -150,6 +175,13 @@ fn should_use_content_schema(raw: &JsonValue) -> bool {
     }
 }
 
+/// Executes `schema_allows_string` (schema allows string).
+///
+/// # Arguments
+/// * `obj` - Input `obj` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn schema_allows_string(obj: &serde_json::Map<String, JsonValue>) -> bool {
     match obj.get("type") {
         None => true,
@@ -161,6 +193,13 @@ fn schema_allows_string(obj: &serde_json::Map<String, JsonValue>) -> bool {
     }
 }
 
+/// Executes `is_json_media_type` (is json media type).
+///
+/// # Arguments
+/// * `media_type` - Input `media_type` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_json_media_type(media_type: &str) -> bool {
     let normalized = media_type
         .split(';')
@@ -171,6 +210,13 @@ fn is_json_media_type(media_type: &str) -> bool {
     normalized == "application/json" || normalized.ends_with("+json")
 }
 
+/// Executes `is_binary_schema` (is binary schema).
+///
+/// # Arguments
+/// * `obj` - Input `obj` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 fn is_binary_schema(obj: &utoipa::openapi::schema::Object) -> bool {
     if !obj.content_encoding.is_empty() {
         return matches!(obj.content_encoding.as_str(), "base64" | "base64url");
@@ -188,6 +234,13 @@ fn is_binary_schema(obj: &utoipa::openapi::schema::Object) -> bool {
         || media.starts_with("video/")
 }
 
+/// Executes `normalize_schema_type` (normalize schema type).
+///
+/// # Arguments
+/// * `schema_type` - Input `schema_type` parameter.
+///
+/// # Returns
+/// Resulting `(SchemaType, bool)` value.
 fn normalize_schema_type(schema_type: &SchemaType) -> (SchemaType, bool) {
     match schema_type {
         SchemaType::Array(types) => {

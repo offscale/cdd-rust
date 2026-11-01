@@ -28,6 +28,15 @@ pub fn format_inner_doc(description: &str, indent: &str) -> String {
     format_doc_with_prefix(description, indent, "//!")
 }
 
+/// Executes `format_doc_with_prefix` (format doc with prefix).
+///
+/// # Arguments
+/// * `description` - Input `description` parameter.
+/// * `indent` - Input `indent` parameter.
+/// * `prefix` - Input `prefix` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 fn format_doc_with_prefix(description: &str, indent: &str, prefix: &str) -> String {
     let trimmed = description.trim();
     if trimmed.is_empty() {

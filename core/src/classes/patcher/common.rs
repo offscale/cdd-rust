@@ -7,6 +7,16 @@ use ra_ap_syntax::ast::HasName;
 use ra_ap_syntax::{ast, AstNode, SourceFile, SyntaxKind, SyntaxToken};
 
 /// Finds a struct definition by name in the source file.
+///
+/// # Arguments
+/// * `file` - Input `file` parameter.
+/// * `name` - Input `name` parameter.
+///
+/// # Returns
+/// Resulting `AppResult<ast::Struct>` value.
+///
+/// # Errors
+/// Returns an error if validation, parsing, or execution fails.
 pub(crate) fn find_struct(file: &SourceFile, name: &str) -> AppResult<ast::Struct> {
     file.syntax()
         .descendants()
@@ -16,6 +26,12 @@ pub(crate) fn find_struct(file: &SourceFile, name: &str) -> AppResult<ast::Struc
 }
 
 /// Detects the indentation string used in a field list.
+///
+/// # Arguments
+/// * `list` - Input `list` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 pub(crate) fn detect_indent(list: &ast::RecordFieldList) -> Option<String> {
     let first_field = list.fields().next()?;
     let token = first_field.syntax().first_token()?.prev_token()?;
@@ -30,6 +46,12 @@ pub(crate) fn detect_indent(list: &ast::RecordFieldList) -> Option<String> {
 }
 
 /// Checks if a comma is needed before inserting a new field at the end of a list.
+///
+/// # Arguments
+/// * `r_curly` - Input `r_curly` parameter.
+///
+/// # Returns
+/// Resulting `bool` value.
 pub(crate) fn check_needs_comma(r_curly: &SyntaxToken) -> bool {
     let mut curr = r_curly.prev_token();
     while let Some(token) = curr {

@@ -558,6 +558,15 @@ impl ShimResponses {
     }
 
     /// Builds a ShimResponses wrapper from raw JSON.
+    ///
+    /// # Arguments
+    /// * `raw` - Input `raw` parameter.
+    ///
+    /// # Returns
+    /// Resulting `Result<Self, serde_json::Error>` value.
+    ///
+    /// # Errors
+    /// Returns an error if validation, parsing, or execution fails.
     pub fn from_raw(raw: Value) -> Result<Self, serde_json::Error> {
         let mut sanitized = raw.clone();
         normalize_responses_for_utoipa(&mut sanitized);
@@ -662,6 +671,10 @@ impl From<RequestBody> for ShimRequestBody {
     }
 }
 
+/// Executes `normalize_encoding_headers` (normalize encoding headers).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
 fn normalize_encoding_headers(value: &mut Value) {
     let Value::Object(map) = value else {
         return;
@@ -704,6 +717,10 @@ fn normalize_encoding_headers(value: &mut Value) {
     }
 }
 
+/// Executes `normalize_responses_for_utoipa` (normalize responses for utoipa).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
 fn normalize_responses_for_utoipa(value: &mut Value) {
     let Value::Object(map) = value else {
         return;
@@ -714,6 +731,10 @@ fn normalize_responses_for_utoipa(value: &mut Value) {
     }
 }
 
+/// Executes `normalize_response_object` (normalize response object).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
 fn normalize_response_object(value: &mut Value) {
     let Value::Object(map) = value else {
         return;
@@ -732,6 +753,10 @@ fn normalize_response_object(value: &mut Value) {
     }
 }
 
+/// Executes `normalize_response_headers` (normalize response headers).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
 fn normalize_response_headers(value: &mut Value) {
     let Value::Object(headers) = value else {
         return;
@@ -765,6 +790,10 @@ fn normalize_response_headers(value: &mut Value) {
     }
 }
 
+/// Executes `normalize_response_content` (normalize response content).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
 fn normalize_response_content(value: &mut Value) {
     let Value::Object(content) = value else {
         return;
@@ -800,6 +829,10 @@ fn normalize_response_content(value: &mut Value) {
     }
 }
 
+/// Executes `normalize_encoding_map_headers` (normalize encoding map headers).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
 fn normalize_encoding_map_headers(value: &mut Value) {
     let Value::Object(map) = value else {
         return;
@@ -809,6 +842,10 @@ fn normalize_encoding_map_headers(value: &mut Value) {
     }
 }
 
+/// Executes `normalize_encoding_array_headers` (normalize encoding array headers).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
 fn normalize_encoding_array_headers(value: &mut Value) {
     let Value::Array(items) = value else {
         return;
@@ -818,6 +855,10 @@ fn normalize_encoding_array_headers(value: &mut Value) {
     }
 }
 
+/// Executes `normalize_encoding_object_headers` (normalize encoding object headers).
+///
+/// # Arguments
+/// * `value` - Input `value` parameter.
 fn normalize_encoding_object_headers(value: &mut Value) {
     let Value::Object(obj) = value else {
         return;

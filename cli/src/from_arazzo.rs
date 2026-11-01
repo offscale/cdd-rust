@@ -116,6 +116,18 @@ pub struct ArazzoGenerateArgs {
     /// Generate Model Context Protocol (MCP) workflow bindings.
     #[clap(short = 'm', long, env = "CDD_MCP")]
     pub mcp: bool,
+
+    /// GitHub organization or user name for repository metadata.
+    #[clap(long, env = "GITHUB_ORG_NAME")]
+    pub github_org: Option<String>,
+
+    /// Repository name for repository metadata (defaults to `<github-org>-sdk` in monorepo mode or `<github-org>-sdk-rust` in polyrepo mode).
+    #[clap(long, env = "REPO_NAME")]
+    pub repo_name: Option<String>,
+
+    /// Use monorepo repository naming convention (`<github-org>-sdk` instead of `<github-org>-sdk-rust`).
+    #[clap(long, env = "CDD_MONOREPO")]
+    pub monorepo: bool,
 }
 
 impl ArazzoGenerateArgs {
@@ -176,6 +188,18 @@ pub fn run_from_arazzo(args: &FromArazzoArgs) -> AppResult<()> {
     }
 }
 
+/// Generates Rust workflow code and optional E2E tests for the given target strategy.
+///
+/// # Arguments
+/// * `args` - Shared Arazzo generation options.
+/// * `strategy` - Target [`WorkflowStrategy`] implementation.
+/// * `is_cli` - Whether the target is a standalone CLI binary crate.
+///
+/// # Returns
+/// `Ok(())` on success.
+///
+/// # Errors
+/// Returns [`AppError`] if reading inputs, parsing specifications, or writing files fails.
 fn generate_arazzo_target(
     args: &ArazzoGenerateArgs,
     strategy: &dyn WorkflowStrategy,
@@ -199,11 +223,14 @@ reqwest = { version = "0.12", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["full"] }"#;
-    crate::from_openapi::write_package_skeleton_files(
+    crate::from_openapi::write_package_skeleton_files_with_repo(
         &out_dir,
         args.no_installable_package,
         args.no_github_actions,
         arazzo_deps,
+        args.github_org.as_deref(),
+        args.repo_name.as_deref(),
+        args.monorepo,
     )?;
 
     let mut registry = DocumentRegistry::new();
@@ -221,14 +248,28 @@ tokio = { version = "1", features = ["full"] }"#;
         fs::write(src_dir.join("workflows.rs"), wf_code)?;
 
         let lib_rs = src_dir.join("lib.rs");
-        let existing_lib =
+        let mut lib_content =
             fs::read_to_string(&lib_rs).unwrap_or_else(|_| "#![allow(missing_docs)]\n".to_string());
-        if !existing_lib.contains("pub mod workflows;") {
-            fs::write(
-                &lib_rs,
-                format!("{}\npub mod workflows;\n", existing_lib.trim_end()),
-            )?;
+        if !lib_content.contains("pub mod workflows;") {
+            lib_content = format!("{}\npub mod workflows;\n", lib_content.trim_end());
         }
+
+        if args.mcp {
+            let wf_names: Vec<String> = doc
+                .workflows
+                .iter()
+                .map(|w| format!("\"{}\"", w.workflow_id))
+                .collect();
+            let mcp_code = format!(
+                "#![allow(missing_docs)]\n\n//! MCP workflow bindings.\n\n/// Returns the list of Arazzo workflow IDs exposed as MCP tools.\npub fn mcp_workflow_tools() -> Vec<&'static str> {{\n    vec![{}]\n}}\n",
+                wf_names.join(", ")
+            );
+            fs::write(src_dir.join("mcp.rs"), mcp_code)?;
+            if !lib_content.contains("pub mod mcp;") {
+                lib_content = format!("{}\npub mod mcp;\n", lib_content.trim_end());
+            }
+        }
+        fs::write(&lib_rs, lib_content)?;
 
         if is_cli {
             let main_rs = src_dir.join("main.rs");
@@ -293,6 +334,12 @@ pub struct FromArazzoConfig {
     pub tests: bool,
     /// Generate MCP workflow module.
     pub mcp: bool,
+    /// GitHub organization or user name for repository metadata.
+    pub github_org: Option<String>,
+    /// Repository name for repository metadata.
+    pub repo_name: Option<String>,
+    /// Use monorepo repository naming convention (`<github-org>-sdk` instead of `<github-org>-sdk-rust`).
+    pub monorepo: bool,
 }
 
 /// Programmatic entrypoint for generating Rust code from an Arazzo 1.1.0 specification.
@@ -315,6 +362,9 @@ pub fn from_arazzo(config: &FromArazzoConfig) -> AppResult<()> {
         no_installable_package: config.no_installable_package,
         tests: config.tests,
         mcp: config.mcp,
+        github_org: config.github_org.clone(),
+        repo_name: config.repo_name.clone(),
+        monorepo: config.monorepo,
     };
     let command = match config.subcommand {
         FromArazzoSubcommand::ToSdk => FromArazzoCommands::Sdk(gen_args),
@@ -394,10 +444,13 @@ workflows:
             input: Some(spec_file.clone()),
             output_dir: Some(sdk_out.clone()),
             tests: true,
+            mcp: true,
             ..Default::default()
         };
         from_arazzo(&cfg_sdk).expect("from_arazzo sdk");
+        from_arazzo(&cfg_sdk).expect("from_arazzo sdk second pass");
         assert!(sdk_out.join("src/workflows.rs").exists());
+        assert!(sdk_out.join("src/mcp.rs").exists());
         assert!(sdk_out.join("tests/arazzo_workflows.rs").exists());
 
         let cli_out = dir.path().join("cli_out");

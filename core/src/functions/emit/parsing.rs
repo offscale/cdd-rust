@@ -12,6 +12,12 @@ use ra_ap_syntax::{AstNode, SourceFile};
 use std::collections::HashSet;
 
 /// Parses the source using rust-analyzer syntax tree to find all function names.
+///
+/// # Arguments
+/// * `source` - Input `source` parameter.
+///
+/// # Returns
+/// Resulting `HashSet<String>` value.
 pub(crate) fn extract_fn_names(source: &str) -> HashSet<String> {
     let parse = SourceFile::parse(source, Edition::Edition2021);
     parse
@@ -24,6 +30,12 @@ pub(crate) fn extract_fn_names(source: &str) -> HashSet<String> {
 }
 
 /// Parses the source using rust-analyzer syntax tree to find all struct names.
+///
+/// # Arguments
+/// * `source` - Input `source` parameter.
+///
+/// # Returns
+/// Resulting `HashSet<String>` value.
 pub(crate) fn extract_struct_names(source: &str) -> HashSet<String> {
     let parse = SourceFile::parse(source, Edition::Edition2021);
     parse
@@ -36,6 +48,12 @@ pub(crate) fn extract_struct_names(source: &str) -> HashSet<String> {
 }
 
 /// Extracts parameter names from a path template like `/users/{id}`.
+///
+/// # Arguments
+/// * `path` - Input `path` parameter.
+///
+/// # Returns
+/// Resulting `Vec<String>` value.
 pub(crate) fn extract_path_vars(path: &str) -> Vec<String> {
     let mut vars = Vec::new();
     let mut rest = path;
@@ -54,6 +72,14 @@ pub(crate) fn extract_path_vars(path: &str) -> Vec<String> {
 }
 
 /// Helper to lookup a parameter type from the parsed route definition.
+///
+/// # Arguments
+/// * `route` - Input `route` parameter.
+/// * `name` - Input `name` parameter.
+/// * `source` - Input `source` parameter.
+///
+/// # Returns
+/// Resulting `Option<String>` value.
 pub(crate) fn find_param_type(
     route: &ParsedRoute,
     name: &str,
@@ -67,6 +93,12 @@ pub(crate) fn find_param_type(
 }
 
 /// Converts a string to snake_case for use as a variable name.
+///
+/// # Arguments
+/// * `s` - Input `s` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub(crate) fn to_snake_case(s: &str) -> String {
     let mut result = String::new();
     let chars: Vec<char> = s.chars().collect();
@@ -90,6 +122,12 @@ pub(crate) fn to_snake_case(s: &str) -> String {
 }
 
 /// Converts a string to PascalCase for use as a type name.
+///
+/// # Arguments
+/// * `s` - Input `s` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub(crate) fn to_pascal_case(s: &str) -> String {
     let mut out = String::new();
     let mut capitalize = true;

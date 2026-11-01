@@ -8,6 +8,13 @@
 use crate::openapi::parse::ParsedRoute;
 
 /// Generates the route registration code statement.
+///
+/// # Arguments
+/// * `route` - Input `route` parameter.
+/// * `handler_full_path` - Input `handler_full_path` parameter.
+///
+/// # Returns
+/// Resulting `String` value.
 pub fn route_registration_statement(route: &ParsedRoute, handler_full_path: &str) -> String {
     let method = route.method.to_uppercase();
     let actix_method = match method.as_str() {
